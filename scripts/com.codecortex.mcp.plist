@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.codecortex.mcp</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>%BIN_PATH%</string>
+        <string>mcp</string>
+        <string>start</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>%HOME%</string>
+
+    <key>StandardOutPath</key>
+    <string>%LOG_DIR%/mcp.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>%LOG_DIR%/mcp.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>%BIN_DIR%:/usr/local/bin:/usr/bin:/bin</string>
+        <key>RUST_LOG</key>
+        <string>info</string>
+    </dict>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>LegacyTimers</key>
+    <true/>
+</dict>
+</plist>

@@ -1,0 +1,26 @@
+[package]
+name = "cortex-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+clap_complete = "4"
+comfy-table = "7"
+cortex-analyzer = { path = "../cortex-analyzer" }
+cortex-core = { path = "../cortex-core" }
+cortex-graph = { path = "../cortex-graph" }
+cortex-indexer = { path = "../cortex-indexer" }
+cortex-mcp = { path = "../cortex-mcp" }
+cortex-watcher = { path = "../cortex-watcher" }
+dialoguer.workspace = true
+indicatif.workspace = true
+owo-colors.workspace = true
+rustyline = "14"
+serde_json.workspace = true
+serde_yaml = "0.9"
+tokio.workspace = true
+tracing-subscriber.workspace = true

@@ -1,0 +1,28 @@
+[package]
+name = "cortex-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+cortex-core = { path = "../cortex-core" }
+serde.workspace = true
+tree-sitter.workspace = true
+tree-sitter-c.workspace = true
+tree-sitter-cpp.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-java = "0.23"
+tree-sitter-javascript.workspace = true
+tree-sitter-php = "0.23"
+tree-sitter-python.workspace = true
+tree-sitter-ruby = "0.23"
+tree-sitter-rust.workspace = true
+tree-sitter-typescript.workspace = true
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "indexing_throughput"
+harness = false

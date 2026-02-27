@@ -1,0 +1,16 @@
+[package]
+name = "cortex-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile = "3"

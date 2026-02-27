@@ -1,0 +1,22 @@
+[package]
+name = "cortex-indexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+cortex-core = { path = "../cortex-core" }
+cortex-graph = { path = "../cortex-graph" }
+cortex-parser = { path = "../cortex-parser" }
+ignore.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sled.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

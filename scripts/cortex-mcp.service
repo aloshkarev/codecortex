@@ -1,0 +1,34 @@
+[Unit]
+Description=CodeCortex MCP Server
+Documentation=https://github.com/codecortex/codecortex
+After=network.target network-online.target memgraph.service docker.service
+Wants=network-online.target memgraph.service
+After=network-online.target
+
+[Service]
+Type=simple
+User=%USER%
+Group=%USER%
+WorkingDirectory=%HOME%
+ExecStart=%BIN_PATH% mcp start
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Environment
+Environment=PATH=%BIN_DIR%:/usr/local/bin:/usr/bin:/bin
+Environment=RUST_LOG=info
+Environment=RUST_BACKTRACE=1
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cortex-mcp
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

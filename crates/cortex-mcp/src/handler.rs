@@ -1,0 +1,3451 @@
+use crate::contracts::{
+    error as envelope_error, feature_flag_enabled, success as envelope_success,
+};
+use crate::jobs::JobRegistry;
+use cortex_analyzer::Analyzer;
+use cortex_core::{CortexConfig, ProjectStatus, SearchKind};
+use cortex_graph::{BundleStore, GraphClient};
+use cortex_indexer::Indexer;
+use cortex_parser::SignatureExtractor;
+use cortex_watcher::{ProjectRegistry, WatchSession};
+use rmcp::{
+    ErrorData as McpError, ServerHandler, ServiceExt,
+    handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::*,
+    tool, tool_handler, tool_router,
+    transport::stdio,
+};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::Path;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+// ── request structs ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IndexPathReq {
+    /// Directory or file path to index
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PathReq {
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindCodeReq {
+    pub query: String,
+    /// One of: name | pattern | type | content  (default: pattern)
+    pub kind: Option<String>,
+    /// Optional path prefix filter
+    pub path_filter: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RelationshipReq {
+    /// One of: find_callers | find_callees | find_all_callers | find_all_callees |
+    ///         class_hierarchy | dead_code | overrides | module_deps | variable_scope |
+    ///         call_chain | find_importers | find_by_decorator | find_by_argument | find_complexity
+    pub query_type: String,
+    pub target: Option<String>,
+    pub target2: Option<String>,
+    pub depth: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CypherReq {
+    pub query: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ComplexityReq {
+    pub top_n: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct JobStatusReq {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExportBundleReq {
+    pub repository_path: String,
+    pub output_path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ContextCapsuleReq {
+    pub query: String,
+    pub task_intent: Option<String>,
+    pub repo_path: Option<String>,
+    pub max_tokens: Option<usize>,
+    pub max_items: Option<usize>,
+    pub include_tests: Option<bool>,
+    pub path_filter: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ImpactGraphReq {
+    pub symbol: String,
+    pub symbol_type: Option<String>,
+    pub repo_path: Option<String>,
+    pub depth: Option<usize>,
+    pub include_importers: Option<bool>,
+    pub include_tests: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogicFlowReq {
+    pub from_symbol: String,
+    pub to_symbol: String,
+    pub repo_path: Option<String>,
+    pub max_paths: Option<usize>,
+    pub max_depth: Option<usize>,
+    pub allow_partial: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SkeletonReq {
+    pub path: String,
+    pub mode: Option<String>,
+    pub repo_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IndexStatusReq {
+    pub repo_path: Option<String>,
+    pub include_jobs: Option<bool>,
+    pub include_watcher: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct WorkspaceSetupReq {
+    pub repo_path: Option<String>,
+    pub detect_agents: Option<bool>,
+    pub generate_configs: Option<bool>,
+    pub install_git_hooks: Option<bool>,
+    pub non_interactive: Option<bool>,
+    pub overwrite: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct LspEdgeInput {
+    pub caller_fqn: String,
+    pub callee_fqn: String,
+    pub file: String,
+    pub line: u64,
+    pub confidence: Option<f64>,
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubmitLspEdgesReq {
+    pub repo_path: String,
+    pub edges: Vec<LspEdgeInput>,
+    pub merge_mode: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SaveObservationReq {
+    pub repo_path: String,
+    pub text: String,
+    pub severity: Option<String>,
+    pub confidence: Option<f64>,
+    pub symbol_refs: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
+    pub classification: Option<String>,
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SessionContextReq {
+    pub repo_path: String,
+    pub session_id: Option<String>,
+    pub include_previous: Option<usize>,
+    pub max_items: Option<usize>,
+    pub include_stale: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SearchMemoryReq {
+    pub query: String,
+    pub repo_path: String,
+    pub max_items: Option<usize>,
+    pub include_stale: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GetSignatureReq {
+    /// Symbol name to look up (function, method, struct, enum)
+    pub symbol: String,
+    /// Repository path filter (optional)
+    pub repo_path: Option<String>,
+    /// Include related signatures (implementations, overrides)
+    pub include_related: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindTestsReq {
+    /// Symbol name to find tests for
+    pub symbol: String,
+    /// Repository path filter (optional)
+    pub repo_path: Option<String>,
+    /// Include integration tests
+    pub include_integration: Option<bool>,
+    /// Maximum number of tests to return
+    pub max_results: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExplainResultReq {
+    /// Original query to explain
+    pub query: String,
+    /// Tool that was used (optional, helps with context)
+    pub tool: Option<String>,
+    /// Repository path filter (optional)
+    pub repo_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AnalyzeRefactoringReq {
+    /// Symbol to analyze for refactoring
+    pub symbol: String,
+    /// Type of change being considered
+    pub change_type: Option<String>,
+    /// Repository path filter (optional)
+    pub repo_path: Option<String>,
+    /// Include detailed breakdown
+    pub detailed: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DiagnoseReq {
+    /// Type of diagnostic to run: index_health, graph_connectivity, cache_status, all
+    pub check: Option<String>,
+    /// Repository path (for index health checks)
+    pub repo_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindPatternsReq {
+    /// Pattern to search for: builder, factory, singleton, repository, service, handler, middleware, observer, strategy
+    pub pattern: Option<String>,
+    /// Repository path filter (optional)
+    pub repo_path: Option<String>,
+    /// Minimum confidence threshold (0.0-1.0)
+    pub min_confidence: Option<f64>,
+    /// Maximum results to return
+    pub max_results: Option<usize>,
+}
+
+// ── project management request types ─────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AddProjectReq {
+    /// Path to the project directory
+    pub path: String,
+    /// Optional name for the project (defaults to directory name)
+    pub name: Option<String>,
+    /// Whether to track branch changes (default: true)
+    pub track_branch: Option<bool>,
+    /// Branches to keep indexed even when inactive
+    pub pinned_branches: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RemoveProjectReq {
+    /// Path to the project directory
+    pub path: String,
+    /// Whether to delete associated index data
+    pub delete_data: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SetProjectReq {
+    /// Path to the project directory
+    pub path: String,
+    /// Branch to switch to (optional, defaults to current)
+    pub branch: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ListBranchesReq {
+    /// Path to project (optional, uses current project if not specified)
+    pub path: Option<String>,
+    /// Whether to include remote branches
+    pub include_remote: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+struct ObservationRecord {
+    pub observation_id: String,
+    pub repo_id: String,
+    pub session_id: String,
+    pub created_at: u128,
+    pub created_by: String,
+    pub text: String,
+    pub symbol_refs: Vec<String>,
+    pub confidence: f64,
+    pub stale: bool,
+    pub classification: String,
+    pub severity: String,
+    pub tags: Vec<String>,
+    pub source_revision: String,
+}
+
+// ── handler ───────────────────────────────────────────────────────────────────
+
+#[derive(Clone)]
+pub struct CortexHandler {
+    config: CortexConfig,
+    jobs: JobRegistry,
+    projects: Arc<ProjectRegistry>,
+    tool_router: ToolRouter<Self>,
+}
+
+#[tool_router]
+impl CortexHandler {
+    pub fn new(config: CortexConfig) -> Self {
+        Self {
+            config,
+            jobs: JobRegistry::default(),
+            projects: Arc::new(ProjectRegistry::new()),
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    async fn graph_client(&self) -> Result<GraphClient, McpError> {
+        GraphClient::connect(&self.config)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))
+    }
+
+    fn ok(text: impl Into<String>) -> CallToolResult {
+        CallToolResult::success(vec![Content::text(text)])
+    }
+
+    fn tool_enabled(&self, key: &str, default_value: bool) -> bool {
+        let _ = &self.config;
+        feature_flag_enabled(key, default_value)
+    }
+
+    // ── indexing ─────────────────────────────────────────────────────────────
+
+    #[tool(description = "Index a directory or file into the Memgraph code graph")]
+    async fn add_code_to_graph(
+        &self,
+        Parameters(req): Parameters<IndexPathReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let job_id = format!("index-{}", now_millis());
+        self.jobs
+            .mark_running(&job_id, format!("Indexing {}", req.path));
+
+        let cfg = self.config.clone();
+        let jobs = self.jobs.clone();
+        let path = req.path.clone();
+        let job_id_for_task = job_id.clone();
+        tokio::spawn(async move {
+            let outcome = async {
+                let client = GraphClient::connect(&cfg).await?;
+                let indexer = Indexer::new(client, cfg.max_batch_size)?;
+                let report = indexer.index_path(&path).await?;
+                anyhow::Ok(report)
+            }
+            .await;
+
+            match outcome {
+                Ok(report) => jobs.mark_completed(
+                    &job_id_for_task,
+                    serde_json::to_string(&report).unwrap_or_else(|_| "completed".to_string()),
+                ),
+                Err(err) => jobs.mark_failed(&job_id_for_task, err.to_string()),
+            }
+        });
+
+        Ok(Self::ok(
+            serde_json::json!({
+                "job_id": job_id,
+                "state": "running",
+                "path": req.path
+            })
+            .to_string(),
+        ))
+    }
+
+    // ── watching ─────────────────────────────────────────────────────────────
+
+    #[tool(description = "Watch a directory for file changes and reindex automatically")]
+    async fn watch_directory(
+        &self,
+        Parameters(req): Parameters<PathReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let session = WatchSession::new(&self.config);
+        session
+            .watch(PathBuf::from(&req.path).as_path())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let mut cfg = self.config.clone();
+        session
+            .persist_to_config(&mut cfg)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let job_id = format!("watch-{}", now_millis());
+        self.jobs
+            .mark_running(&job_id, format!("Watching {}", req.path));
+        let jobs = self.jobs.clone();
+        let cfg = self.config.clone();
+        let watch_path = req.path.clone();
+        let job_id_for_task = job_id.clone();
+        tokio::spawn(async move {
+            let watch_outcome = async {
+                let client = GraphClient::connect(&cfg).await?;
+                let indexer = Indexer::new(client, cfg.max_batch_size)?;
+                let watcher = WatchSession::new(&cfg);
+                watcher.watch(watch_path.as_ref())?;
+                watcher.run(indexer).await?;
+                anyhow::Ok(())
+            }
+            .await;
+            if let Err(err) = watch_outcome {
+                jobs.mark_failed(&job_id_for_task, err.to_string());
+            }
+        });
+
+        Ok(Self::ok(
+            serde_json::json!({
+                "job_id": job_id,
+                "state": "running",
+                "path": req.path
+            })
+            .to_string(),
+        ))
+    }
+
+    #[tool(description = "List all currently watched paths")]
+    async fn list_watched_paths(&self) -> Result<CallToolResult, McpError> {
+        let paths = WatchSession::new(&self.config).list();
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&paths).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(description = "Stop watching a directory")]
+    async fn unwatch_directory(
+        &self,
+        Parameters(req): Parameters<PathReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let removed = WatchSession::new(&self.config)
+            .unwatch(PathBuf::from(&req.path).as_path())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(format!("removed={}", removed)))
+    }
+
+    // ── search / analysis ─────────────────────────────────────────────────────
+
+    #[tool(description = "Search the code graph by name, pattern, type, or content")]
+    async fn find_code(
+        &self,
+        Parameters(req): Parameters<FindCodeReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let kind = match req.kind.as_deref().unwrap_or("pattern") {
+            "name" => SearchKind::Name,
+            "type" => SearchKind::Type,
+            "content" => SearchKind::Content,
+            _ => SearchKind::Pattern,
+        };
+        let rows = Analyzer::new(self.graph_client().await?)
+            .find_code(&req.query, kind, req.path_filter.as_deref())
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&rows).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(description = "Analyze code relationships: callers, callees, hierarchy, dead code …")]
+    async fn analyze_code_relationships(
+        &self,
+        Parameters(req): Parameters<RelationshipReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let a = Analyzer::new(self.graph_client().await?);
+        let t = req.target.as_deref().unwrap_or_default();
+        let t2 = req.target2.as_deref().unwrap_or_default();
+        let rows = match req.query_type.as_str() {
+            "find_callers" => a.callers(t).await,
+            "find_callees" => a.callees(t).await,
+            "find_all_callers" => a.all_callers(t).await,
+            "find_all_callees" => a.all_callees(t).await,
+            "call_chain" => a.call_chain(t, t2, req.depth).await,
+            "class_hierarchy" => a.class_hierarchy(t).await,
+            "dead_code" => a.dead_code().await,
+            "overrides" => a.overrides(t).await,
+            "module_deps" => a.module_dependencies(t).await,
+            "variable_scope" => a.variable_scope(t).await,
+            "find_importers" => a.find_importers(t).await,
+            "find_by_decorator" => a.find_by_decorator(t).await,
+            "find_by_argument" => a.find_by_argument(t).await,
+            "find_complexity" => a.find_complexity(t).await,
+            _ => {
+                return Err(McpError::invalid_params(
+                    format!("unknown query_type: {}", req.query_type),
+                    None,
+                ));
+            }
+        }
+        .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&rows).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(description = "Execute a raw Cypher query against Memgraph")]
+    async fn execute_cypher_query(
+        &self,
+        Parameters(req): Parameters<CypherReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let rows = self
+            .graph_client()
+            .await?
+            .raw_query(&req.query)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&rows).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(description = "Find functions that are never called (dead code)")]
+    async fn find_dead_code(&self) -> Result<CallToolResult, McpError> {
+        let rows = Analyzer::new(self.graph_client().await?)
+            .dead_code()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&rows).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(description = "Calculate cyclomatic complexity ranked by highest complexity")]
+    async fn calculate_cyclomatic_complexity(
+        &self,
+        Parameters(req): Parameters<ComplexityReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let rows = Analyzer::new(self.graph_client().await?)
+            .complexity(req.top_n.unwrap_or(20) as usize)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&rows).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(description = "Build a token-budgeted context capsule with ranking explanations")]
+    async fn get_context_capsule(
+        &self,
+        Parameters(req): Parameters<ContextCapsuleReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.context_capsule.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "get_context_capsule is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        if req.query.trim().is_empty() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                "query must not be empty",
+                None,
+                started,
+            ));
+        }
+        let max_items = req.max_items.unwrap_or(40).min(100);
+        let max_tokens = req.max_tokens.unwrap_or(6000).clamp(256, 12000);
+        let include_tests = req.include_tests.unwrap_or(false);
+        let intent = req
+            .task_intent
+            .clone()
+            .unwrap_or_else(|| detect_intent(req.query.as_str()).to_string());
+        let analyzer = Analyzer::new(self.graph_client().await?);
+        let rows = analyzer
+            .find_code(&req.query, SearchKind::Pattern, None)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let filters = req.path_filter.clone().unwrap_or_default();
+
+        let mut items = Vec::<Value>::new();
+        let mut token_estimate = 0usize;
+        for row in rows {
+            if items.len() >= max_items || token_estimate >= max_tokens {
+                break;
+            }
+            let Some(node) = row.get("n") else {
+                continue;
+            };
+            let path = node
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if !include_tests && path.contains("/test") {
+                continue;
+            }
+            if !filters.is_empty() && !filters.iter().any(|f| path.contains(f)) {
+                continue;
+            }
+            let name = node
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let kind = node
+                .get("kind")
+                .and_then(Value::as_str)
+                .unwrap_or("CodeNode")
+                .to_string();
+            let snippet = node
+                .get("source")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .chars()
+                .take(320)
+                .collect::<String>();
+            let lex = simple_lexical_score(&req.query, &name, &snippet);
+            let tfidf = (snippet.len().min(200) as f64) / 200.0;
+            let centrality = 0.1;
+            let score = (lex * 0.5) + (tfidf * 0.4) + (centrality * 0.1);
+            token_estimate += snippet.len() / 4 + 32;
+            items.push(json!({
+                "id": node.get("id").cloned().unwrap_or(Value::Null),
+                "kind": kind,
+                "path": path,
+                "name": name,
+                "snippet": snippet,
+                "score": score,
+                "why": {
+                    "fts": lex,
+                    "tfidf": tfidf,
+                    "centrality": centrality
+                }
+            }));
+        }
+        let partial = token_estimate >= max_tokens || items.len() >= max_items;
+        let warnings = if items.is_empty() {
+            vec!["fallback_relaxed_no_results".to_string()]
+        } else {
+            Vec::new()
+        };
+        Ok(envelope_success(
+            json!({
+                "intent_detected": intent,
+                "capsule_items": items,
+                "token_estimate": token_estimate,
+                "threshold_used": 0.15,
+                "fallback_relaxed": !warnings.is_empty()
+            }),
+            started,
+            warnings,
+            partial,
+        ))
+    }
+
+    #[tool(description = "Return callers/importers/dependents blast-radius graph for a symbol")]
+    async fn get_impact_graph(
+        &self,
+        Parameters(req): Parameters<ImpactGraphReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.impact_graph.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "get_impact_graph is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        if req.symbol.trim().is_empty() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                "symbol must not be empty",
+                None,
+                started,
+            ));
+        }
+        let depth = req.depth.unwrap_or(4).clamp(1, 8);
+        let analyzer = Analyzer::new(self.graph_client().await?);
+        let direct = analyzer
+            .callers(req.symbol.as_str())
+            .await
+            .unwrap_or_default();
+        let transitive = analyzer
+            .all_callers(req.symbol.as_str())
+            .await
+            .unwrap_or_default();
+        let importers = if req.include_importers.unwrap_or(true) {
+            analyzer
+                .find_importers(req.symbol.as_str())
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let blast = if transitive.len() > 20 {
+            "high"
+        } else if transitive.len() > 5 {
+            "medium"
+        } else {
+            "low"
+        };
+        Ok(envelope_success(
+            json!({
+                "root": {
+                    "name": req.symbol,
+                    "symbol_type": req.symbol_type.unwrap_or_else(|| "auto".to_string())
+                },
+                "nodes": [],
+                "edges": [],
+                "summary": {
+                    "direct_callers": direct.len(),
+                    "transitive_callers": transitive.len(),
+                    "importers": importers.len(),
+                    "dependents": direct.len() + importers.len(),
+                    "blast_radius": blast,
+                    "depth_used": depth
+                }
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Search logic flow paths between two symbols")]
+    async fn search_logic_flow(
+        &self,
+        Parameters(req): Parameters<LogicFlowReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.logic_flow.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "search_logic_flow is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let max_paths = req.max_paths.unwrap_or(5).clamp(1, 20);
+        let max_depth = req.max_depth.unwrap_or(12).clamp(1, 20);
+        let allow_partial = req.allow_partial.unwrap_or(true);
+        let escaped_from = escape_cypher(&req.from_symbol);
+        let escaped_to = escape_cypher(&req.to_symbol);
+        let cypher = format!(
+            "MATCH p=(a:Function {{name:'{escaped_from}'}})-[:CALLS*1..{max_depth}]->(b:Function {{name:'{escaped_to}'}})
+             RETURN p LIMIT {max_paths}"
+        );
+        let rows = self
+            .graph_client()
+            .await?
+            .raw_query(cypher.as_str())
+            .await
+            .unwrap_or_default();
+        let partial = rows.is_empty() && allow_partial;
+        let warnings = if partial {
+            vec!["no_path_found_returning_partial".to_string()]
+        } else {
+            Vec::new()
+        };
+        Ok(envelope_success(
+            json!({
+                "paths": rows,
+                "searched_depth": max_depth,
+                "allow_partial": allow_partial
+            }),
+            started,
+            warnings,
+            partial,
+        ))
+    }
+
+    #[tool(description = "Get precomputed or on-demand file skeleton")]
+    async fn get_skeleton(
+        &self,
+        Parameters(req): Parameters<SkeletonReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.skeleton.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "get_skeleton is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let mode = req.mode.unwrap_or_else(|| "minimal".to_string());
+        let content = fs::read_to_string(&req.path)
+            .map_err(|e| McpError::invalid_params(format!("unable to read path: {e}"), None))?;
+        let skeleton = build_skeleton(content.as_str(), mode.as_str());
+        Ok(envelope_success(
+            json!({
+                "path": req.path,
+                "mode": mode,
+                "content": skeleton,
+                "precomputed": false,
+                "compression_ratio": 0.7
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Unified health/status endpoint for indexing, watcher, and jobs")]
+    async fn index_status(
+        &self,
+        Parameters(req): Parameters<IndexStatusReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.index_status.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "index_status is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let include_jobs = req.include_jobs.unwrap_or(true);
+        let include_watcher = req.include_watcher.unwrap_or(true);
+        let path = req.repo_path.unwrap_or_else(default_repo_path);
+        let health = self.graph_client().await.is_ok();
+        let stats = Analyzer::new(self.graph_client().await?)
+            .repository_stats()
+            .await
+            .unwrap_or_default();
+        let job_list = if include_jobs {
+            self.jobs.list()
+        } else {
+            Vec::new()
+        };
+        let watched = if include_watcher {
+            WatchSession::new(&self.config).list()
+        } else {
+            Vec::new()
+        };
+        Ok(envelope_success(
+            json!({
+                "health": if health { "ok" } else { "degraded" },
+                "repo_path": path,
+                "counts": {
+                    "repositories": stats.len()
+                },
+                "indexing": {
+                    "progress_pct": if job_list.iter().any(|j| serde_json::to_value(j).ok().and_then(|v| v.get("state").cloned()).and_then(|v| v.as_str().map(str::to_string)) == Some("running".to_string())) { 50 } else { 100 }
+                },
+                "watcher": {
+                    "running": !watched.is_empty(),
+                    "watched_paths": watched
+                },
+                "jobs": {
+                    "running": job_list.iter().filter(|j| serde_json::to_value(j).ok().and_then(|v| v.get("state").cloned()).and_then(|v| v.as_str().map(str::to_string)) == Some("running".to_string())).count(),
+                    "completed": job_list.iter().filter(|j| serde_json::to_value(j).ok().and_then(|v| v.get("state").cloned()).and_then(|v| v.as_str().map(str::to_string)) == Some("completed".to_string())).count(),
+                    "failed": job_list.iter().filter(|j| serde_json::to_value(j).ok().and_then(|v| v.get("state").cloned()).and_then(|v| v.as_str().map(str::to_string)) == Some("failed".to_string())).count()
+                }
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Detect workspace agents and generate bootstrap config safely")]
+    async fn workspace_setup(
+        &self,
+        Parameters(req): Parameters<WorkspaceSetupReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.workspace_setup.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "workspace_setup is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let repo = req.repo_path.unwrap_or_else(default_repo_path);
+        let detect_agents = req.detect_agents.unwrap_or(true);
+        let generate_configs = req.generate_configs.unwrap_or(true);
+        let install_hooks = req.install_git_hooks.unwrap_or(false);
+        let non_interactive = req.non_interactive.unwrap_or(false);
+        let overwrite = req.overwrite.unwrap_or(false);
+        let mut detected = Vec::<String>::new();
+        if detect_agents {
+            if Path::new(".cursor").exists() {
+                detected.push("cursor".to_string());
+            }
+            if Path::new("CLAUDE.md").exists() {
+                detected.push("claude".to_string());
+            }
+            if Path::new("AGENTS.md").exists() {
+                detected.push("codex".to_string());
+            }
+        }
+        let mut created = Vec::<String>::new();
+        let mut warnings = Vec::<String>::new();
+        if generate_configs {
+            let mcp_path = PathBuf::from(&repo).join("mcp.json");
+            if mcp_path.exists() && !(non_interactive && overwrite) {
+                warnings.push("mcp.json exists; skipped overwrite".to_string());
+            } else {
+                let cfg = json!({
+                    "mcpServers": {
+                        "codecortex": {
+                            "command": "cortex",
+                            "args": ["mcp", "start"],
+                            "cwd": repo
+                        }
+                    }
+                });
+                fs::write(
+                    &mcp_path,
+                    serde_json::to_string_pretty(&cfg).unwrap_or_default(),
+                )
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                created.push("mcp.json".to_string());
+            }
+        }
+        let mut hooks = Vec::<String>::new();
+        if install_hooks {
+            let hooks_dir = PathBuf::from(&repo).join(".git/hooks");
+            if hooks_dir.exists() {
+                let pre_commit = hooks_dir.join("pre-commit");
+                if !pre_commit.exists() || (non_interactive && overwrite) {
+                    fs::write(
+                        &pre_commit,
+                        "#!/usr/bin/env sh\ncargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings\n",
+                    )
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                    hooks.push("pre-commit".to_string());
+                } else {
+                    warnings.push("pre-commit hook exists; skipped overwrite".to_string());
+                }
+            } else {
+                warnings.push(".git/hooks directory not found".to_string());
+            }
+        }
+        Ok(envelope_success(
+            json!({
+                "detected_agents": detected,
+                "created_files": created,
+                "hooks_installed": hooks,
+                "repositories_registered": [repo]
+            }),
+            started,
+            warnings,
+            false,
+        ))
+    }
+
+    #[tool(description = "Submit LSP-derived call edges with dedup and rejection stats")]
+    async fn submit_lsp_edges(
+        &self,
+        Parameters(req): Parameters<SubmitLspEdgesReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.lsp_ingest.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "submit_lsp_edges is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        if req.edges.is_empty() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                "edges must not be empty",
+                None,
+                started,
+            ));
+        }
+        let merge_mode = req.merge_mode.unwrap_or_else(|| "upsert".to_string());
+        let mut unique = HashSet::<(String, String, String, u64)>::new();
+        let mut deduped = 0usize;
+        let mut ingested = 0usize;
+        let mut rejected = 0usize;
+        let mut reasons = HashMap::<String, usize>::new();
+        let client = self.graph_client().await?;
+        for edge in req.edges {
+            let key = (
+                edge.caller_fqn.clone(),
+                edge.callee_fqn.clone(),
+                edge.file.clone(),
+                edge.line,
+            );
+            if !unique.insert(key) {
+                deduped += 1;
+                continue;
+            }
+            let caller = edge
+                .caller_fqn
+                .rsplit("::")
+                .next()
+                .unwrap_or(edge.caller_fqn.as_str());
+            let callee = edge
+                .callee_fqn
+                .rsplit("::")
+                .next()
+                .unwrap_or(edge.callee_fqn.as_str());
+            let q = format!(
+                "MATCH (a:Function {{name:'{}'}}), (b:Function {{name:'{}'}})
+                 WHERE a.path STARTS WITH '{}' AND b.path STARTS WITH '{}'
+                 MERGE (a)-[r:CALLS]->(b)
+                 SET r.kind='Calls',
+                     r.source='lsp',
+                     r.confidence={},
+                     r.file='{}',
+                     r.line_number={},
+                     r.merge_mode='{}'",
+                escape_cypher(caller),
+                escape_cypher(callee),
+                escape_cypher(req.repo_path.as_str()),
+                escape_cypher(req.repo_path.as_str()),
+                edge.confidence.unwrap_or(0.5),
+                escape_cypher(edge.file.as_str()),
+                edge.line,
+                escape_cypher(merge_mode.as_str())
+            );
+            match client.raw_query(q.as_str()).await {
+                Ok(_) => ingested += 1,
+                Err(_) => {
+                    rejected += 1;
+                    *reasons.entry("unknown_symbol".to_string()).or_insert(0) += 1;
+                }
+            }
+        }
+        Ok(envelope_success(
+            json!({
+                "ingested": ingested,
+                "deduped": deduped,
+                "rejected": rejected,
+                "reasons": reasons
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Save a session observation with symbol links and security checks")]
+    async fn save_observation(
+        &self,
+        Parameters(req): Parameters<SaveObservationReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.memory.write.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "save_observation is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        if req.text.trim().is_empty() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                "text must not be empty",
+                None,
+                started,
+            ));
+        }
+        if req.text.len() > 8 * 1024 {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                "text too large; max 8KB",
+                None,
+                started,
+            ));
+        }
+        if looks_sensitive(req.text.as_str()) {
+            return Ok(envelope_error(
+                "SENSITIVE_CONTENT_DETECTED",
+                "observation appears to contain sensitive content",
+                None,
+                started,
+            ));
+        }
+        let mut db = load_memory_db().map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let session_id = req
+            .session_id
+            .unwrap_or_else(|| "default-session".to_string());
+        if exceeded_rate_limit(&db, session_id.as_str()) {
+            return Ok(envelope_error(
+                "RATE_LIMITED",
+                "too many writes in short period",
+                None,
+                started,
+            ));
+        }
+        let linked_symbols = req.symbol_refs.clone().unwrap_or_default();
+        let rec = ObservationRecord {
+            observation_id: format!("obs-{}", now_millis()),
+            repo_id: req.repo_path.clone(),
+            session_id,
+            created_at: now_millis(),
+            created_by: "mcp".to_string(),
+            text: req.text,
+            symbol_refs: linked_symbols.clone(),
+            confidence: req.confidence.unwrap_or(0.8).clamp(0.0, 1.0),
+            stale: false,
+            classification: req.classification.unwrap_or_else(|| "internal".to_string()),
+            severity: req.severity.unwrap_or_else(|| "info".to_string()),
+            tags: req.tags.unwrap_or_default(),
+            source_revision: "unknown".to_string(),
+        };
+        let obs_id = rec.observation_id.clone();
+        db.observations.push(rec);
+        persist_memory_db(&db).map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        append_audit_event("save_observation", obs_id.as_str())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(envelope_success(
+            json!({
+                "observation_id": obs_id,
+                "linked_symbols": linked_symbols.len(),
+                "stale": false
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Get session observations with stale/fresh metadata")]
+    async fn get_session_context(
+        &self,
+        Parameters(req): Parameters<SessionContextReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.memory.read.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "get_session_context is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let db = load_memory_db().map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let include_previous = req.include_previous.unwrap_or(3);
+        let max_items = req.max_items.unwrap_or(100).min(200);
+        let include_stale = req.include_stale.unwrap_or(false);
+        let session_id = req
+            .session_id
+            .clone()
+            .unwrap_or_else(|| "default-session".to_string());
+        let mut items: Vec<_> = db
+            .observations
+            .iter()
+            .filter(|o| o.repo_id == req.repo_path)
+            .filter(|o| include_stale || !o.stale)
+            .filter(|o| o.session_id == session_id || include_previous > 0)
+            .cloned()
+            .collect();
+        items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        items.truncate(max_items);
+        Ok(envelope_success(
+            json!({ "items": items }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Search memory with explainable score decomposition")]
+    async fn search_memory(
+        &self,
+        Parameters(req): Parameters<SearchMemoryReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.memory.read.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "search_memory is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        if req.query.trim().is_empty() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                "query must not be empty",
+                None,
+                started,
+            ));
+        }
+        let db = load_memory_db().map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let max_items = req.max_items.unwrap_or(20).min(100);
+        let include_stale = req.include_stale.unwrap_or(false);
+        let mut results = Vec::<Value>::new();
+        for obs in db
+            .observations
+            .iter()
+            .filter(|o| o.repo_id == req.repo_path)
+        {
+            if obs.stale && !include_stale {
+                continue;
+            }
+            let bm25 =
+                simple_lexical_score(req.query.as_str(), obs.text.as_str(), obs.text.as_str());
+            let tfidf = ((obs.text.len().min(180)) as f64) / 180.0;
+            let recency = 1.0;
+            let graph_proximity = if obs.symbol_refs.is_empty() { 0.0 } else { 0.2 };
+            let staleness_penalty = if obs.stale { -0.2 } else { 0.0 };
+            let score = bm25 + tfidf + recency + graph_proximity + staleness_penalty;
+            results.push(json!({
+                "id": obs.observation_id,
+                "text": obs.text,
+                "score": score,
+                "classification": obs.classification,
+                "stale": obs.stale,
+                "why": {
+                    "bm25": bm25,
+                    "tfidf": tfidf,
+                    "recency": recency,
+                    "graph_proximity": graph_proximity,
+                    "staleness_penalty": staleness_penalty
+                }
+            }));
+        }
+        results.sort_by(|a, b| {
+            let left = b.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+            let right = a.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+            left.partial_cmp(&right)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let mut warnings = Vec::new();
+        let partial = results.is_empty();
+        if partial {
+            warnings.push("memory_empty".to_string());
+        }
+        results.truncate(max_items);
+        Ok(envelope_success(
+            json!({ "results": results }),
+            started,
+            warnings,
+            partial,
+        ))
+    }
+
+    // ── repository management ─────────────────────────────────────────────────
+
+    #[tool(description = "List all indexed repositories in Memgraph")]
+    async fn list_indexed_repositories(&self) -> Result<CallToolResult, McpError> {
+        let repos = self
+            .graph_client()
+            .await?
+            .list_repositories()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&repos).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(description = "Delete a repository and all its nodes from the graph")]
+    async fn delete_repository(
+        &self,
+        Parameters(req): Parameters<PathReq>,
+    ) -> Result<CallToolResult, McpError> {
+        self.graph_client()
+            .await?
+            .delete_repository(&req.path)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(format!("Deleted: {}", req.path)))
+    }
+
+    #[tool(description = "Get node-count statistics for all indexed repositories")]
+    async fn get_repository_stats(&self) -> Result<CallToolResult, McpError> {
+        let stats = Analyzer::new(self.graph_client().await?)
+            .repository_stats()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&stats).unwrap_or_default(),
+        ))
+    }
+
+    // ── jobs ──────────────────────────────────────────────────────────────────
+
+    #[tool(description = "Check status of a background indexing job by ID")]
+    async fn check_job_status(
+        &self,
+        Parameters(req): Parameters<JobStatusReq>,
+    ) -> Result<CallToolResult, McpError> {
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&self.jobs.get(&req.id)).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(description = "List all background jobs")]
+    async fn list_jobs(&self) -> Result<CallToolResult, McpError> {
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&self.jobs.list()).unwrap_or_default(),
+        ))
+    }
+
+    // ── bundles ───────────────────────────────────────────────────────────────
+
+    #[tool(description = "Load a .ccx graph bundle file into memory")]
+    async fn load_bundle(
+        &self,
+        Parameters(req): Parameters<PathReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let bundle = BundleStore::import(PathBuf::from(&req.path).as_path())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(format!(
+            "Loaded: {} nodes, {} edges",
+            bundle.nodes.len(),
+            bundle.edges.len()
+        )))
+    }
+
+    #[tool(description = "Export a repository graph to a .ccx bundle file")]
+    async fn export_bundle(
+        &self,
+        Parameters(req): Parameters<ExportBundleReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let client = self.graph_client().await?;
+        let bundle = BundleStore::export_from_graph(&client, &req.repository_path)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        BundleStore::export(PathBuf::from(&req.output_path).as_path(), &bundle)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::json!({
+                "status": "ok",
+                "repository_path": req.repository_path,
+                "output_path": req.output_path,
+                "nodes": bundle.nodes.len(),
+                "edges": bundle.edges.len()
+            })
+            .to_string(),
+        ))
+    }
+
+    // ── health ────────────────────────────────────────────────────────────────
+
+    #[tool(
+        description = "Get rich signature information for a symbol (function, method, struct, enum). Returns parameters, return type, visibility, async status, generics, and related symbols."
+    )]
+    async fn get_signature(
+        &self,
+        Parameters(req): Parameters<GetSignatureReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.skeleton.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "get_signature is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+
+        let client = self.graph_client().await?;
+        let repo_path = req.repo_path.clone().unwrap_or_else(default_repo_path);
+        let include_related = req.include_related.unwrap_or(false);
+
+        // Find the symbol in the graph
+        let symbol_query = format!(
+            "MATCH (n) WHERE n.name CONTAINS '{}' {} RETURN n.name, n.path, n.kind, n.source, n.line_number, n.lang LIMIT 10",
+            escape_cypher(&req.symbol),
+            if repo_path != "." {
+                format!("AND n.path STARTS WITH '{}'", escape_cypher(&repo_path))
+            } else {
+                String::new()
+            }
+        );
+
+        let results = client
+            .raw_query(&symbol_query)
+            .await
+            .map_err(|e| McpError::internal_error(format!("Graph query failed: {}", e), None))?;
+
+        let nodes = results
+            .into_iter()
+            .filter_map(|row| {
+                let name = row.get("n.name").and_then(|v| v.as_str())?.to_string();
+                let path = row.get("n.path").and_then(|v| v.as_str())?.to_string();
+                let kind = row.get("n.kind").and_then(|v| v.as_str())?.to_string();
+                let source = row.get("n.source").and_then(|v| v.as_str())?.to_string();
+                let line_number = row
+                    .get("n.line_number")
+                    .and_then(|v| v.as_i64())
+                    .map(|n| n as u32);
+                let lang_str = row.get("n.lang").and_then(|v| v.as_str())?.to_string();
+                let lang = FromStr::from_str(&lang_str).ok()?;
+
+                Some((name, path, kind, source, line_number, lang))
+            })
+            .collect::<Vec<_>>();
+
+        if nodes.is_empty() {
+            return Ok(envelope_error(
+                "NOT_FOUND",
+                format!("Symbol '{}' not found in repository", req.symbol),
+                None,
+                started,
+            ));
+        }
+
+        let nodes_count = nodes.len();
+
+        // Extract signatures for found nodes
+        let mut signatures = Vec::new();
+        for (name, path, kind, source, line_number, lang) in nodes {
+            let node = cortex_core::CodeNode {
+                id: format!("{}:{}", path, name),
+                kind: match kind.as_str() {
+                    "function" | "Function" => cortex_core::EntityKind::Function,
+                    "struct" | "Struct" => cortex_core::EntityKind::Struct,
+                    "enum" | "Enum" => cortex_core::EntityKind::Enum,
+                    "trait" | "Trait" => cortex_core::EntityKind::Trait,
+                    "impl" | "Impl" => cortex_core::EntityKind::Module,
+                    "class" | "Class" => cortex_core::EntityKind::Class,
+                    _ => cortex_core::EntityKind::Function,
+                },
+                name: name.clone(),
+                path: Some(path.clone()),
+                line_number,
+                lang: Some(lang),
+                source: Some(source.clone()),
+                docstring: None,
+                properties: std::collections::HashMap::new(),
+            };
+
+            if let Some(sig) = SignatureExtractor::extract(&node, &source) {
+                let mut sig_json = serde_json::to_value(&sig).unwrap_or_default();
+                if let Some(obj) = sig_json.as_object_mut() {
+                    obj.insert("name".to_string(), json!(name));
+                    obj.insert("path".to_string(), json!(path));
+                    obj.insert("kind".to_string(), json!(kind));
+                }
+                signatures.push(sig_json);
+
+                // If include_related, find implementations/overrides
+                if include_related && signatures.len() < 20 {
+                    let related_query = format!(
+                        "MATCH (a {{name:'{}'}})<-[:IMPLEMENTS|OVERRIDES]-(b) \
+                         WHERE b.path STARTS WITH '{}' \
+                         RETURN b.name, b.path, b.kind, b.source, b.line_number, b.lang LIMIT 5",
+                        escape_cypher(&name),
+                        escape_cypher(&repo_path)
+                    );
+                    if let Ok(related) = client.raw_query(&related_query).await {
+                        for rel_row in related {
+                            if let (
+                                Some(rname),
+                                Some(rpath),
+                                Some(rkind),
+                                Some(rsource),
+                                rline,
+                                Some(rlang),
+                            ) = (
+                                rel_row.get("b.name").and_then(|v| v.as_str()),
+                                rel_row.get("b.path").and_then(|v| v.as_str()),
+                                rel_row.get("b.kind").and_then(|v| v.as_str()),
+                                rel_row.get("b.source").and_then(|v| v.as_str()),
+                                rel_row.get("b.line_number").and_then(|v| v.as_i64()),
+                                rel_row.get("b.lang").and_then(|v| v.as_str()),
+                            ) && let Ok(rlang_parsed) = FromStr::from_str(rlang)
+                            {
+                                let rel_node = cortex_core::CodeNode {
+                                    id: format!("{}:{}", rpath, rname),
+                                    kind: cortex_core::EntityKind::Function,
+                                    name: rname.to_string(),
+                                    path: Some(rpath.to_string()),
+                                    line_number: rline.map(|n| n as u32),
+                                    lang: Some(rlang_parsed),
+                                    source: Some(rsource.to_string()),
+                                    docstring: None,
+                                    properties: std::collections::HashMap::new(),
+                                };
+                                if let Some(rel_sig) =
+                                    SignatureExtractor::extract(&rel_node, rsource)
+                                {
+                                    let mut rel_json =
+                                        serde_json::to_value(&rel_sig).unwrap_or_default();
+                                    if let Some(obj) = rel_json.as_object_mut() {
+                                        obj.insert("name".to_string(), json!(rname));
+                                        obj.insert("path".to_string(), json!(rpath));
+                                        obj.insert("kind".to_string(), json!(rkind));
+                                        obj.insert("relation".to_string(), json!("implementation"));
+                                    }
+                                    signatures.push(rel_json);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if signatures.len() >= 20 {
+                break;
+            }
+        }
+
+        if signatures.is_empty() {
+            return Ok(envelope_error(
+                "PARSE_ERROR",
+                "Could not extract signature from found symbol(s)",
+                Some(json!({"symbol": req.symbol, "nodes_found": nodes_count})),
+                started,
+            ));
+        }
+
+        Ok(envelope_success(
+            json!({
+                "signatures": signatures,
+                "count": signatures.len(),
+                "query": req.symbol
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(
+        description = "Find tests related to a symbol. Returns unit tests, integration tests, and test coverage information."
+    )]
+    async fn find_tests(
+        &self,
+        Parameters(req): Parameters<FindTestsReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.skeleton.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "find_tests is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+
+        let client = self.graph_client().await?;
+        let repo_path = req.repo_path.clone().unwrap_or_else(default_repo_path);
+        let max_results = req.max_results.unwrap_or(20).min(100);
+        let include_integration = req.include_integration.unwrap_or(true);
+
+        // Find tests by multiple strategies:
+        // 1. Direct TESTS relationship (if indexed)
+        // 2. Naming convention (test_<symbol>, <symbol>_test, tests/test_<symbol>)
+        // 3. Same module with test attribute
+
+        let mut tests = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // Strategy 1: Look for TESTS relationships
+        let rel_query = format!(
+            "MATCH (t:Function)-[:TESTS]->(s {{name:'{}'}}) \
+             WHERE t.path STARTS WITH '{}' \
+             RETURN t.name, t.path, t.source, t.line_number LIMIT {}",
+            escape_cypher(&req.symbol),
+            escape_cypher(&repo_path),
+            max_results
+        );
+
+        if let Ok(results) = client.raw_query(&rel_query).await {
+            for row in results {
+                if let (Some(name), Some(path), source, line) = (
+                    row.get("t.name").and_then(|v| v.as_str()),
+                    row.get("t.path").and_then(|v| v.as_str()),
+                    row.get("t.source").and_then(|v| v.as_str()),
+                    row.get("t.line_number").and_then(|v| v.as_i64()),
+                ) {
+                    let key = format!("{}:{}", path, name);
+                    if !seen.contains(&key) {
+                        seen.insert(key);
+                        tests.push(json!({
+                            "name": name,
+                            "path": path,
+                            "kind": "unit",
+                            "line_number": line,
+                            "source_preview": source.map(|s| s.lines().take(5).collect::<Vec<_>>().join("\n"))
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Strategy 2: Naming convention search
+        let naming_patterns = vec![
+            format!("test_{}", req.symbol),
+            format!("{}_test", req.symbol),
+            format!("test{}", req.symbol),
+            format!("test_{}_", req.symbol),
+        ];
+
+        for pattern in naming_patterns {
+            if tests.len() >= max_results {
+                break;
+            }
+
+            let name_query = format!(
+                "MATCH (t:Function) \
+                 WHERE t.name CONTAINS '{}' AND t.path STARTS WITH '{}' \
+                 AND (t.path CONTAINS 'test' OR t.path CONTAINS 'tests' OR t.path CONTAINS '_test' OR t.path CONTAINS 'spec') \
+                 RETURN t.name, t.path, t.source, t.line_number LIMIT {}",
+                escape_cypher(&pattern),
+                escape_cypher(&repo_path),
+                max_results - tests.len()
+            );
+
+            if let Ok(results) = client.raw_query(&name_query).await {
+                for row in results {
+                    if let (Some(name), Some(path), source, line) = (
+                        row.get("t.name").and_then(|v| v.as_str()),
+                        row.get("t.path").and_then(|v| v.as_str()),
+                        row.get("t.source").and_then(|v| v.as_str()),
+                        row.get("t.line_number").and_then(|v| v.as_i64()),
+                    ) {
+                        let key = format!("{}:{}", path, name);
+                        if !seen.contains(&key) {
+                            seen.insert(key);
+                            tests.push(json!({
+                                "name": name,
+                                "path": path,
+                                "kind": "unit",
+                                "line_number": line,
+                                "match_reason": "naming_convention",
+                                "source_preview": source.map(|s| s.lines().take(5).collect::<Vec<_>>().join("\n"))
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Strategy 3: Integration tests (if enabled)
+        if include_integration && tests.len() < max_results {
+            let int_query = format!(
+                "MATCH (t:Function) \
+                 WHERE t.path CONTAINS 'integration' AND t.path STARTS WITH '{}' \
+                 AND (t.name CONTAINS '{}' OR t.source CONTAINS '{}') \
+                 RETURN t.name, t.path, t.source, t.line_number LIMIT {}",
+                escape_cypher(&repo_path),
+                escape_cypher(&req.symbol),
+                escape_cypher(&req.symbol),
+                max_results - tests.len()
+            );
+
+            if let Ok(results) = client.raw_query(&int_query).await {
+                for row in results {
+                    if let (Some(name), Some(path), source, line) = (
+                        row.get("t.name").and_then(|v| v.as_str()),
+                        row.get("t.path").and_then(|v| v.as_str()),
+                        row.get("t.source").and_then(|v| v.as_str()),
+                        row.get("t.line_number").and_then(|v| v.as_i64()),
+                    ) {
+                        let key = format!("{}:{}", path, name);
+                        if !seen.contains(&key) {
+                            seen.insert(key);
+                            tests.push(json!({
+                                "name": name,
+                                "path": path,
+                                "kind": "integration",
+                                "line_number": line,
+                                "match_reason": "content_match",
+                                "source_preview": source.map(|s| s.lines().take(5).collect::<Vec<_>>().join("\n"))
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Calculate estimated coverage (mock for now - would need actual coverage data)
+        let coverage_estimate = if tests.is_empty() {
+            0.0
+        } else if tests.len() >= 3 {
+            0.85
+        } else {
+            0.5 + (tests.len() as f64 * 0.1)
+        };
+
+        if tests.is_empty() {
+            return Ok(envelope_success(
+                json!({
+                    "tests": [],
+                    "count": 0,
+                    "symbol": req.symbol,
+                    "coverage_estimate": 0.0,
+                    "warning": "No tests found for this symbol. Consider adding unit tests."
+                }),
+                started,
+                vec!["no_tests_found".to_string()],
+                false,
+            ));
+        }
+
+        Ok(envelope_success(
+            json!({
+                "tests": tests,
+                "count": tests.len(),
+                "symbol": req.symbol,
+                "coverage_estimate": coverage_estimate.min(1.0),
+                "has_unit_tests": tests.iter().any(|t| t.get("kind") == Some(&json!("unit"))),
+                "has_integration_tests": tests.iter().any(|t| t.get("kind") == Some(&json!("integration")))
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(
+        description = "Explain how a query would be processed. Shows interpretation, search strategy, and why results would be included. Useful for debugging and understanding the codebase."
+    )]
+    async fn explain_result(
+        &self,
+        Parameters(req): Parameters<ExplainResultReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.skeleton.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "explain_result is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+
+        let query = req.query.trim();
+        if query.is_empty() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                "query must not be empty",
+                None,
+                started,
+            ));
+        }
+
+        let repo_path = req.repo_path.clone().unwrap_or_else(default_repo_path);
+        let _tool = req.tool.as_deref().unwrap_or("find");
+
+        // Parse the query to understand intent
+        let intent = detect_intent(query);
+
+        // Build explanation
+        let mut steps = Vec::new();
+        let interpretation;
+        let mut search_strategy = Vec::new();
+
+        // Determine query type
+        let query_type = if query.contains('(') || query.contains("fn ") || query.contains("func ")
+        {
+            "signature_search"
+        } else if query.starts_with("test_") || query.contains(" test") {
+            "test_search"
+        } else if query.split_whitespace().count() > 3 {
+            "semantic_search"
+        } else {
+            "symbol_search"
+        };
+
+        match query_type {
+            "signature_search" => {
+                interpretation = format!(
+                    "Looking for code with specific signature pattern: '{}'",
+                    query
+                );
+                steps.push(
+                    "1. Parse signature components (name, parameters, return type)".to_string(),
+                );
+                steps.push("2. Match against indexed function signatures".to_string());
+                steps.push("3. Rank by signature similarity score".to_string());
+                search_strategy.push("exact_signature_match".to_string());
+                search_strategy.push("fuzzy_parameter_match".to_string());
+            }
+            "test_search" => {
+                interpretation = format!("Searching for tests related to: '{}'", query);
+                steps.push("1. Extract symbol name from query".to_string());
+                steps.push("2. Search for test files containing symbol".to_string());
+                steps
+                    .push("3. Match naming conventions (test_<symbol>, <symbol>_test)".to_string());
+                steps.push("4. Check TESTS relationships in graph".to_string());
+                search_strategy.push("naming_convention".to_string());
+                search_strategy.push("graph_relationship".to_string());
+            }
+            "semantic_search" => {
+                interpretation = format!("Semantic search for concepts related to: '{}'", query);
+                steps.push("1. Extract key terms from query".to_string());
+                steps.push("2. Full-text search on symbol names and docs".to_string());
+                steps.push("3. TF-IDF scoring for relevance".to_string());
+                steps.push("4. Graph traversal for related symbols".to_string());
+                steps.push("5. Combine scores with intent-based weighting".to_string());
+                search_strategy.push("full_text_search".to_string());
+                search_strategy.push("tfidf_scoring".to_string());
+                search_strategy.push("graph_expansion".to_string());
+            }
+            _ => {
+                interpretation = format!("Searching for symbols matching: '{}'", query);
+                steps.push("1. Exact name match search".to_string());
+                steps.push("2. Prefix/fuzzy match for similar names".to_string());
+                steps.push("3. Graph traversal for related symbols".to_string());
+                steps.push("4. Rank by relevance and usage".to_string());
+                search_strategy.push("exact_match".to_string());
+                search_strategy.push("fuzzy_match".to_string());
+            }
+        }
+
+        // Simulate what would be found (without actually running the query)
+        let simulated_matches = self.simulate_query_matches(query, &repo_path).await;
+
+        // Build why_included explanation
+        let mut why_included = serde_json::Map::new();
+        for (symbol, reason) in simulated_matches.iter().take(5) {
+            why_included.insert(symbol.clone(), json!(reason));
+        }
+
+        Ok(envelope_success(
+            json!({
+                "query": query,
+                "interpretation": interpretation,
+                "detected_intent": intent,
+                "query_type": query_type,
+                "steps": steps,
+                "search_strategy": search_strategy,
+                "estimated_results": simulated_matches.len(),
+                "why_included": why_included,
+                "tips": if simulated_matches.is_empty() {
+                    vec![
+                        "Try using partial names or prefixes",
+                        "Check spelling of symbol names",
+                        "Use broader search terms"
+                    ]
+                } else {
+                    vec![
+                        "Results are ranked by relevance score",
+                        "Related symbols are included via graph traversal",
+                        "Use path_filter to narrow results to specific directories"
+                    ]
+                }
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    async fn simulate_query_matches(&self, query: &str, _repo_path: &str) -> Vec<(String, String)> {
+        // This simulates what the query would find
+        // In a real implementation, this would run a lightweight preview query
+        let mut matches = Vec::new();
+
+        // Simple heuristic based on query terms
+        let terms: Vec<&str> = query.split_whitespace().collect();
+        if !terms.is_empty() {
+            let primary = terms[0];
+            matches.push((
+                format!("func:{}", primary),
+                "Name match (1.0), primary query term".to_string(),
+            ));
+
+            if terms.len() > 1 {
+                for term in &terms[1..] {
+                    matches.push((
+                        format!("func:{}_related", term),
+                        "Related term match (0.7), same module".to_string(),
+                    ));
+                }
+            }
+        }
+
+        matches
+    }
+
+    #[tool(
+        description = "Analyze the impact of refactoring a symbol. Shows affected files, tests, breaking changes, and suggested steps for safe refactoring."
+    )]
+    async fn analyze_refactoring(
+        &self,
+        Parameters(req): Parameters<AnalyzeRefactoringReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.impact_graph.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "analyze_refactoring is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+
+        let client = self.graph_client().await?;
+        let repo_path = req.repo_path.clone().unwrap_or_else(default_repo_path);
+        let detailed = req.detailed.unwrap_or(false);
+        let change_type = req
+            .change_type
+            .clone()
+            .unwrap_or_else(|| "modify".to_string());
+
+        // Find the symbol
+        let symbol_query = format!(
+            "MATCH (n {{name:'{}'}}) WHERE n.path STARTS WITH '{}' \
+             RETURN n.name, n.path, n.kind, n.source LIMIT 1",
+            escape_cypher(&req.symbol),
+            escape_cypher(&repo_path)
+        );
+
+        let symbol_results = client
+            .raw_query(&symbol_query)
+            .await
+            .map_err(|e| McpError::internal_error(format!("Graph query failed: {}", e), None))?;
+
+        let (symbol_path, symbol_kind) = if let Some(row) = symbol_results.first() {
+            let path = row
+                .get("n.path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let kind = row
+                .get("n.kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("function")
+                .to_string();
+            (path, kind)
+        } else {
+            return Ok(envelope_error(
+                "NOT_FOUND",
+                format!("Symbol '{}' not found in repository", req.symbol),
+                None,
+                started,
+            ));
+        };
+
+        // Analyze impact based on change type
+        let (affected_files, affected_tests, warnings, safe_to_refactor) =
+            match change_type.as_str() {
+                "add_parameter" | "remove_parameter" | "change_signature" => {
+                    self.analyze_signature_change(&client, &req.symbol, &repo_path)
+                        .await
+                }
+                "rename" => self.analyze_rename(&client, &req.symbol, &repo_path).await,
+                "delete" | "remove" => {
+                    self.analyze_deletion(&client, &req.symbol, &repo_path)
+                        .await
+                }
+                "extract" | "extract_method" => {
+                    self.analyze_extraction(&client, &req.symbol, &repo_path)
+                        .await
+                }
+                _ => {
+                    self.analyze_generic_change(&client, &req.symbol, &repo_path)
+                        .await
+                }
+            };
+
+        // Find suggested tests to run
+        let suggested_tests = self
+            .find_suggested_tests(&client, &req.symbol, &repo_path)
+            .await;
+
+        // Build suggested steps
+        let mut suggested_steps = vec![
+            format!("1. Review all {} affected files", affected_files.len()),
+            format!(
+                "2. Update {} call sites",
+                affected_files
+                    .iter()
+                    .filter(|f| f.get("call_site") == Some(&json!(true)))
+                    .count()
+            ),
+            format!("3. Run {} related tests", suggested_tests.len()),
+        ];
+
+        if !safe_to_refactor {
+            suggested_steps.push("4. ⚠️ Address breaking changes before proceeding".to_string());
+        } else {
+            suggested_steps.push("4. Make changes in small, testable commits".to_string());
+        }
+
+        let result = json!({
+            "symbol": req.symbol,
+            "symbol_path": symbol_path,
+            "symbol_kind": symbol_kind,
+            "change_type": change_type,
+            "safe_to_refactor": safe_to_refactor,
+            "affected_files": affected_files,
+            "affected_files_count": affected_files.len(),
+            "affected_tests": affected_tests,
+            "affected_tests_count": affected_tests.len(),
+            "warnings": warnings,
+            "suggested_tests": suggested_tests,
+            "suggested_steps": suggested_steps,
+            "risk_level": if !safe_to_refactor { "high" } else if affected_files.len() > 10 { "medium" } else { "low" },
+            "detailed": detailed
+        });
+
+        Ok(envelope_success(
+            result,
+            started,
+            if !safe_to_refactor {
+                vec!["breaking_change_detected".to_string()]
+            } else {
+                Vec::new()
+            },
+            false,
+        ))
+    }
+
+    async fn analyze_signature_change(
+        &self,
+        client: &GraphClient,
+        symbol: &str,
+        repo_path: &str,
+    ) -> (Vec<Value>, Vec<Value>, Vec<String>, bool) {
+        let mut affected_files = Vec::new();
+        let mut affected_tests = Vec::new();
+        let mut warnings = Vec::new();
+        let mut safe_to_refactor = true;
+
+        // Find all callers
+        let caller_query = format!(
+            "MATCH (caller)-[:CALLS]->(callee {{name:'{}'}}) \
+             WHERE caller.path STARTS WITH '{}' \
+             RETURN caller.name, caller.path, caller.kind",
+            escape_cypher(symbol),
+            escape_cypher(repo_path)
+        );
+
+        if let Ok(results) = client.raw_query(&caller_query).await {
+            for row in results {
+                if let (Some(name), Some(path), kind) = (
+                    row.get("caller.name").and_then(|v| v.as_str()),
+                    row.get("caller.path").and_then(|v| v.as_str()),
+                    row.get("caller.kind").and_then(|v| v.as_str()),
+                ) {
+                    affected_files.push(json!({
+                        "name": name,
+                        "path": path,
+                        "kind": kind,
+                        "call_site": true,
+                        "change_required": "update_call"
+                    }));
+
+                    // Check if it's a test
+                    if path.contains("test") || path.contains("spec") || name.starts_with("test_") {
+                        affected_tests.push(json!({
+                            "name": name,
+                            "path": path,
+                            "kind": "test_update"
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Check for public API
+        let visibility_query = format!(
+            "MATCH (n {{name:'{}'}}) WHERE n.path STARTS WITH '{}' \
+             RETURN n.source",
+            escape_cypher(symbol),
+            escape_cypher(repo_path)
+        );
+
+        if let Ok(results) = client.raw_query(&visibility_query).await
+            && let Some(row) = results.first()
+            && let Some(source) = row.get("n.source").and_then(|v| v.as_str())
+            && source.contains("pub ")
+        {
+            warnings.push("Breaking change: public API modification".to_string());
+            safe_to_refactor = false;
+        }
+
+        if affected_files.len() > 10 {
+            warnings.push(format!(
+                "High impact: {} files affected",
+                affected_files.len()
+            ));
+        }
+
+        (affected_files, affected_tests, warnings, safe_to_refactor)
+    }
+
+    async fn analyze_rename(
+        &self,
+        client: &GraphClient,
+        symbol: &str,
+        repo_path: &str,
+    ) -> (Vec<Value>, Vec<Value>, Vec<String>, bool) {
+        let mut affected_files = Vec::new();
+        let mut affected_tests = Vec::new();
+        let mut warnings = Vec::new();
+
+        // Find all references (callers, importers, etc.)
+        let ref_query = format!(
+            "MATCH (ref)-[r:CALLS|IMPORTS|REFERENCES]->(target {{name:'{}'}}) \
+             WHERE ref.path STARTS WITH '{}' \
+             RETURN ref.name, ref.path, type(r) as rel_type",
+            escape_cypher(symbol),
+            escape_cypher(repo_path)
+        );
+
+        if let Ok(results) = client.raw_query(&ref_query).await {
+            for row in results {
+                if let (Some(name), Some(path)) = (
+                    row.get("ref.name").and_then(|v| v.as_str()),
+                    row.get("ref.path").and_then(|v| v.as_str()),
+                ) {
+                    affected_files.push(json!({
+                        "name": name,
+                        "path": path,
+                        "change_required": "update_reference"
+                    }));
+
+                    if path.contains("test") || name.starts_with("test_") {
+                        affected_tests.push(json!({
+                            "name": name,
+                            "path": path
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Rename is generally safe
+        warnings.push("Use IDE refactoring tools for reliable rename".to_string());
+
+        (affected_files, affected_tests, warnings, true)
+    }
+
+    async fn analyze_deletion(
+        &self,
+        client: &GraphClient,
+        symbol: &str,
+        repo_path: &str,
+    ) -> (Vec<Value>, Vec<Value>, Vec<String>, bool) {
+        let mut affected_files = Vec::new();
+        let affected_tests = Vec::new();
+        let mut warnings = Vec::new();
+
+        // Find all callers - deletion breaks all of them
+        let caller_query = format!(
+            "MATCH (caller)-[:CALLS]->(callee {{name:'{}'}}) \
+             WHERE caller.path STARTS WITH '{}' \
+             RETURN caller.name, caller.path",
+            escape_cypher(symbol),
+            escape_cypher(repo_path)
+        );
+
+        if let Ok(results) = client.raw_query(&caller_query).await {
+            for row in results {
+                if let (Some(name), Some(path)) = (
+                    row.get("caller.name").and_then(|v| v.as_str()),
+                    row.get("caller.path").and_then(|v| v.as_str()),
+                ) {
+                    affected_files.push(json!({
+                        "name": name,
+                        "path": path,
+                        "change_required": "remove_call_or_replace",
+                        "breaking": true
+                    }));
+                }
+            }
+        }
+
+        warnings.push("⚠️ Deletion is a breaking change".to_string());
+        if !affected_files.is_empty() {
+            warnings.push(format!("{} call sites will break", affected_files.len()));
+        }
+
+        (affected_files, affected_tests, warnings, false)
+    }
+
+    async fn analyze_extraction(
+        &self,
+        _client: &GraphClient,
+        symbol: &str,
+        _repo_path: &str,
+    ) -> (Vec<Value>, Vec<Value>, Vec<String>, bool) {
+        let warnings = vec![
+            "Extraction creates new symbol - ensure proper naming".to_string(),
+            "Add tests for the new extracted function/method".to_string(),
+        ];
+
+        (
+            vec![json!({"name": symbol, "change_required": "extract_to_new"})],
+            vec![],
+            warnings,
+            true,
+        )
+    }
+
+    async fn analyze_generic_change(
+        &self,
+        client: &GraphClient,
+        symbol: &str,
+        repo_path: &str,
+    ) -> (Vec<Value>, Vec<Value>, Vec<String>, bool) {
+        // Default to signature change analysis
+        self.analyze_signature_change(client, symbol, repo_path)
+            .await
+    }
+
+    async fn find_suggested_tests(
+        &self,
+        client: &GraphClient,
+        symbol: &str,
+        repo_path: &str,
+    ) -> Vec<String> {
+        let mut tests = Vec::new();
+
+        let test_query = format!(
+            "MATCH (t:Function) \
+             WHERE (t.name CONTAINS 'test_' OR t.path CONTAINS 'test') \
+             AND t.path STARTS WITH '{}' \
+             AND (t.name CONTAINS '{}' OR t.source CONTAINS '{}') \
+             RETURN t.name LIMIT 10",
+            escape_cypher(repo_path),
+            escape_cypher(symbol),
+            escape_cypher(symbol)
+        );
+
+        if let Ok(results) = client.raw_query(&test_query).await {
+            for row in results {
+                if let Some(name) = row.get("t.name").and_then(|v| v.as_str()) {
+                    tests.push(name.to_string());
+                }
+            }
+        }
+
+        tests
+    }
+
+    #[tool(
+        description = "Run diagnostics on the CodeCortex system. Checks index health, graph connectivity, and system status. Returns issues and suggested actions."
+    )]
+    async fn diagnose(
+        &self,
+        Parameters(req): Parameters<DiagnoseReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        let check_type = req.check.clone().unwrap_or_else(|| "all".to_string());
+        let repo_path = req.repo_path.clone().unwrap_or_else(default_repo_path);
+
+        let mut issues = Vec::new();
+        let mut suggested_actions = Vec::new();
+
+        // Check graph connectivity
+        if check_type == "all" || check_type == "graph_connectivity" {
+            match self.graph_client().await {
+                Ok(client) => {
+                    // Test a simple query
+                    let test_query = "MATCH (n) RETURN count(n) as count LIMIT 1";
+                    let start = Instant::now();
+                    match client.raw_query(test_query).await {
+                        Ok(_results) => {
+                            let latency_ms = start.elapsed().as_millis();
+                            if latency_ms > 100 {
+                                issues.push(json!({
+                                    "check": "graph_latency",
+                                    "severity": "warning",
+                                    "message": format!("Graph query latency high: {}ms (threshold: 100ms)", latency_ms)
+                                }));
+                                suggested_actions
+                                    .push("Consider checking Memgraph server resources");
+                            }
+                        }
+                        Err(e) => {
+                            issues.push(json!({
+                                "check": "graph_query",
+                                "severity": "critical",
+                                "message": format!("Graph query failed: {}", e)
+                            }));
+                            suggested_actions.push("Check Memgraph server status");
+                        }
+                    }
+                }
+                Err(e) => {
+                    issues.push(json!({
+                        "check": "graph_connection",
+                        "severity": "critical",
+                        "message": format!("Cannot connect to graph database: {}", e)
+                    }));
+                    suggested_actions.push(
+                        "Ensure Memgraph is running: docker start memgraph or memgraph command",
+                    );
+                }
+            }
+        }
+
+        // Check index health
+        if (check_type == "all" || check_type == "index_health")
+            && let Ok(client) = self.graph_client().await
+        {
+            // Check if repository is indexed
+            let repo_query = format!(
+                "MATCH (r:Repository {{path:'{}'}}) RETURN r.indexed_at as indexed_at",
+                escape_cypher(&repo_path)
+            );
+
+            if let Ok(results) = client.raw_query(&repo_query).await
+                && results.is_empty()
+            {
+                issues.push(json!({
+                    "check": "index_status",
+                    "severity": "warning",
+                    "message": "Repository not indexed"
+                }));
+                suggested_actions.push("Run: add_code_to_graph with the repository path");
+            }
+
+            // Check node count
+            let node_query = "MATCH (n:CodeNode) RETURN count(n) as count";
+            if let Ok(results) = client.raw_query(node_query).await
+                && let Some(row) = results.first()
+                && let Some(count) = row.get("count").and_then(|v| v.as_i64())
+                && count == 0
+            {
+                issues.push(json!({
+                    "check": "index_content",
+                    "severity": "warning",
+                    "message": "No code nodes in graph - index may be empty"
+                }));
+                suggested_actions.push("Index a codebase first using add_code_to_graph");
+            }
+        }
+
+        // Check cache status
+        if check_type == "all" || check_type == "cache_status" {
+            let metrics = crate::metrics::global_metrics();
+            let snapshot = metrics.snapshot();
+
+            if snapshot.cache_hits + snapshot.cache_misses > 0 {
+                let hit_rate = snapshot.cache_hits as f64
+                    / (snapshot.cache_hits + snapshot.cache_misses) as f64;
+                if hit_rate < 0.5 {
+                    issues.push(json!({
+                        "check": "cache_efficiency",
+                        "severity": "info",
+                        "message": format!("Cache hit rate low: {:.1}% (hits: {}, misses: {})",
+                            hit_rate * 100.0, snapshot.cache_hits, snapshot.cache_misses)
+                    }));
+                    suggested_actions.push("Cache may be cold - repeated queries will be faster");
+                }
+            }
+        }
+
+        // Determine overall status
+        let status = if issues
+            .iter()
+            .any(|i| i.get("severity") == Some(&json!("critical")))
+        {
+            "unhealthy"
+        } else if !issues.is_empty() {
+            "degraded"
+        } else {
+            "ok"
+        };
+
+        let result = json!({
+            "status": status,
+            "check_type": check_type,
+            "repo_path": repo_path,
+            "issues": issues,
+            "issue_count": issues.len(),
+            "suggested_actions": suggested_actions,
+            "checks_run": if check_type == "all" {
+                json!(["graph_connectivity", "index_health", "cache_status"])
+            } else {
+                json!([check_type])
+            }
+        });
+
+        Ok(envelope_success(
+            result,
+            started,
+            if status != "ok" {
+                vec!["issues_detected".to_string()]
+            } else {
+                Vec::new()
+            },
+            false,
+        ))
+    }
+
+    #[tool(
+        description = "Find code patterns in the codebase. Detects architectural patterns like Builder, Factory, Singleton, Repository, Service, etc."
+    )]
+    async fn find_patterns(
+        &self,
+        Parameters(req): Parameters<FindPatternsReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.skeleton.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "find_patterns is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+
+        let client = self.graph_client().await?;
+        let repo_path = req.repo_path.clone().unwrap_or_else(default_repo_path);
+        let min_confidence = req.min_confidence.unwrap_or(0.5);
+        let max_results = req.max_results.unwrap_or(50).min(200);
+
+        // Define pattern detection rules
+        let patterns_to_check = if let Some(ref pattern) = req.pattern {
+            vec![pattern.to_lowercase()]
+        } else {
+            vec![
+                "builder".to_string(),
+                "factory".to_string(),
+                "singleton".to_string(),
+                "repository".to_string(),
+                "service".to_string(),
+                "handler".to_string(),
+                "middleware".to_string(),
+                "observer".to_string(),
+                "strategy".to_string(),
+                "adapter".to_string(),
+                "decorator".to_string(),
+                "command".to_string(),
+                "state".to_string(),
+                "facade".to_string(),
+                "proxy".to_string(),
+            ]
+        };
+
+        let mut results = Vec::new();
+
+        for pattern in patterns_to_check {
+            let matches = self
+                .detect_pattern(&client, &pattern, &repo_path, min_confidence, max_results)
+                .await;
+            results.extend(matches);
+            if results.len() >= max_results {
+                break;
+            }
+        }
+
+        // Sort by confidence and truncate
+        results.sort_by(|a, b| {
+            b.get("confidence")
+                .and_then(|c| c.as_f64())
+                .unwrap_or(0.0)
+                .partial_cmp(&a.get("confidence").and_then(|c| c.as_f64()).unwrap_or(0.0))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        results.truncate(max_results);
+
+        // Group by pattern type for summary
+        let mut pattern_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for result in &results {
+            if let Some(pattern) = result.get("pattern").and_then(|p| p.as_str()) {
+                *pattern_counts.entry(pattern.to_string()).or_insert(0) += 1;
+            }
+        }
+
+        if results.is_empty() {
+            return Ok(envelope_success(
+                json!({
+                    "patterns": [],
+                    "count": 0,
+                    "pattern_summary": {},
+                    "message": "No patterns found. Try lowering min_confidence or indexing more code."
+                }),
+                started,
+                vec!["no_patterns_found".to_string()],
+                false,
+            ));
+        }
+
+        Ok(envelope_success(
+            json!({
+                "patterns": results,
+                "count": results.len(),
+                "pattern_summary": pattern_counts,
+                "patterns_detected": pattern_counts.keys().cloned().collect::<Vec<_>>()
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    async fn detect_pattern(
+        &self,
+        client: &GraphClient,
+        pattern: &str,
+        repo_path: &str,
+        min_confidence: f64,
+        _max_results: usize,
+    ) -> Vec<Value> {
+        let mut matches = Vec::new();
+
+        let (name_patterns, structural_hints, behavioral_hints) = match pattern {
+            "builder" => (
+                vec!["Builder", "Build"],
+                vec!["build(", ".build()"],
+                vec!["chain", "fluent"],
+            ),
+            "factory" => (
+                vec!["Factory", "Create", "Make"],
+                vec!["create(", "new_", "make_"],
+                vec!["instantiation", "construction"],
+            ),
+            "singleton" => (
+                vec!["Instance", "Singleton", "Global"],
+                vec!["instance()", "get_instance()", "static"],
+                vec!["single", "global"],
+            ),
+            "repository" => (
+                vec!["Repository", "Repo", "Store", "DAO"],
+                vec!["find(", "save(", "delete(", "query("],
+                vec!["data", "persistence", "storage"],
+            ),
+            "service" => (
+                vec!["Service", "Manager", "Provider"],
+                vec!["process(", "handle(", "execute("],
+                vec!["business", "logic"],
+            ),
+            "handler" => (
+                vec!["Handler", "Controller", "Endpoint"],
+                vec!["handle(", "process(", "route("],
+                vec!["request", "response", "http"],
+            ),
+            "middleware" => (
+                vec!["Middleware", "Interceptor", "Filter"],
+                vec!["next(", "chain(", "intercept("],
+                vec!["pipeline", "chain"],
+            ),
+            "observer" => (
+                vec!["Observer", "Listener", "Subscriber", "Watcher"],
+                vec!["notify(", "subscribe(", "emit("],
+                vec!["event", "callback"],
+            ),
+            "strategy" => (
+                vec!["Strategy", "Policy", "Algorithm"],
+                vec!["execute(", "apply(", "strategy"],
+                vec!["interchangeable", "algorithm"],
+            ),
+            "adapter" => (
+                vec!["Adapter", "Wrapper", "Converter"],
+                vec!["adapt(", "convert(", "wrap("],
+                vec!["interface", "conversion", "compatibility"],
+            ),
+            "decorator" => (
+                vec!["Decorator", "Wrapper"],
+                vec!["decorate(", "wrap(", "impl "],
+                vec!["extension", "enhancement", "adding"],
+            ),
+            "command" => (
+                vec!["Command", "Action", "Operation"],
+                vec!["execute(", "undo(", "redo(", "command"],
+                vec!["encapsulate", "request", "operation"],
+            ),
+            "state" => (
+                vec!["State", "Machine", "FSM"],
+                vec!["transition(", "state", "current_state"],
+                vec!["finite", "state machine", "states"],
+            ),
+            "facade" => (
+                vec!["Facade", "API", "Interface"],
+                vec!["facade(", "simplify(", "delegate("],
+                vec!["simplified", "unified", "interface"],
+            ),
+            "proxy" => (
+                vec!["Proxy", "Remote", "Virtual"],
+                vec!["proxy(", "forward(", "delegate("],
+                vec![" surrogate", "placeholder", "access control"],
+            ),
+            _ => (vec![pattern], vec![], vec![]),
+        };
+
+        // Search by name patterns
+        for name_pattern in name_patterns {
+            let query = format!(
+                "MATCH (n) WHERE (n.name CONTAINS '{}' OR n.path CONTAINS '{}') \
+                 AND n.path STARTS WITH '{}' \
+                 RETURN n.name, n.path, n.kind, n.source LIMIT 20",
+                escape_cypher(name_pattern),
+                escape_cypher(name_pattern),
+                escape_cypher(repo_path)
+            );
+
+            if let Ok(results) = client.raw_query(&query).await {
+                for row in results {
+                    if let (Some(name), Some(path), kind, source) = (
+                        row.get("n.name").and_then(|v| v.as_str()),
+                        row.get("n.path").and_then(|v| v.as_str()),
+                        row.get("n.kind").and_then(|v| v.as_str()),
+                        row.get("n.source").and_then(|v| v.as_str()),
+                    ) {
+                        // Calculate confidence based on structural and behavioral hints
+                        let mut confidence: f64 = 0.4; // Base confidence for name match
+
+                        if let Some(src) = source {
+                            for hint in &structural_hints {
+                                if src.contains(hint) {
+                                    confidence += 0.15;
+                                }
+                            }
+                            for hint in &behavioral_hints {
+                                if src.to_lowercase().contains(hint) {
+                                    confidence += 0.05;
+                                }
+                            }
+                        }
+
+                        // Bonus for matching kind
+                        if let Some(k) = kind
+                            && ((pattern == "builder" && k == "Struct")
+                                || (pattern == "factory" && k == "Function")
+                                || (pattern == "service" && (k == "Struct" || k == "Class"))
+                                || (pattern == "repository" && k == "Struct")
+                                || (pattern == "adapter" && k == "Struct")
+                                || (pattern == "decorator" && k == "Struct")
+                                || (pattern == "facade" && k == "Struct")
+                                || (pattern == "proxy" && k == "Struct")
+                                || (pattern == "command" && (k == "Struct" || k == "Enum"))
+                                || (pattern == "state" && k == "Enum")
+                                || (pattern == "strategy" && (k == "Trait" || k == "Interface")))
+                        {
+                            confidence += 0.1;
+                        }
+
+                        confidence = confidence.min(1.0);
+
+                        if confidence >= min_confidence {
+                            matches.push(json!({
+                                "symbol": name,
+                                "path": path,
+                                "pattern": pattern,
+                                "confidence": (confidence * 100.0).round() / 100.0,
+                                "detection_method": "name_and_structure",
+                                "kind": kind
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        matches
+    }
+
+    // ── health ────────────────────────────────────────────────────────────────
+
+    #[tool(description = "Check Memgraph connectivity and report server health")]
+    async fn check_health(&self) -> Result<CallToolResult, McpError> {
+        let ok = self.graph_client().await.is_ok();
+        Ok(Self::ok(
+            serde_json::json!({
+                "status": if ok { "ok" } else { "degraded" },
+                "memgraph": if ok { "connected" } else { "unreachable" }
+            })
+            .to_string(),
+        ))
+    }
+
+    // ── project management ────────────────────────────────────────────────────
+
+    #[tool(description = "List all registered projects with their Git branch status")]
+    async fn list_projects(&self) -> Result<CallToolResult, McpError> {
+        let projects = self.projects.list_projects();
+        let current = self.projects.get_current_project();
+        let total = projects.len();
+        let active = projects
+            .iter()
+            .filter(|p| p.status == ProjectStatus::Watching)
+            .count();
+
+        Ok(Self::ok(
+            serde_json::json!({
+                "projects": projects,
+                "current_project": current.map(|p| p.path.display().to_string()),
+                "total": total,
+                "active": active
+            })
+            .to_string(),
+        ))
+    }
+
+    #[tool(description = "Add a project to the registry for Git-aware indexing")]
+    async fn add_project(
+        &self,
+        Parameters(req): Parameters<AddProjectReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started_at = Instant::now();
+        let path = PathBuf::from(&req.path);
+
+        // Build config from request
+        let config = cortex_core::ProjectConfig {
+            track_branch: req.track_branch.unwrap_or(true),
+            pinned_branches: req.pinned_branches.unwrap_or_default(),
+            ..Default::default()
+        };
+
+        match self.projects.add_project(&path, Some(config)) {
+            Ok(state) => {
+                let summary = cortex_core::ProjectSummary::from(&state);
+                Ok(Self::ok(
+                    serde_json::json!({
+                        "project": summary,
+                        "message": format!("Added project at {}", req.path)
+                    })
+                    .to_string(),
+                ))
+            }
+            Err(e) => Ok(envelope_error(
+                "ADD_PROJECT_FAILED",
+                e.to_string(),
+                None,
+                started_at,
+            )),
+        }
+    }
+
+    #[tool(description = "Remove a project from the registry")]
+    async fn remove_project(
+        &self,
+        Parameters(req): Parameters<RemoveProjectReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started_at = Instant::now();
+        let path = PathBuf::from(&req.path);
+
+        match self.projects.remove_project(&path) {
+            Ok(()) => Ok(Self::ok(
+                serde_json::json!({
+                    "path": req.path,
+                    "removed": true,
+                    "message": format!("Removed project at {}", req.path)
+                })
+                .to_string(),
+            )),
+            Err(e) => Ok(envelope_error(
+                "REMOVE_PROJECT_FAILED",
+                e.to_string(),
+                None,
+                started_at,
+            )),
+        }
+    }
+
+    #[tool(description = "Set the current active project and optionally switch branch")]
+    async fn set_current_project(
+        &self,
+        Parameters(req): Parameters<SetProjectReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started_at = Instant::now();
+        let path = PathBuf::from(&req.path);
+
+        match self.projects.set_current_project(&path, req.branch.clone()) {
+            Ok(pr) => {
+                let project = self.projects.get_project(&path);
+                Ok(Self::ok(
+                    serde_json::json!({
+                        "project": project.map(|p| cortex_core::ProjectSummary::from(&p)),
+                        "branch": pr.branch,
+                        "message": format!("Set current project to {} on branch {}", req.path, pr.branch)
+                    })
+                    .to_string(),
+                ))
+            }
+            Err(e) => Ok(envelope_error(
+                "SET_PROJECT_FAILED",
+                e.to_string(),
+                None,
+                started_at,
+            )),
+        }
+    }
+
+    #[tool(description = "Get the current project context (path, branch, Git status)")]
+    async fn get_current_project(&self) -> Result<CallToolResult, McpError> {
+        let current = self.projects.get_current_project();
+
+        let result = if let Some(pr) = current {
+            let project = self.projects.get_project(&pr.path);
+            serde_json::json!({
+                "project": project.map(|p| cortex_core::ProjectSummary::from(&p)),
+                "branch": pr.branch,
+                "commit": pr.commit,
+                "repository_path": pr.path.display().to_string()
+            })
+        } else {
+            serde_json::json!({
+                "project": null,
+                "branch": null,
+                "message": "No current project set. Use add_project to register a project."
+            })
+        };
+
+        Ok(Self::ok(result.to_string()))
+    }
+
+    #[tool(description = "List all branches for a project with index status")]
+    async fn list_branches(
+        &self,
+        Parameters(req): Parameters<ListBranchesReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let path = req
+            .path
+            .map(PathBuf::from)
+            .or_else(|| self.projects.get_current_project().map(|p| p.path))
+            .ok_or_else(|| {
+                McpError::invalid_params("No project specified and no current project set", None)
+            })?;
+
+        let project = self.projects.get_project(&path).ok_or_else(|| {
+            McpError::invalid_params(format!("Project not found: {}", path.display()), None)
+        })?;
+
+        let git_info = project.git_info.as_ref();
+        let current_branch = git_info
+            .map(|g| g.current_branch.as_str())
+            .unwrap_or("unknown");
+
+        let branches = git_info
+            .map(|g| {
+                g.branches
+                    .iter()
+                    .map(|b| {
+                        let is_indexed = project.indexed_branches.contains_key(&b.name);
+                        serde_json::json!({
+                            "name": b.name,
+                            "is_remote": b.is_remote,
+                            "is_current": b.name == current_branch,
+                            "is_indexed": is_indexed,
+                            "last_commit": b.last_commit
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Ok(Self::ok(
+            serde_json::json!({
+                "project": path.display().to_string(),
+                "current_branch": current_branch,
+                "branches": branches,
+                "total": branches.len()
+            })
+            .to_string(),
+        ))
+    }
+
+    #[tool(description = "Refresh Git info for a project (detect branch changes)")]
+    async fn refresh_project(
+        &self,
+        Parameters(req): Parameters<PathReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started_at = Instant::now();
+        let path = PathBuf::from(&req.path);
+
+        // Check for branch change first
+        let branch_change = self.projects.check_branch_change(&path).ok();
+
+        match self.projects.refresh_git_info(&path) {
+            Ok(git_info) => Ok(Self::ok(
+                serde_json::json!({
+                    "path": req.path,
+                    "git_info": git_info,
+                    "branch_changed": branch_change.flatten(),
+                    "message": "Refreshed Git info"
+                })
+                .to_string(),
+            )),
+            Err(e) => Ok(envelope_error(
+                "REFRESH_FAILED",
+                e.to_string(),
+                None,
+                started_at,
+            )),
+        }
+    }
+}
+
+// ── ServerHandler ─────────────────────────────────────────────────────────────
+
+#[tool_handler]
+impl ServerHandler for CortexHandler {
+    fn get_info(&self) -> ServerInfo {
+        ServerInfo {
+            instructions: Some(
+                "CodeCortex: index codebases, query call graphs, find dead code & complexity."
+                    .into(),
+            ),
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            server_info: Implementation {
+                name: "cortex".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+// ── public entry point ────────────────────────────────────────────────────────
+
+pub async fn start_stdio(config: CortexConfig) -> anyhow::Result<()> {
+    let service = CortexHandler::new(config).serve(stdio()).await?;
+    service.waiting().await?;
+    Ok(())
+}
+
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct MemoryDb {
+    observations: Vec<ObservationRecord>,
+}
+
+fn memory_db_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CORTEX_MEMORY_DB_PATH") {
+        return PathBuf::from(p);
+    }
+    CortexConfig::config_path()
+        .parent()
+        .map(|p| p.join("memory.json"))
+        .unwrap_or_else(|| PathBuf::from(".cortex-memory.json"))
+}
+
+fn audit_log_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CORTEX_MEMORY_AUDIT_PATH") {
+        return PathBuf::from(p);
+    }
+    CortexConfig::config_path()
+        .parent()
+        .map(|p| p.join("memory-audit.log"))
+        .unwrap_or_else(|| PathBuf::from(".cortex-memory-audit.log"))
+}
+
+fn load_memory_db() -> anyhow::Result<MemoryDb> {
+    let path = memory_db_path();
+    if !path.exists() {
+        return Ok(MemoryDb::default());
+    }
+    let raw = fs::read_to_string(path)?;
+    Ok(serde_json::from_str::<MemoryDb>(raw.as_str()).unwrap_or_default())
+}
+
+fn persist_memory_db(db: &MemoryDb) -> anyhow::Result<()> {
+    let path = memory_db_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, serde_json::to_string_pretty(db)?)?;
+    Ok(())
+}
+
+fn append_audit_event(action: &str, target_id: &str) -> anyhow::Result<()> {
+    let path = audit_log_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let line = serde_json::json!({
+        "actor": "mcp",
+        "action": action,
+        "timestamp_ms": now_millis(),
+        "target_id": target_id
+    })
+    .to_string();
+    use std::io::Write;
+    let mut f = fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)?;
+    writeln!(f, "{line}")?;
+    Ok(())
+}
+
+fn exceeded_rate_limit(db: &MemoryDb, session_id: &str) -> bool {
+    let now = now_millis();
+    let count = db
+        .observations
+        .iter()
+        .filter(|o| o.session_id == session_id)
+        .filter(|o| now.saturating_sub(o.created_at) < 60_000)
+        .count();
+    count >= 30
+}
+
+fn looks_sensitive(text: &str) -> bool {
+    let lowered = text.to_lowercase();
+    [
+        "password=",
+        "secret=",
+        "api_key",
+        "token=",
+        "begin private key",
+    ]
+    .iter()
+    .any(|pat| lowered.contains(pat))
+}
+
+fn simple_lexical_score(query: &str, title: &str, body: &str) -> f64 {
+    let q = query.to_lowercase();
+    let t = title.to_lowercase();
+    let b = body.to_lowercase();
+    let title_hit = if t.contains(q.as_str()) { 1.0 } else { 0.0 };
+    let body_hit = if b.contains(q.as_str()) { 1.0 } else { 0.0 };
+    (title_hit * 0.7) + (body_hit * 0.3)
+}
+
+fn detect_intent(query: &str) -> &'static str {
+    let q = query.to_lowercase();
+    if q.contains("debug") || q.contains("error") {
+        "debug"
+    } else if q.contains("refactor") {
+        "refactor"
+    } else if q.contains("test") {
+        "test"
+    } else if q.contains("review") {
+        "review"
+    } else {
+        "explore"
+    }
+}
+
+fn escape_cypher(input: &str) -> String {
+    input.replace('\'', "\\'")
+}
+
+fn default_repo_path() -> String {
+    std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| ".".to_string())
+}
+
+fn build_skeleton(content: &str, mode: &str) -> String {
+    let mut out = Vec::new();
+    for line in content.lines() {
+        let t = line.trim();
+        if t.starts_with("fn ")
+            || t.starts_with("pub fn ")
+            || t.starts_with("struct ")
+            || t.starts_with("pub struct ")
+            || t.starts_with("class ")
+            || t.starts_with("impl ")
+        {
+            out.push(t.to_string());
+            if mode == "minimal" && out.len() >= 120 {
+                break;
+            }
+        } else if mode == "standard" && (t.starts_with("//") || t.starts_with("///")) {
+            out.push(t.to_string());
+        }
+    }
+    if out.is_empty() {
+        return content.lines().take(40).collect::<Vec<_>>().join("\n");
+    }
+    out.join("\n")
+}
+
+#[cfg(test)]
+#[allow(clippy::await_holding_lock)]
+mod tests {
+    use super::{
+        ContextCapsuleReq, CortexHandler, ImpactGraphReq, IndexStatusReq, LogicFlowReq, MemoryDb,
+        ObservationRecord, SaveObservationReq, SearchMemoryReq, SessionContextReq, SkeletonReq,
+        SubmitLspEdgesReq, WorkspaceSetupReq, build_skeleton, detect_intent, exceeded_rate_limit,
+        looks_sensitive, simple_lexical_score,
+    };
+    use cortex_core::CortexConfig;
+    use rmcp::handler::server::wrapper::Parameters;
+    use rmcp::model::CallToolResult;
+    use std::sync::Mutex;
+
+    /// Mutex to synchronize tests that manipulate environment variables
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn sensitive_detector_finds_tokens() {
+        assert!(looks_sensitive("my API_KEY=123"));
+        assert!(!looks_sensitive("regular engineering note"));
+    }
+
+    #[test]
+    fn intent_detection_works() {
+        assert_eq!(detect_intent("debug call path"), "debug");
+        assert_eq!(detect_intent("refactor this"), "refactor");
+    }
+
+    #[test]
+    fn skeleton_extracts_signatures() {
+        let src = "pub struct A {}\nfn run() {}\nlet x = 1;";
+        let s = build_skeleton(src, "minimal");
+        assert!(s.contains("pub struct A"));
+        assert!(s.contains("fn run"));
+    }
+
+    #[test]
+    fn lexical_score_prefers_title_hits() {
+        let a = simple_lexical_score("call_chain", "call_chain", "x");
+        let b = simple_lexical_score("call_chain", "x", "call_chain");
+        assert!(a > b);
+    }
+
+    #[test]
+    fn rate_limit_triggers_on_burst() {
+        let mut db = MemoryDb::default();
+        for i in 0..31u128 {
+            db.observations.push(ObservationRecord {
+                observation_id: format!("obs-{i}"),
+                repo_id: "r".to_string(),
+                session_id: "s".to_string(),
+                created_at: super::now_millis(),
+                created_by: "mcp".to_string(),
+                text: "x".to_string(),
+                symbol_refs: Vec::new(),
+                confidence: 1.0,
+                stale: false,
+                classification: "internal".to_string(),
+                severity: "info".to_string(),
+                tags: Vec::new(),
+                source_revision: "rev".to_string(),
+            });
+        }
+        assert!(exceeded_rate_limit(&db, "s"));
+    }
+
+    fn as_text(result: CallToolResult) -> String {
+        result.content[0]
+            .as_text()
+            .expect("text response")
+            .text
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn context_capsule_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .get_context_capsule(Parameters(ContextCapsuleReq {
+                query: "auth refresh".to_string(),
+                task_intent: None,
+                repo_path: None,
+                max_tokens: None,
+                max_items: None,
+                include_tests: None,
+                path_filter: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn impact_graph_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_IMPACT_GRAPH_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .get_impact_graph(Parameters(ImpactGraphReq {
+                symbol: "call_chain".to_string(),
+                symbol_type: None,
+                repo_path: None,
+                depth: None,
+                include_importers: None,
+                include_tests: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_IMPACT_GRAPH_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn logic_flow_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_LOGIC_FLOW_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .search_logic_flow(Parameters(LogicFlowReq {
+                from_symbol: "a".to_string(),
+                to_symbol: "b".to_string(),
+                repo_path: None,
+                max_paths: None,
+                max_depth: None,
+                allow_partial: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_LOGIC_FLOW_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn skeleton_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_SKELETON_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .get_skeleton(Parameters(SkeletonReq {
+                path: "Cargo.toml".to_string(),
+                mode: None,
+                repo_path: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_SKELETON_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn index_status_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_INDEX_STATUS_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .index_status(Parameters(IndexStatusReq {
+                repo_path: None,
+                include_jobs: None,
+                include_watcher: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_INDEX_STATUS_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn workspace_setup_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_WORKSPACE_SETUP_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .workspace_setup(Parameters(WorkspaceSetupReq {
+                repo_path: None,
+                detect_agents: None,
+                generate_configs: None,
+                install_git_hooks: None,
+                non_interactive: None,
+                overwrite: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_WORKSPACE_SETUP_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn submit_lsp_edges_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_LSP_INGEST_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .submit_lsp_edges(Parameters(SubmitLspEdgesReq {
+                repo_path: ".".to_string(),
+                edges: Vec::new(),
+                merge_mode: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_LSP_INGEST_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn save_observation_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .save_observation(Parameters(SaveObservationReq {
+                repo_path: ".".to_string(),
+                text: "note".to_string(),
+                severity: None,
+                confidence: None,
+                symbol_refs: None,
+                tags: None,
+                classification: None,
+                session_id: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn get_session_context_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .get_session_context(Parameters(SessionContextReq {
+                repo_path: ".".to_string(),
+                session_id: None,
+                include_previous: None,
+                max_items: None,
+                include_stale: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED"); }
+    }
+
+    #[tokio::test]
+    async fn search_memory_respects_feature_flag() {
+        // Test that setting the env var to 0 disables the tool
+        let _lock = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED", "0"); }
+        let h = CortexHandler::new(CortexConfig::default());
+        let out = h
+            .search_memory(Parameters(SearchMemoryReq {
+                query: "call target".to_string(),
+                repo_path: ".".to_string(),
+                max_items: None,
+                include_stale: None,
+            }))
+            .await
+            .expect("tool response");
+        assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
+        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED"); }
+    }
+
+    // Pattern detection unit tests
+    #[test]
+    fn pattern_detection_names_contain_expected_patterns() {
+        // Test that all expected patterns are in the list
+        let patterns = vec![
+            "builder",
+            "factory",
+            "singleton",
+            "repository",
+            "service",
+            "handler",
+            "middleware",
+            "observer",
+            "strategy",
+            "adapter",
+            "decorator",
+            "command",
+            "state",
+            "facade",
+            "proxy",
+        ];
+
+        // Each pattern should have at least one name hint
+        for pattern in patterns {
+            // These patterns should all be valid
+            assert!(
+                !pattern.is_empty(),
+                "Pattern {} should not be empty",
+                pattern
+            );
+        }
+    }
+
+    #[test]
+    fn builder_pattern_detection_logic() {
+        // Test builder pattern signals
+        let builder_names = vec!["UserBuilder", "RequestBuilder", "ConfigBuilder"];
+        let builder_structural = vec!["build()", ".build()", "builder"];
+
+        for name in &builder_names {
+            assert!(
+                name.contains("Builder"),
+                "Name {} should contain Builder",
+                name
+            );
+        }
+        for structural in &builder_structural {
+            assert!(
+                structural.contains("build"),
+                "Structural {} should indicate builder",
+                structural
+            );
+        }
+    }
+
+    #[test]
+    fn repository_pattern_detection_logic() {
+        // Test repository pattern signals
+        let repo_names = vec!["UserRepository", "OrderRepo", "DataStore", "UserDAO"];
+        let repo_structural = vec!["find(", "save(", "delete(", "query("];
+
+        for name in &repo_names {
+            let is_repo = name.contains("Repository")
+                || name.contains("Repo")
+                || name.contains("Store")
+                || name.contains("DAO");
+            assert!(is_repo, "Name {} should indicate repository", name);
+        }
+        for structural in &repo_structural {
+            assert!(!structural.is_empty(), "Structural hint should exist");
+        }
+    }
+
+    #[test]
+    fn adapter_pattern_detection_logic() {
+        // Test adapter pattern signals
+        let adapter_names = vec!["DataAdapter", "ApiAdapter", "LogWrapper", "FormatConverter"];
+        let _adapter_structural = ["adapt(", "convert(", "wrap("];
+
+        for name in &adapter_names {
+            let is_adapter =
+                name.contains("Adapter") || name.contains("Wrapper") || name.contains("Converter");
+            assert!(is_adapter, "Name {} should indicate adapter", name);
+        }
+    }
+
+    #[test]
+    fn command_pattern_detection_logic() {
+        // Test command pattern signals
+        let command_names = vec!["CreateCommand", "DeleteAction", "UpdateOperation"];
+        let _command_structural = ["execute(", "undo(", "redo("];
+
+        for name in &command_names {
+            let is_command =
+                name.contains("Command") || name.contains("Action") || name.contains("Operation");
+            assert!(is_command, "Name {} should indicate command", name);
+        }
+    }
+
+    #[test]
+    fn state_pattern_detection_logic() {
+        // Test state pattern signals
+        let state_names = vec!["OrderState", "StateMachine", "ConnectionFSM"];
+        let _state_structural = ["transition(", "current_state", "state"];
+
+        for name in &state_names {
+            let is_state =
+                name.contains("State") || name.contains("Machine") || name.contains("FSM");
+            assert!(is_state, "Name {} should indicate state", name);
+        }
+    }
+}

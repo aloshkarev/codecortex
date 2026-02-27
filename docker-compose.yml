@@ -1,0 +1,21 @@
+services:
+  memgraph:
+    image: memgraph/memgraph:2.19.0
+    ports:
+      - "7687:7687"
+      - "7444:7444"
+    volumes:
+      - memgraph_data:/var/lib/memgraph
+    command:
+      - "--also-log-to-stderr=true"
+      - "--query-modules-directory=/usr/lib/memgraph/query_modules"
+
+  memgraph_lab:
+    image: memgraph/lab:2.11.1
+    ports:
+      - "3000:3000"
+    depends_on:
+      - memgraph
+
+volumes:
+  memgraph_data:
