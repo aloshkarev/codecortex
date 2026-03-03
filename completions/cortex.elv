@@ -18,11 +18,11 @@ set edit:completion:arg-completer[cortex] = {|@words|
     }
     var completions = [
         &'cortex'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
             cand -V 'Print version'
             cand --version 'Print version'
             cand setup 'setup'
@@ -44,45 +44,57 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand debug 'debug'
             cand completion 'Generate shell completion scripts'
             cand interactive 'Start interactive REPL mode'
+            cand capsule 'Get context capsule for a symbol'
+            cand impact 'Get impact graph for a symbol'
+            cand refactor 'Analyze refactoring suggestions for a symbol'
+            cand patterns 'Find design patterns in codebase'
+            cand test 'Find tests for a symbol'
+            cand diagnose 'Run diagnostic checks'
+            cand memory 'Memory operations'
+            cand project 'Project management operations'
+            cand skeleton 'Get skeleton (compressed view) of a file'
+            cand signature 'Get signature of a symbol'
+            cand search 'Semantic code search using vector embeddings'
+            cand vector-index 'Index code for vector search'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;setup'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;doctor'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;mcp'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
             cand start 'start'
             cand tools 'tools'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;mcp;start'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;mcp;tools'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;mcp;help'= {
             cand start 'start'
@@ -96,33 +108,33 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;mcp;help;help'= {
         }
         &'cortex;index'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand --force 'force'
-            cand --json 'json'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;watch'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;unwatch'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;find'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
             cand name 'name'
             cand pattern 'pattern'
             cand type 'type'
@@ -132,46 +144,46 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;find;name'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;find;pattern'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;find;type'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;find;content'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;find;decorator'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;find;argument'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;find;help'= {
             cand name 'name'
@@ -197,11 +209,11 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;find;help;help'= {
         }
         &'cortex;analyze'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
             cand callers 'callers'
             cand callees 'callees'
             cand chain 'chain'
@@ -213,62 +225,62 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;analyze;callers'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;analyze;callees'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;analyze;chain'= {
             cand --depth 'depth'
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;analyze;hierarchy'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;analyze;deps'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;analyze;dead-code'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;analyze;complexity'= {
             cand --top 'top'
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;analyze;overrides'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;analyze;help'= {
             cand callers 'callers'
@@ -300,29 +312,29 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;analyze;help;help'= {
         }
         &'cortex;bundle'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
             cand export 'export'
             cand import 'import'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;bundle;export'= {
             cand --repo 'repo'
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;bundle;import'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;bundle;help'= {
             cand export 'export'
@@ -336,36 +348,36 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;bundle;help;help'= {
         }
         &'cortex;config'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
             cand show 'show'
             cand set 'set'
             cand reset 'reset'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;config;show'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;config;set'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;config;reset'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;config;help'= {
             cand show 'show'
@@ -382,63 +394,63 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;config;help;help'= {
         }
         &'cortex;clean'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;list'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;delete'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;stats'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;query'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;jobs'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
             cand list 'list'
             cand status 'status'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;jobs;list'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;jobs;status'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;jobs;help'= {
             cand list 'list'
@@ -452,11 +464,11 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;jobs;help;help'= {
         }
         &'cortex;debug'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
             cand capsule 'Debug context capsule building for a symbol'
             cand cache 'Show cache statistics'
             cand trace 'Trace query execution'
@@ -465,36 +477,36 @@ set edit:completion:arg-completer[cortex] = {|@words|
         }
         &'cortex;debug;capsule'= {
             cand --max-items 'Maximum items in capsule'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand --explain 'Explain the capsule building process'
-            cand --json 'json'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;debug;cache'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand --clear 'Clear the cache'
-            cand --json 'json'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;debug;trace'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'Enable verbose output'
             cand --verbose 'Enable verbose output'
-            cand --json 'json'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;debug;validate'= {
             cand --repo 'Repository path to validate'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand --fix 'Fix issues automatically'
-            cand --json 'json'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;debug;help'= {
             cand capsule 'Debug context capsule building for a symbol'
@@ -514,18 +526,270 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;debug;help;help'= {
         }
         &'cortex;completion'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;interactive'= {
-            cand --json 'json'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
-            cand -h 'Print help'
-            cand --help 'Print help'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;capsule'= {
+            cand --max-items 'Maximum items in capsule'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;impact'= {
+            cand --depth 'Maximum depth to traverse'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;refactor'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;patterns'= {
+            cand --pattern-type 'Filter by pattern type (singleton, factory, observer, etc.)'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;test'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;diagnose'= {
+            cand --component 'Check specific component'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;memory'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+            cand save 'Save an observation'
+            cand search 'Search observations'
+            cand context 'Get session context'
+            cand list 'List all observations'
+            cand clear 'Clear all observations'
+            cand help 'Print this message or the help of the given subcommand(s)'
+        }
+        &'cortex;memory;save'= {
+            cand --classification 'Classification (architecture, decision, pattern, issue, note)'
+            cand --severity 'Severity (low, medium, high, critical)'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;memory;search'= {
+            cand --limit 'Maximum results'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;memory;context'= {
+            cand --session 'Session ID (optional)'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;memory;list'= {
+            cand --classification 'Filter by classification'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;memory;clear'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;memory;help'= {
+            cand save 'Save an observation'
+            cand search 'Search observations'
+            cand context 'Get session context'
+            cand list 'List all observations'
+            cand clear 'Clear all observations'
+            cand help 'Print this message or the help of the given subcommand(s)'
+        }
+        &'cortex;memory;help;save'= {
+        }
+        &'cortex;memory;help;search'= {
+        }
+        &'cortex;memory;help;context'= {
+        }
+        &'cortex;memory;help;list'= {
+        }
+        &'cortex;memory;help;clear'= {
+        }
+        &'cortex;memory;help;help'= {
+        }
+        &'cortex;project'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+            cand list 'List all registered projects'
+            cand add 'Add a project to the registry'
+            cand remove 'Remove a project from the registry'
+            cand set 'Set the current active project'
+            cand current 'Get the current active project'
+            cand branches 'List branches for a project'
+            cand refresh 'Refresh Git info for a project'
+            cand help 'Print this message or the help of the given subcommand(s)'
+        }
+        &'cortex;project;list'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;add'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand --track-branch 'Whether to track branch changes'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;remove'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;set'= {
+            cand --branch 'Branch to use (optional, defaults to current)'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;current'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;branches'= {
+            cand --path 'Path to the project (optional, uses current)'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;refresh'= {
+            cand --path 'Path to the project (optional, uses current)'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;help'= {
+            cand list 'List all registered projects'
+            cand add 'Add a project to the registry'
+            cand remove 'Remove a project from the registry'
+            cand set 'Set the current active project'
+            cand current 'Get the current active project'
+            cand branches 'List branches for a project'
+            cand refresh 'Refresh Git info for a project'
+            cand help 'Print this message or the help of the given subcommand(s)'
+        }
+        &'cortex;project;help;list'= {
+        }
+        &'cortex;project;help;add'= {
+        }
+        &'cortex;project;help;remove'= {
+        }
+        &'cortex;project;help;set'= {
+        }
+        &'cortex;project;help;current'= {
+        }
+        &'cortex;project;help;branches'= {
+        }
+        &'cortex;project;help;refresh'= {
+        }
+        &'cortex;project;help;help'= {
+        }
+        &'cortex;skeleton'= {
+            cand --mode 'Skeleton mode (minimal, standard, full)'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;signature'= {
+            cand --repo 'Repository path filter'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand --include-related 'Include related symbols'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;search'= {
+            cand --limit 'Number of results to return'
+            cand --search-type 'Search type (semantic, structural, hybrid)'
+            cand --repo 'Filter by repository path'
+            cand --path 'Filter by file path pattern'
+            cand --kind 'Filter by symbol kind (function, class, method, etc.)'
+            cand --language 'Filter by language'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;vector-index'= {
+            cand --repo 'Repository path for metadata'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand --force 'Force reindex'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;help'= {
             cand setup 'setup'
@@ -547,6 +811,18 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand debug 'debug'
             cand completion 'Generate shell completion scripts'
             cand interactive 'Start interactive REPL mode'
+            cand capsule 'Get context capsule for a symbol'
+            cand impact 'Get impact graph for a symbol'
+            cand refactor 'Analyze refactoring suggestions for a symbol'
+            cand patterns 'Find design patterns in codebase'
+            cand test 'Find tests for a symbol'
+            cand diagnose 'Run diagnostic checks'
+            cand memory 'Memory operations'
+            cand project 'Project management operations'
+            cand skeleton 'Get skeleton (compressed view) of a file'
+            cand signature 'Get signature of a symbol'
+            cand search 'Semantic code search using vector embeddings'
+            cand vector-index 'Index code for vector search'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;help;setup'= {
@@ -667,6 +943,66 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;help;completion'= {
         }
         &'cortex;help;interactive'= {
+        }
+        &'cortex;help;capsule'= {
+        }
+        &'cortex;help;impact'= {
+        }
+        &'cortex;help;refactor'= {
+        }
+        &'cortex;help;patterns'= {
+        }
+        &'cortex;help;test'= {
+        }
+        &'cortex;help;diagnose'= {
+        }
+        &'cortex;help;memory'= {
+            cand save 'Save an observation'
+            cand search 'Search observations'
+            cand context 'Get session context'
+            cand list 'List all observations'
+            cand clear 'Clear all observations'
+        }
+        &'cortex;help;memory;save'= {
+        }
+        &'cortex;help;memory;search'= {
+        }
+        &'cortex;help;memory;context'= {
+        }
+        &'cortex;help;memory;list'= {
+        }
+        &'cortex;help;memory;clear'= {
+        }
+        &'cortex;help;project'= {
+            cand list 'List all registered projects'
+            cand add 'Add a project to the registry'
+            cand remove 'Remove a project from the registry'
+            cand set 'Set the current active project'
+            cand current 'Get the current active project'
+            cand branches 'List branches for a project'
+            cand refresh 'Refresh Git info for a project'
+        }
+        &'cortex;help;project;list'= {
+        }
+        &'cortex;help;project;add'= {
+        }
+        &'cortex;help;project;remove'= {
+        }
+        &'cortex;help;project;set'= {
+        }
+        &'cortex;help;project;current'= {
+        }
+        &'cortex;help;project;branches'= {
+        }
+        &'cortex;help;project;refresh'= {
+        }
+        &'cortex;help;skeleton'= {
+        }
+        &'cortex;help;signature'= {
+        }
+        &'cortex;help;search'= {
+        }
+        &'cortex;help;vector-index'= {
         }
         &'cortex;help;help'= {
         }

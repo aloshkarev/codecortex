@@ -87,20 +87,18 @@
 mod debounce;
 pub mod filter;
 pub mod perf;
-pub mod remote;
 mod registry;
+pub mod remote;
 mod watcher;
 
-pub use debounce::{
-    DebounceConfig, DebouncedEvent, EventPriority, FileEventKind, SmartDebouncer,
-};
+pub use debounce::{DebounceConfig, DebouncedEvent, EventPriority, FileEventKind, SmartDebouncer};
 pub use filter::{
     EventFilter, EventFilterBuilder, FilterConfig, FilterRule, FilterStats, WatchEventKind,
 };
 pub use perf::{
-    AdaptivePoller, BackpressureController, BackpressureStats, BoundedEventQueue,
-    PerfConfig, PerfStats, PerformanceManager, ResourceMonitor,
+    AdaptivePoller, BackpressureController, BackpressureStats, BoundedEventQueue, PerfConfig,
+    PerfStats, PerformanceManager, ResourceMonitor,
 };
-pub use remote::{is_remote_path, RemoteFsConfig, RemoteFsType};
 pub use registry::{ProjectRegistry, RegistryError};
-pub use watcher::WatchSession;
+pub use remote::{RemoteFsConfig, RemoteFsType, is_remote_path};
+pub use watcher::{SmartWatchConfig, SmartWatchSession, WatchSession};

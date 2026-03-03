@@ -1,12 +1,12 @@
 # cortex-mcp
 
-Model Context Protocol server implementation with 41 production-ready tools.
+Model Context Protocol server implementation with 40 production-ready tools.
 
 ## Overview
 
 This crate implements the MCP server for CodeCortex, providing AI assistants with powerful code intelligence capabilities.
 
-## Tool Categories (41 Tools)
+## Tool Categories (40 Tools)
 
 ### Code Retrieval (4 tools)
 | Tool | Description | p95 Latency |
@@ -57,7 +57,7 @@ This crate implements the MCP server for CodeCortex, providing AI assistants wit
 | `list_branches` | List Git branches |
 | `refresh_project` | Refresh Git state |
 
-### Other Tools (16 tools)
+### Other Tools (15 tools)
 - LSP Integration: `submit_lsp_edges`, `workspace_setup`
 - Repository: `add_code_to_graph`, `list_indexed_repositories`, `delete_repository`, `get_repository_stats`
 - Bundle: `load_bundle`, `export_bundle`
@@ -88,14 +88,15 @@ assert!(matches!(health, QualityHealthStatus::Excellent | QualityHealthStatus::G
 ## Usage
 
 ```rust
+use cortex_core::config::CortexConfig;
 use cortex_mcp::CortexHandler;
 
-// Create handler with graph client
-let handler = CortexHandler::new(graph_client);
+// Create handler with configuration
+let _handler = CortexHandler::new(CortexConfig::default());
 
 // Get all tool names
 let tools = cortex_mcp::tool_names();
-assert_eq!(tools.len(), 41);
+assert_eq!(tools.len(), 40);
 ```
 
 ## Feature Flags
@@ -134,4 +135,4 @@ Run tests with:
 cargo test -p cortex-mcp -- --test-threads=1
 ```
 
-Current test count: **137 tests**
+Current test count: **143 tests**

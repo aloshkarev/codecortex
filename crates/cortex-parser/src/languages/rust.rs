@@ -19,6 +19,18 @@ const DEF_QUERY: &str = r#"
 
 (trait_item
   name: (type_identifier) @name) @trait_entity
+
+(impl_item
+  type: (type_identifier) @name) @impl_entity
+
+(type_item
+  name: (type_identifier) @name) @type_alias_entity
+
+(const_item
+  name: (identifier) @name) @const_entity
+
+(macro_definition
+  name: (identifier) @name) @macro_entity
 "#;
 
 const CALL_QUERY: &str = r#"
@@ -97,6 +109,34 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
             name: def_q.capture_index_for_name("name").unwrap_or(1),
             kind: EntityKind::Trait,
         },
+        DefCaptures {
+            entity: def_q
+                .capture_index_for_name("impl_entity")
+                .unwrap_or(u32::MAX),
+            name: def_q.capture_index_for_name("name").unwrap_or(1),
+            kind: EntityKind::Module,
+        },
+        DefCaptures {
+            entity: def_q
+                .capture_index_for_name("type_alias_entity")
+                .unwrap_or(u32::MAX),
+            name: def_q.capture_index_for_name("name").unwrap_or(1),
+            kind: EntityKind::TypeAlias,
+        },
+        DefCaptures {
+            entity: def_q
+                .capture_index_for_name("const_entity")
+                .unwrap_or(u32::MAX),
+            name: def_q.capture_index_for_name("name").unwrap_or(1),
+            kind: EntityKind::Constant,
+        },
+        DefCaptures {
+            entity: def_q
+                .capture_index_for_name("macro_entity")
+                .unwrap_or(u32::MAX),
+            name: def_q.capture_index_for_name("name").unwrap_or(1),
+            kind: EntityKind::Macro,
+        },
     ];
 
     extract_all(
@@ -129,4 +169,193 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
             var: var_q.capture_index_for_name("var").unwrap_or(0),
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    fn parse_rust(source: &str) -> tree_sitter::Tree {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_rust::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    #[test]
+    fn test_parse_function() {
+        let source = r#"
+            fn main() {
+                println!("hello");
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("main.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "main" && n.kind == EntityKind::Function)
+        );
+    }
+
+    #[test]
+    fn test_parse_struct() {
+        let source = r#"
+            struct Point {
+                x: i32,
+                y: i32,
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("point.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "Point" && n.kind == EntityKind::Struct)
+        );
+    }
+
+    #[test]
+    fn test_parse_enum() {
+        let source = r#"
+            enum Color {
+                Red,
+                Green,
+                Blue,
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("color.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "Color" && n.kind == EntityKind::Enum)
+        );
+    }
+
+    #[test]
+    fn test_parse_trait() {
+        let source = r#"
+            trait Drawable {
+                fn draw(&self);
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("drawable.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "Drawable" && n.kind == EntityKind::Trait)
+        );
+    }
+
+    #[test]
+    fn test_parse_impl() {
+        let source = r#"
+            struct Point;
+            impl Point {
+                fn new() -> Self { Point }
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("point.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "Point" && n.kind == EntityKind::Module)
+        );
+    }
+
+    #[test]
+    fn test_parse_type_alias() {
+        let source = r#"
+            type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("result.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "Result" && n.kind == EntityKind::TypeAlias)
+        );
+    }
+
+    #[test]
+    fn test_parse_const() {
+        let source = r#"
+            const MAX_SIZE: usize = 1024;
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("config.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "MAX_SIZE" && n.kind == EntityKind::Constant)
+        );
+    }
+
+    #[test]
+    fn test_parse_macro() {
+        let source = r#"
+            macro_rules! vec_of_strings {
+                ($($x:expr),*) => {
+                    vec![$($x.to_string()),*]
+                };
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("macros.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "vec_of_strings" && n.kind == EntityKind::Macro)
+        );
+    }
+
+    #[test]
+    fn test_parse_trait_impl() {
+        let source = r#"
+            struct Point;
+            trait Drawable { fn draw(&self); }
+            impl Drawable for Point {
+                fn draw(&self) {}
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("point.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(
+            result
+                .edges
+                .iter()
+                .any(|e| matches!(e.kind, EdgeKind::Implements))
+        );
+    }
 }

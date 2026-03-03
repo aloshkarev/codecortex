@@ -11,6 +11,132 @@ pub fn compute_cyclomatic_complexity(source: &str) -> u32 {
     complexity
 }
 
+/// Compute cognitive complexity (Nesting-aware complexity metric)
+///
+/// Cognitive complexity increments for:
+/// - Control structures (if, for, while, switch, catch)
+/// - Nesting levels (incremented for each nested level)
+/// - Logical operators (&&, ||) but not at the top level
+///
+/// See: https://www.sonarsource.com/resources/cognitive-complexity/
+pub fn compute_cognitive_complexity(source: &str) -> u32 {
+    let mut complexity = 0u32;
+    let mut nesting_level = 0u32;
+    let chars: Vec<char> = source.chars().collect();
+
+    let mut i = 0;
+    while i < chars.len() {
+        // Check for control structures that increase complexity
+        let remaining: String = chars[i..].iter().collect();
+        let trimmed = remaining.trim_start();
+
+        // Check for if statements
+        if trimmed.starts_with("if ") || trimmed.starts_with("if(") {
+            complexity += 1 + nesting_level;
+            nesting_level += 1;
+        }
+        // Check for else if (don't double count)
+        else if trimmed.starts_with("else if") {
+            complexity += 1; // No nesting increment for else-if chain
+        }
+        // Check for else
+        else if trimmed.starts_with("else") && !trimmed.starts_with("else if") {
+            // else alone doesn't add complexity, but we track for nesting
+        }
+        // Check for loops
+        else if trimmed.starts_with("for ")
+            || trimmed.starts_with("for(")
+            || trimmed.starts_with("while ")
+            || trimmed.starts_with("while(")
+        {
+            complexity += 1 + nesting_level;
+            nesting_level += 1;
+        }
+        // Check for switch/match/case
+        else if trimmed.starts_with("switch ")
+            || trimmed.starts_with("switch(")
+            || trimmed.starts_with("match ")
+            || trimmed.starts_with("match(")
+        {
+            complexity += 1 + nesting_level;
+            nesting_level += 1;
+        } else if trimmed.starts_with("case ") {
+            complexity += 1;
+        }
+        // Check for catch
+        else if trimmed.starts_with("catch ") || trimmed.starts_with("catch(") {
+            complexity += 1 + nesting_level;
+            nesting_level += 1;
+        }
+        // Check for try (not counted, but starts a block)
+        else if trimmed.starts_with("try ") || trimmed.starts_with("try{") {
+            nesting_level += 1;
+        }
+
+        // Track nesting level via braces
+        if chars[i] == '{' {
+            // Already handled control structures
+        } else if chars[i] == '}' && nesting_level > 0 {
+            nesting_level = nesting_level.saturating_sub(1);
+        }
+
+        // Check for logical operators (add complexity for && and ||)
+        if i + 1 < chars.len() {
+            if chars[i] == '&' && chars[i + 1] == '&' {
+                complexity += 1;
+                i += 1; // Skip next char
+            } else if chars[i] == '|' && chars[i + 1] == '|' {
+                complexity += 1;
+                i += 1; // Skip next char
+            }
+        }
+
+        // Check for ternary operator
+        if chars[i] == '?' {
+            complexity += 1 + nesting_level;
+        }
+
+        i += 1;
+    }
+
+    complexity
+}
+
+/// Complexity rating based on cognitive complexity value
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComplexityRating {
+    /// Simple (0-5)
+    Simple,
+    /// Moderate (6-10)
+    Moderate,
+    /// Complex (11-20)
+    Complex,
+    /// VeryComplex (21+)
+    VeryComplex,
+}
+
+impl ComplexityRating {
+    /// Get rating from cognitive complexity value
+    pub fn from_complexity(value: u32) -> Self {
+        match value {
+            0..=5 => Self::Simple,
+            6..=10 => Self::Moderate,
+            11..=20 => Self::Complex,
+            _ => Self::VeryComplex,
+        }
+    }
+
+    /// Get a human-readable name
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Simple => "simple",
+            Self::Moderate => "moderate",
+            Self::Complex => "complex",
+            Self::VeryComplex => "very_complex",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +228,109 @@ mod tests {
         let source = "switch x { case 1: a; case 2: b; }";
         // 1 base + 2 "case " = 3
         assert_eq!(compute_cyclomatic_complexity(source), 3);
+    }
+
+    #[test]
+    fn cognitive_complexity_simple() {
+        let source = "fn main() { println!(\"hello\"); }";
+        // No control structures = 0
+        let complexity = compute_cognitive_complexity(source);
+        assert_eq!(complexity, 0);
+    }
+
+    #[test]
+    fn cognitive_complexity_with_if() {
+        let source = "fn test() { if x > 0 { y } }";
+        // Contains an if statement
+        let complexity = compute_cognitive_complexity(source);
+        assert!(
+            complexity >= 1,
+            "Expected complexity >= 1, got {}",
+            complexity
+        );
+    }
+
+    #[test]
+    fn cognitive_complexity_nested_if() {
+        let source = "fn test() { if x { if y { z } } }";
+        // Nested ifs should have higher complexity than single if
+        let nested_complexity = compute_cognitive_complexity(source);
+        let single_complexity = compute_cognitive_complexity("fn test() { if x { y } }");
+        assert!(
+            nested_complexity > single_complexity,
+            "Nested complexity ({}) should be > single complexity ({})",
+            nested_complexity,
+            single_complexity
+        );
+    }
+
+    #[test]
+    fn cognitive_complexity_deeply_nested() {
+        let source = "fn test() { if a { if b { if c { d } } } }";
+        // Deeply nested should have higher complexity than shallow
+        let deep_complexity = compute_cognitive_complexity(source);
+        let shallow_complexity = compute_cognitive_complexity("fn test() { if a { b } }");
+        assert!(
+            deep_complexity > shallow_complexity,
+            "Deep complexity ({}) should be > shallow complexity ({})",
+            deep_complexity,
+            shallow_complexity
+        );
+    }
+
+    #[test]
+    fn complexity_rating_simple() {
+        assert_eq!(
+            ComplexityRating::from_complexity(3),
+            ComplexityRating::Simple
+        );
+        assert_eq!(
+            ComplexityRating::from_complexity(0),
+            ComplexityRating::Simple
+        );
+    }
+
+    #[test]
+    fn complexity_rating_moderate() {
+        assert_eq!(
+            ComplexityRating::from_complexity(6),
+            ComplexityRating::Moderate
+        );
+        assert_eq!(
+            ComplexityRating::from_complexity(10),
+            ComplexityRating::Moderate
+        );
+    }
+
+    #[test]
+    fn complexity_rating_complex() {
+        assert_eq!(
+            ComplexityRating::from_complexity(11),
+            ComplexityRating::Complex
+        );
+        assert_eq!(
+            ComplexityRating::from_complexity(20),
+            ComplexityRating::Complex
+        );
+    }
+
+    #[test]
+    fn complexity_rating_very_complex() {
+        assert_eq!(
+            ComplexityRating::from_complexity(21),
+            ComplexityRating::VeryComplex
+        );
+        assert_eq!(
+            ComplexityRating::from_complexity(100),
+            ComplexityRating::VeryComplex
+        );
+    }
+
+    #[test]
+    fn complexity_rating_as_str() {
+        assert_eq!(ComplexityRating::Simple.as_str(), "simple");
+        assert_eq!(ComplexityRating::Moderate.as_str(), "moderate");
+        assert_eq!(ComplexityRating::Complex.as_str(), "complex");
+        assert_eq!(ComplexityRating::VeryComplex.as_str(), "very_complex");
     }
 }

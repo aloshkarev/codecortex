@@ -144,7 +144,7 @@ docker run -d \
   -p 7687:7687 \
   -p 7444:7444 \
   -v memgraph_data:/var/lib/memgraph \
-  memgraph/memgraph:2.19.0 \
+  memgraph/memgraph:3.8.1 \
   --also-log-to-stderr=true
 
 # Verify it's running
@@ -464,7 +464,7 @@ docker ps | grep memgraph
 docker start memgraph
 
 # Or start fresh
-docker run -d --name memgraph -p 7687:7687 memgraph/memgraph:2.19.0
+docker run -d --name memgraph -p 7687:7687 memgraph/memgraph:3.8.1
 ```
 
 #### "Permission denied" on Linux

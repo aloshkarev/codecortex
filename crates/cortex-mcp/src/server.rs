@@ -28,7 +28,9 @@ impl McpServer {
     pub fn start_stdio(&self) -> Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
-        let rt = Runtime::new().expect("tokio runtime");
+        let rt = Runtime::new().map_err(|e| cortex_core::CortexError::Runtime(
+            format!("Failed to create tokio runtime: {}", e)
+        ))?;
 
         for line in stdin.lock().lines().map_while(|r| r.ok()) {
             let req: Value = serde_json::from_str(&line).unwrap_or_else(|_| json!({}));

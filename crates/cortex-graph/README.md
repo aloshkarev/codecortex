@@ -103,4 +103,18 @@ Run tests with:
 cargo test -p cortex-graph -- --test-threads=1
 ```
 
-Current test count: **53 tests**
+Current test count: **84 tests**
+
+## Security
+
+All query methods use parameterized queries to prevent Cypher injection:
+
+```rust
+// Safe: uses parameterized query
+let results = engine.callers("user_input").await?;
+
+// Also safe: GraphClient methods
+let results = client
+    .query_with_param("MATCH (n) WHERE n.name = $name RETURN n", "name", user_input)
+    .await?;
+```

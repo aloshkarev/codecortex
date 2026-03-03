@@ -34,7 +34,7 @@
 //!
 //! let registry = ParserRegistry::new();
 //! let parser = registry.parser_for_path(Path::new("src/main.rs")).unwrap();
-//! let result = parser.parse("fn main() {}");
+//! let result = parser.parse("fn main() {}", Path::new("src/main.rs"));
 //! ```
 //!
 //! ## Feature Flags

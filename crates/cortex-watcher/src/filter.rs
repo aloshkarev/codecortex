@@ -7,8 +7,8 @@
 //! - Path-based inclusion/exclusion
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 use std::collections::HashSet;
+use std::path::Path;
 
 /// Types of file system events
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -105,7 +105,9 @@ impl FilterRule {
                 if !prefix.is_empty() && !path_str.starts_with(prefix) {
                     // Check if any path component matches
                     let matches_prefix = path.components().any(|c| {
-                        c.as_os_str().to_string_lossy().starts_with(prefix.trim_start_matches('/'))
+                        c.as_os_str()
+                            .to_string_lossy()
+                            .starts_with(prefix.trim_start_matches('/'))
                     });
                     if !matches_prefix && !path_str.contains(prefix) {
                         return false;
@@ -114,10 +116,11 @@ impl FilterRule {
 
                 // Check suffix
                 if !suffix.is_empty() {
-                    return path_str.ends_with(suffix) ||
-                           path.extension()
-                               .map(|e| suffix.contains(&e.to_string_lossy().to_string()))
-                               .unwrap_or(false);
+                    return path_str.ends_with(suffix)
+                        || path
+                            .extension()
+                            .map(|e| suffix.contains(&e.to_string_lossy().to_string()))
+                            .unwrap_or(false);
                 }
 
                 return true;
@@ -127,24 +130,26 @@ impl FilterRule {
         // Handle extension patterns like *.rs
         if self.pattern.starts_with("*.") && !self.pattern.contains('*') {
             let ext = &self.pattern[2..];
-            return path.extension()
+            return path
+                .extension()
                 .map(|e| e.to_string_lossy() == ext)
                 .unwrap_or(false);
         }
 
         // Handle patterns with wildcards like *test*
         if self.pattern.starts_with('*') && self.pattern.ends_with('*') && self.pattern.len() > 2 {
-            let middle = &self.pattern[1..self.pattern.len()-1];
+            let middle = &self.pattern[1..self.pattern.len() - 1];
             return path_str.contains(middle);
         }
 
         // Handle prefix patterns like test*
         if self.pattern.ends_with('*') && self.pattern.len() > 1 {
-            let prefix = &self.pattern[..self.pattern.len()-1];
-            return path_str.starts_with(prefix) ||
-                   path.file_name()
-                       .map(|n| n.to_string_lossy().starts_with(prefix))
-                       .unwrap_or(false);
+            let prefix = &self.pattern[..self.pattern.len() - 1];
+            return path_str.starts_with(prefix)
+                || path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().starts_with(prefix))
+                    .unwrap_or(false);
         }
 
         // Handle suffix patterns like *test
@@ -156,9 +161,9 @@ impl FilterRule {
         // Handle directory patterns like target/
         if self.pattern.ends_with('/') {
             let dir = &self.pattern[..self.pattern.len() - 1];
-            return path.components().any(|c| {
-                c.as_os_str().to_string_lossy() == dir
-            });
+            return path
+                .components()
+                .any(|c| c.as_os_str().to_string_lossy() == dir);
         }
 
         // Exact match or contains
@@ -494,10 +499,16 @@ mod tests {
         assert!(filter.should_process(Path::new("src/main.rs"), WatchEventKind::Modified));
 
         // Should exclude node_modules
-        assert!(!filter.should_process(Path::new("node_modules/package/index.js"), WatchEventKind::Modified));
+        assert!(!filter.should_process(
+            Path::new("node_modules/package/index.js"),
+            WatchEventKind::Modified
+        ));
 
         // Should exclude .pyc files
-        assert!(!filter.should_process(Path::new("__pycache__/module.pyc"), WatchEventKind::Modified));
+        assert!(!filter.should_process(
+            Path::new("__pycache__/module.pyc"),
+            WatchEventKind::Modified
+        ));
     }
 
     #[test]

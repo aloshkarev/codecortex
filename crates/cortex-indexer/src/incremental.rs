@@ -213,8 +213,7 @@ impl IncrementalIndexer {
             std::fs::create_dir_all(parent)?;
         }
 
-        let json = serde_json::to_string_pretty(&self.hash_cache)
-            .map_err(std::io::Error::other)?;
+        let json = serde_json::to_string_pretty(&self.hash_cache).map_err(std::io::Error::other)?;
         std::fs::write(&self.cache_path, json)
     }
 
@@ -225,8 +224,8 @@ impl IncrementalIndexer {
         }
 
         let content = std::fs::read_to_string(&self.cache_path)?;
-        let cache: HashMap<String, HashEntry> = serde_json::from_str(&content)
-            .map_err(std::io::Error::other)?;
+        let cache: HashMap<String, HashEntry> =
+            serde_json::from_str(&content).map_err(std::io::Error::other)?;
 
         self.hash_cache = cache;
         Ok(())
@@ -254,9 +253,8 @@ impl IncrementalIndexer {
     pub fn prune_missing_files(&mut self) -> usize {
         let before = self.hash_cache.len();
 
-        self.hash_cache.retain(|path, _| {
-            PathBuf::from(path).exists()
-        });
+        self.hash_cache
+            .retain(|path, _| PathBuf::from(path).exists());
 
         before - self.hash_cache.len()
     }
@@ -338,15 +336,13 @@ impl GitAwareIncremental {
             .output();
 
         match output {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter_map(|line| {
-                        let path = repo_path.join(line.trim());
-                        if path.exists() { Some(path) } else { None }
-                    })
-                    .collect()
-            }
+            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|line| {
+                    let path = repo_path.join(line.trim());
+                    if path.exists() { Some(path) } else { None }
+                })
+                .collect(),
             _ => Vec::new(),
         }
     }

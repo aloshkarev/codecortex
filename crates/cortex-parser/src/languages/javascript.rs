@@ -46,8 +46,7 @@ const INHERIT_QUERY: &str = r#"
 (class_declaration
   name: (identifier) @child
   (class_heritage
-    (extends_clause
-      (identifier) @parent))
+    (identifier) @parent)
 )
 "#;
 

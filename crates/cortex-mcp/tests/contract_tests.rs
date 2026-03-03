@@ -82,13 +82,10 @@ mod schema_validation {
 
     fn validate_envelope(json: &Value) -> Result<(), String> {
         let schema: Value = serde_json::from_str(ENVELOPE_SCHEMA).map_err(|e| e.to_string())?;
-        let compiled = jsonschema::JSONSchema::compile(&schema).map_err(|e| e.to_string())?;
+        let compiled = jsonschema::validator_for(&schema).map_err(|e| e.to_string())?;
         let result = compiled.validate(json);
-        if let Err(errors) = result {
-            let error_messages: Vec<String> = errors
-                .map(|e: jsonschema::ValidationError| e.to_string())
-                .collect();
-            return Err(format!("Validation errors: {}", error_messages.join(", ")));
+        if let Err(error) = result {
+            return Err(format!("Validation error: {}", error));
         }
         Ok(())
     }

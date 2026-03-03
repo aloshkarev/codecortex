@@ -9,15 +9,21 @@ pub enum EntityKind {
     Directory,
     File,
     Function,
+    Method,
     Class,
     Struct,
     Trait,
     Interface,
     Enum,
+    EnumVariant,
     Macro,
     Variable,
+    Constant,
     Parameter,
+    TypeAlias,
     Module,
+    Property,
+    Field,
 }
 
 impl EntityKind {
@@ -28,15 +34,21 @@ impl EntityKind {
             Self::Directory => "Directory",
             Self::File => "File",
             Self::Function => "Function",
+            Self::Method => "Method",
             Self::Class => "Class",
             Self::Struct => "Struct",
             Self::Trait => "Trait",
             Self::Interface => "Interface",
             Self::Enum => "Enum",
+            Self::EnumVariant => "EnumVariant",
             Self::Macro => "Macro",
             Self::Variable => "Variable",
+            Self::Constant => "Constant",
             Self::Parameter => "Parameter",
+            Self::TypeAlias => "TypeAlias",
             Self::Module => "Module",
+            Self::Property => "Property",
+            Self::Field => "Field",
         }
     }
 }
@@ -51,6 +63,15 @@ pub enum EdgeKind {
     Implements,
     HasParameter,
     DefinedIn,
+    References,
+    Uses,
+    Throws,
+    Returns,
+    HasField,
+    HasMethod,
+    HasProperty,
+    Documents,
+    Annotates,
 }
 
 impl EdgeKind {
@@ -64,6 +85,15 @@ impl EdgeKind {
             Self::Implements => "IMPLEMENTS",
             Self::HasParameter => "HAS_PARAMETER",
             Self::DefinedIn => "DEFINED_IN",
+            Self::References => "REFERENCES",
+            Self::Uses => "USES",
+            Self::Throws => "THROWS",
+            Self::Returns => "RETURNS",
+            Self::HasField => "HAS_FIELD",
+            Self::HasMethod => "HAS_METHOD",
+            Self::HasProperty => "HAS_PROPERTY",
+            Self::Documents => "DOCUMENTS",
+            Self::Annotates => "ANNOTATES",
         }
     }
 }
@@ -124,15 +154,21 @@ mod tests {
         assert_eq!(EntityKind::Directory.cypher_label(), "Directory");
         assert_eq!(EntityKind::File.cypher_label(), "File");
         assert_eq!(EntityKind::Function.cypher_label(), "Function");
+        assert_eq!(EntityKind::Method.cypher_label(), "Method");
         assert_eq!(EntityKind::Class.cypher_label(), "Class");
         assert_eq!(EntityKind::Struct.cypher_label(), "Struct");
         assert_eq!(EntityKind::Trait.cypher_label(), "Trait");
         assert_eq!(EntityKind::Interface.cypher_label(), "Interface");
         assert_eq!(EntityKind::Enum.cypher_label(), "Enum");
+        assert_eq!(EntityKind::EnumVariant.cypher_label(), "EnumVariant");
         assert_eq!(EntityKind::Macro.cypher_label(), "Macro");
         assert_eq!(EntityKind::Variable.cypher_label(), "Variable");
+        assert_eq!(EntityKind::Constant.cypher_label(), "Constant");
         assert_eq!(EntityKind::Parameter.cypher_label(), "Parameter");
+        assert_eq!(EntityKind::TypeAlias.cypher_label(), "TypeAlias");
         assert_eq!(EntityKind::Module.cypher_label(), "Module");
+        assert_eq!(EntityKind::Property.cypher_label(), "Property");
+        assert_eq!(EntityKind::Field.cypher_label(), "Field");
     }
 
     #[test]
@@ -144,6 +180,15 @@ mod tests {
         assert_eq!(EdgeKind::Implements.cypher_rel_type(), "IMPLEMENTS");
         assert_eq!(EdgeKind::HasParameter.cypher_rel_type(), "HAS_PARAMETER");
         assert_eq!(EdgeKind::DefinedIn.cypher_rel_type(), "DEFINED_IN");
+        assert_eq!(EdgeKind::References.cypher_rel_type(), "REFERENCES");
+        assert_eq!(EdgeKind::Uses.cypher_rel_type(), "USES");
+        assert_eq!(EdgeKind::Throws.cypher_rel_type(), "THROWS");
+        assert_eq!(EdgeKind::Returns.cypher_rel_type(), "RETURNS");
+        assert_eq!(EdgeKind::HasField.cypher_rel_type(), "HAS_FIELD");
+        assert_eq!(EdgeKind::HasMethod.cypher_rel_type(), "HAS_METHOD");
+        assert_eq!(EdgeKind::HasProperty.cypher_rel_type(), "HAS_PROPERTY");
+        assert_eq!(EdgeKind::Documents.cypher_rel_type(), "DOCUMENTS");
+        assert_eq!(EdgeKind::Annotates.cypher_rel_type(), "ANNOTATES");
     }
 
     #[test]

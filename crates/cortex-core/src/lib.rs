@@ -64,8 +64,10 @@ pub mod language;
 pub mod model;
 pub mod project;
 
-pub use complexity::compute_cyclomatic_complexity;
-pub use config::CortexConfig;
+pub use complexity::{
+    ComplexityRating, compute_cognitive_complexity, compute_cyclomatic_complexity,
+};
+pub use config::{CortexConfig, LlmConfig, PoolConfig, VectorConfig};
 pub use error::{CortexError, Result};
 pub use git::{
     BlameLine, BranchDiff, CommitInfo, FileChangeType, FileDiff, GitError, GitOperations,

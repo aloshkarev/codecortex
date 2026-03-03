@@ -1,6 +1,6 @@
 //! # CodeCortex MCP Server Library
 //!
-//! Model Context Protocol server implementation with 41 production-ready tools.
+//! Model Context Protocol server implementation with 40 production-ready tools.
 //!
 //! ## Overview
 //!
@@ -16,18 +16,18 @@
 //!
 //! ## Tool Categories
 //!
-//! | Category | Tools | Count |
-//! |----------|-------|-------|
-//! | Code Retrieval | get_context_capsule, find_code, get_skeleton, get_signature | 4 |
-//! | Impact Analysis | get_impact_graph, search_logic_flow, find_dead_code | 3 |
-//! | Code Quality | calculate_cyclomatic_complexity, find_tests, analyze_refactoring, find_patterns | 4 |
-//! | Diagnostics | diagnose, check_health, index_status, explain_result | 4 |
-//! | Memory System | save_observation, get_session_context, search_memory | 3 |
-//! | Project Management | list/add/remove/set/get projects, list_branches, refresh | 7 |
-//! | LSP Integration | submit_lsp_edges, workspace_setup | 2 |
-//! | Repository Ops | add_code_to_graph, list/delete repos, get_stats, bundles | 6 |
-//! | Watch System | watch/unwatch_directory, list_watched_paths | 3 |
-//! | Advanced | execute_cypher_query, analyze_code_relationships, jobs | 5 |
+//! | Category | Tools |
+//! |----------|-------|
+//! | Code Retrieval | get_context_capsule, find_code, get_skeleton, get_signature |
+//! | Impact Analysis | get_impact_graph, search_logic_flow, find_dead_code |
+//! | Code Quality | calculate_cyclomatic_complexity, find_tests, analyze_refactoring, find_patterns |
+//! | Diagnostics | diagnose, check_health, index_status, explain_result |
+//! | Memory System | save_observation, get_session_context, search_memory |
+//! | Project Management | list/add/remove/set/get projects, list_branches, refresh |
+//! | LSP Integration | submit_lsp_edges, workspace_setup |
+//! | Repository Ops | add_code_to_graph, list/delete repos, get_stats, bundles |
+//! | Watch System | watch/unwatch_directory, list_watched_paths |
+//! | Advanced | execute_cypher_query, analyze_code_relationships, jobs |
 //!
 //! ## Performance SLOs
 //!
@@ -42,13 +42,14 @@
 //!
 //! ```rust,no_run
 //! use cortex_mcp::CortexHandler;
+//! use cortex_core::config::CortexConfig;
 //!
 //! // The handler implements the MCP server protocol
-//! let handler = CortexHandler::new(/* graph_client */);
+//! let handler = CortexHandler::new(CortexConfig::default());
 //!
 //! // Tools are automatically registered and available to MCP clients
 //! let tools = cortex_mcp::tool_names();
-//! assert_eq!(tools.len(), 41);
+//! assert_eq!(tools.len(), 40);
 //! ```
 //!
 //! ## Quality Metrics
@@ -117,12 +118,12 @@ pub use metrics::{
     HealthCheck, HealthCheckStatus, HealthChecker, HealthStatus, LatencySnapshot, MetricsRegistry,
     MetricsSnapshot, TimerGuard, global_metrics,
 };
+pub use quality::{
+    QualityConfig, QualityHealthStatus, QualityRegistry, QualitySummaryReport, QualityTimer,
+    ToolQualityMetrics,
+};
 pub use telemetry::{TelemetryCollector, TelemetryRegistry, ToolTelemetry};
 pub use tfidf::{Document, TfIdfScorer, tokenize};
-pub use quality::{
-    QualityConfig, QualityHealthStatus, QualityRegistry, QualitySummaryReport,
-    QualityTimer, ToolQualityMetrics,
-};
 
 /// Names of all tools this server exposes.
 pub fn tool_names() -> &'static [&'static str] {

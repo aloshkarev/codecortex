@@ -74,6 +74,7 @@
 pub mod backend;
 pub mod bundle;
 pub mod client;
+pub mod memgraph;
 pub mod migration;
 pub mod pool;
 pub mod query_engine;
@@ -85,7 +86,8 @@ pub mod writer;
 pub use backend::{BackendConfig, BackendKind, BackendStats, QueryOptions, QueryResult};
 pub use bundle::BundleStore;
 pub use client::GraphClient;
-pub use migration::{Migration, MigrationManager, MigrationResult, CURRENT_VERSION, MIGRATIONS};
+pub use memgraph::MemgraphClient;
+pub use migration::{CURRENT_VERSION, MIGRATIONS, Migration, MigrationManager, MigrationResult};
 pub use pool::{ConnectionPool, PoolConfig, PoolStats, PooledConnection};
 pub use query_engine::{AnalysisQuery, QueryEngine};
 pub use schema::{

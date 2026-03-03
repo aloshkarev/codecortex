@@ -15,6 +15,19 @@ const DEF_QUERY: &str = r#"
   name: (identifier) @name) @class_entity
 "#;
 
+const DECORATOR_QUERY: &str = r#"
+(decorator
+  (identifier) @decorator)
+
+(decorator
+  (attribute
+    attribute: (identifier) @decorator))
+
+(decorated_definition
+  (decorator
+    (identifier) @decorator))
+"#;
+
 const CALL_QUERY: &str = r#"
 (call
   function: (identifier) @call)

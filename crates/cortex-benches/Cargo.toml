@@ -10,7 +10,7 @@ publish = false
 cortex-mcp = { path = "../cortex-mcp" }
 cortex-indexer = { path = "../cortex-indexer" }
 cortex-core = { path = "../cortex-core" }
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "capsule_benchmark"

@@ -1,112 +1,277 @@
+//! Graph Database Client
+//!
+//! This module provides a unified client for graph databases, supporting both
+//! Memgraph (via rsmgclient) and Neo4j (via neo4rs).
+
+use crate::backend::BackendKind;
+use crate::memgraph::MemgraphClient;
 use crate::schema;
 use anyhow::Context;
 use cortex_core::{CodeEdge, CodeNode, CortexConfig, CortexError, Repository, Result};
-use neo4rs::{Graph, Node, Relation, query};
-use serde_json::{Map, Value};
+use neo4rs::{ConfigBuilder, Graph, query};
+use serde_json::Value;
 use std::sync::Arc;
+use tracing::{debug, info, instrument, warn};
 
+/// Internal driver enum to hold either Memgraph or Neo4j connection
+enum GraphDriver {
+    /// Memgraph connection using rsmgclient
+    Memgraph(MemgraphClient),
+    /// Neo4j connection using neo4rs
+    Neo4j(Arc<Graph>),
+}
+
+/// Unified graph database client supporting multiple backends
 #[derive(Clone)]
 pub struct GraphClient {
-    graph: Arc<Graph>,
+    driver: Arc<GraphDriver>,
+    backend: BackendKind,
 }
 
 impl GraphClient {
-    pub async fn connect(config: &CortexConfig) -> Result<Self> {
-        let graph = Graph::new(
-            config.memgraph_uri.as_str(),
-            config.memgraph_user.as_str(),
-            config.memgraph_password.as_str(),
-        )
-        .await
-        .map_err(|e| CortexError::Database(e.to_string()))?;
+    /// Detect backend type from configuration
+    fn detect_backend(config: &CortexConfig) -> BackendKind {
+        // Check environment variable override first
+        if let Ok(backend_type) = std::env::var("CORTEX_BACKEND_TYPE") {
+            let backend_lower = backend_type.to_lowercase();
+            if backend_lower == "neo4j" {
+                debug!("Backend type explicitly set to Neo4j via CORTEX_BACKEND_TYPE");
+                return BackendKind::Neo4j;
+            } else if backend_lower == "memgraph" {
+                debug!("Backend type explicitly set to Memgraph via CORTEX_BACKEND_TYPE");
+                return BackendKind::Memgraph;
+            }
+        }
 
-        let client = Self {
-            graph: Arc::new(graph),
+        // Config override is the next priority (used by quickstart/install defaults).
+        let configured = config.backend_type.trim().to_lowercase();
+        if configured == "neo4j" {
+            debug!("Backend type set to Neo4j via config.backend_type");
+            return BackendKind::Neo4j;
+        }
+        if configured == "memgraph" {
+            debug!("Backend type set to Memgraph via config.backend_type");
+            return BackendKind::Memgraph;
+        }
+
+        // Detect from URI
+        BackendKind::from_uri(&config.memgraph_uri)
+    }
+
+    /// Connect to a graph database
+    #[instrument(skip(config), fields(uri = %config.memgraph_uri))]
+    pub async fn connect(config: &CortexConfig) -> Result<Self> {
+        let backend = Self::detect_backend(config);
+        info!(uri = %config.memgraph_uri, backend = ?backend, "Connecting to graph database");
+
+        let driver = match backend {
+            BackendKind::Memgraph => {
+                debug!("Using Memgraph driver (rsmgclient)");
+                let client = MemgraphClient::connect(config).await?;
+                Arc::new(GraphDriver::Memgraph(client))
+            }
+            BackendKind::Neo4j | BackendKind::Neptune | BackendKind::Other => {
+                debug!("Using Neo4j driver (neo4rs)");
+                let graph = ConfigBuilder::default()
+                    .uri(config.memgraph_uri.as_str())
+                    .user(config.memgraph_user.as_str())
+                    .password(config.memgraph_password.as_str())
+                    .build()
+                    .map_err(|e| {
+                        warn!(error = %e.to_string(), "Failed to build database config");
+                        CortexError::Database(e.to_string())
+                    })?;
+
+                let graph =
+                    tokio::time::timeout(std::time::Duration::from_secs(10), Graph::connect(graph))
+                        .await
+                        .map_err(|e| CortexError::Database(format!("Connection timeout: {}", e)))?
+                        .map_err(|e| {
+                            warn!(error = %e.to_string(), "Failed to connect to graph database");
+                            CortexError::Database(e.to_string())
+                        })?;
+
+                Arc::new(GraphDriver::Neo4j(Arc::new(graph)))
+            }
         };
+
+        let client = Self { driver, backend };
         schema::ensure_constraints(&client).await?;
+        info!(backend = ?backend, "Successfully connected to graph database");
         Ok(client)
     }
 
-    pub fn inner(&self) -> Arc<Graph> {
-        Arc::clone(&self.graph)
+    /// Get the backend type
+    pub fn backend(&self) -> BackendKind {
+        self.backend
     }
 
+    /// Get the inner Neo4j graph if using Neo4j backend
+    pub fn inner_neo4j(&self) -> Option<Arc<Graph>> {
+        match self.driver.as_ref() {
+            GraphDriver::Neo4j(graph) => Some(Arc::clone(graph)),
+            GraphDriver::Memgraph(_) => None,
+        }
+    }
+
+    /// Execute a Cypher query without returning results
+    #[instrument(skip(self), fields(cypher_len = cypher.len()))]
     pub async fn run(&self, cypher: &str) -> Result<()> {
-        self.graph
-            .run(query(cypher))
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))?;
-        Ok(())
+        debug!(cypher = %cypher, "Executing cypher query");
+        match self.driver.as_ref() {
+            GraphDriver::Memgraph(client) => client.run(cypher).await,
+            GraphDriver::Neo4j(graph) => graph.run(query(cypher)).await.map_err(|e| {
+                warn!(error = %e.to_string(), "Cypher query failed");
+                CortexError::Database(e.to_string())
+            }),
+        }
     }
 
-    pub async fn raw_query(&self, cypher: &str) -> Result<Vec<serde_json::Value>> {
-        let mut result = self
-            .graph
-            .execute(query(cypher))
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))?;
-        let mut rows = Vec::new();
-        while let Ok(Some(row)) = result.next().await {
-            match row.to::<Value>() {
-                Ok(v) => rows.push(v),
-                Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+    /// Execute a Cypher query and return results as JSON
+    #[instrument(skip(self), fields(cypher_len = cypher.len()))]
+    pub async fn raw_query(&self, cypher: &str) -> Result<Vec<Value>> {
+        debug!(cypher = %cypher, "Executing raw query");
+        match self.driver.as_ref() {
+            GraphDriver::Memgraph(client) => client.raw_query(cypher).await,
+            GraphDriver::Neo4j(graph) => {
+                let mut result = graph.execute(query(cypher)).await.map_err(|e| {
+                    warn!(error = %e.to_string(), "Raw query failed");
+                    CortexError::Database(e.to_string())
+                })?;
+                let mut rows = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    match row.to::<Value>() {
+                        Ok(v) => rows.push(v),
+                        Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                    }
+                }
+                debug!(row_count = rows.len(), "Raw query completed");
+                Ok(rows)
             }
         }
-        Ok(rows)
     }
 
+    /// Execute a parameterized query with a single string parameter
+    pub async fn query_with_param(
+        &self,
+        cypher: &str,
+        param_name: &str,
+        param_value: &str,
+    ) -> Result<Vec<Value>> {
+        match self.driver.as_ref() {
+            GraphDriver::Memgraph(client) => {
+                client
+                    .query_with_param(cypher, param_name, param_value)
+                    .await
+            }
+            GraphDriver::Neo4j(graph) => {
+                let mut result = graph
+                    .execute(query(cypher).param(param_name, param_value.to_string()))
+                    .await
+                    .map_err(|e| CortexError::Database(e.to_string()))?;
+                let mut rows = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    match row.to::<Value>() {
+                        Ok(v) => rows.push(v),
+                        Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                    }
+                }
+                Ok(rows)
+            }
+        }
+    }
+
+    /// Execute a parameterized query with multiple string parameters
+    pub async fn query_with_params(
+        &self,
+        cypher: &str,
+        params: Vec<(&str, String)>,
+    ) -> Result<Vec<Value>> {
+        match self.driver.as_ref() {
+            GraphDriver::Memgraph(client) => client.query_with_params(cypher, params).await,
+            GraphDriver::Neo4j(graph) => {
+                let mut q = query(cypher);
+                for (name, value) in params {
+                    q = q.param(name, value);
+                }
+                let mut result = graph
+                    .execute(q)
+                    .await
+                    .map_err(|e| CortexError::Database(e.to_string()))?;
+                let mut rows = Vec::new();
+                while let Ok(Some(row)) = result.next().await {
+                    match row.to::<Value>() {
+                        Ok(v) => rows.push(v),
+                        Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                    }
+                }
+                Ok(rows)
+            }
+        }
+    }
+
+    /// Upsert a repository node
     pub async fn upsert_repository(&self, repository: &Repository) -> Result<()> {
         let repo_id = format!("repo:{}", repository.path);
-        let q = query(
-            "MERGE (r:Repository {path: $path})
+        let cypher = format!(
+            "MERGE (r:Repository {{path: $path}})
              SET r:CodeNode,
                  r.id = $id,
                  r.kind = 'Repository',
                  r.name = $name,
                  r.path = $path,
-                 r.watched = $watched",
-        )
-        .param("id", repo_id)
-        .param("path", repository.path.clone())
-        .param("name", repository.name.clone())
-        .param("watched", repository.watched);
-        self.graph
-            .run(q)
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))
+                 r.watched = toBoolean($watched)"
+        );
+        let params = vec![
+            ("id", repo_id.clone()),
+            ("path", repository.path.clone()),
+            ("name", repository.name.clone()),
+            ("watched", repository.watched.to_string()),
+        ];
+        self.query_with_params(&cypher, params).await?;
+        Ok(())
     }
 
+    /// Upsert a call target node
     pub async fn upsert_call_target(&self, id: &str, name: &str) -> Result<()> {
-        let q = query(
-            "MERGE (n:CallTarget {id: $id})
-             SET n:CodeNode, n.kind = 'CallTarget', n.name = $name",
-        )
-        .param("id", id.to_string())
-        .param("name", name.to_string());
-        self.graph
-            .run(q)
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))
+        let cypher = format!(
+            "MERGE (n:CallTarget {{id: $id}})
+             SET n:CodeNode, n.kind = 'CallTarget', n.name = $name"
+        );
+        let params = vec![("id", id.to_string()), ("name", name.to_string())];
+        self.query_with_params(&cypher, params).await?;
+        Ok(())
     }
 
+    /// List all repositories
     pub async fn list_repositories(&self) -> Result<Vec<Repository>> {
-        let mut result = self
-            .graph
-            .execute(query(
+        let rows = self
+            .raw_query(
                 "MATCH (r:Repository)
                  RETURN r.path AS path, r.name AS name, coalesce(r.watched, false) AS watched
                  ORDER BY r.path",
-            ))
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))?;
+            )
+            .await?;
 
         let mut repos = Vec::new();
-        while let Ok(Some(row)) = result.next().await {
-            let path: String = row.get("path").context("missing path").map_err(|e| {
-                CortexError::Database(format!("failed to decode repository path: {e}"))
-            })?;
-            let name: String = row.get("name").unwrap_or_default();
-            let watched: bool = row.get("watched").unwrap_or(false);
+        for row in rows {
+            let path: String = row
+                .get("path")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .context("missing path")
+                .map_err(|e| {
+                    CortexError::Database(format!("failed to decode repository path: {e}"))
+                })?;
+            let name: String = row
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_default();
+            let watched: bool = row
+                .get("watched")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             repos.push(Repository {
                 path,
                 name,
@@ -116,19 +281,19 @@ impl GraphClient {
         Ok(repos)
     }
 
+    /// Delete a repository and all its nodes
     pub async fn delete_repository(&self, repository_path: &str) -> Result<()> {
-        let q = query(
-            "MATCH (r:Repository {path: $path})
+        let cypher = format!(
+            "MATCH (r:Repository {{path: $path}})
              OPTIONAL MATCH (r)-[:CONTAINS*]->(n)
-             DETACH DELETE n, r",
-        )
-        .param("path", repository_path.to_string());
-        self.graph
-            .run(q)
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))
+             DETACH DELETE n, r"
+        );
+        self.query_with_param(&cypher, "path", repository_path)
+            .await?;
+        Ok(())
     }
 
+    /// Upsert a code node
     pub async fn upsert_node(&self, node: &CodeNode) -> Result<()> {
         let label = node.kind.cypher_label();
         let cyclomatic = node
@@ -136,105 +301,109 @@ impl GraphClient {
             .get("cyclomatic_complexity")
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(0);
-        let q = query(&format!(
+
+        let cypher = format!(
             "MERGE (n:{label} {{id: $id}})
              SET n:CodeNode,
                  n.kind = $kind, n.name = $name, n.path = $path,
-                 n.line_number = $line_number, n.lang = $lang,
+                 n.line_number = toInteger($line_number), n.lang = $lang,
                  n.source = $source, n.docstring = $docstring,
-                 n.cyclomatic_complexity = $cyclomatic_complexity,
+                 n.cyclomatic_complexity = toInteger($cyclomatic_complexity),
                  n.properties = $properties"
-        ))
-        .param("id", node.id.clone())
-        .param("kind", format!("{:?}", node.kind))
-        .param("name", node.name.clone())
-        .param("path", node.path.clone().unwrap_or_default())
-        .param("line_number", node.line_number.unwrap_or_default() as i64)
-        .param(
-            "lang",
-            node.lang
-                .map(|l| l.as_str().to_string())
-                .unwrap_or_default(),
-        )
-        .param("source", node.source.clone().unwrap_or_default())
-        .param("docstring", node.docstring.clone().unwrap_or_default())
-        .param("cyclomatic_complexity", cyclomatic)
-        .param(
-            "properties",
-            serde_json::to_string(&node.properties).unwrap_or_default(),
         );
-        self.graph
-            .run(q)
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))
+
+        let params = vec![
+            ("id", node.id.clone()),
+            ("kind", format!("{:?}", node.kind)),
+            ("name", node.name.clone()),
+            ("path", node.path.clone().unwrap_or_default()),
+            (
+                "line_number",
+                node.line_number.unwrap_or_default().to_string(),
+            ),
+            (
+                "lang",
+                node.lang
+                    .map(|l| l.as_str().to_string())
+                    .unwrap_or_default(),
+            ),
+            ("source", node.source.clone().unwrap_or_default()),
+            ("docstring", node.docstring.clone().unwrap_or_default()),
+            ("cyclomatic_complexity", cyclomatic.to_string()),
+            (
+                "properties",
+                serde_json::to_string(&node.properties).unwrap_or_default(),
+            ),
+        ];
+
+        self.query_with_params(&cypher, params).await?;
+        Ok(())
     }
 
+    /// Upsert an edge
     pub async fn upsert_edge(&self, edge: &CodeEdge) -> Result<()> {
         let rel_type = edge.kind.cypher_rel_type();
-        let q = query(&format!(
+        let cypher = format!(
             "MATCH (from {{id: $from}}), (to {{id: $to}})
              MERGE (from)-[r:{rel_type}]->(to)
              SET r.kind = $kind, r.properties = $properties"
-        ))
-        .param("from", edge.from.clone())
-        .param("to", edge.to.clone())
-        .param("kind", format!("{:?}", edge.kind))
-        .param(
-            "properties",
-            serde_json::to_string(&edge.properties).unwrap_or_default(),
         );
-        self.graph
-            .run(q)
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))
+
+        let params = vec![
+            ("from", edge.from.clone()),
+            ("to", edge.to.clone()),
+            ("kind", format!("{:?}", edge.kind)),
+            (
+                "properties",
+                serde_json::to_string(&edge.properties).unwrap_or_default(),
+            ),
+        ];
+
+        self.query_with_params(&cypher, params).await?;
+        Ok(())
     }
 
-    /// Resolves symbolic CALLS edges (to `:CallTarget` placeholders) into concrete
-    /// `(:Function)-[:CALLS]->(:Function)` edges for a repository.
+    /// Resolve call targets to concrete functions
     pub async fn resolve_call_targets(&self, repository_path: &str) -> Result<usize> {
-        let mut result = self
-            .graph
-            .execute(
-                query(
-                    "MATCH (caller)-[old:CALLS]->(ct:CallTarget)
-                     WHERE caller.path STARTS WITH $repo
-                     WITH caller, old, ct, coalesce(old.callee_name, ct.name) AS callee_name
-                     MATCH (callee:Function {name: callee_name})
-                     WHERE callee.path STARTS WITH $repo
-                     MERGE (caller)-[r:CALLS]->(callee)
-                     SET r.kind = 'Calls', r.properties = old.properties
-                     DELETE old
-                     RETURN count(r) AS resolved",
-                )
-                .param("repo", repository_path.to_string()),
-            )
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))?;
+        let cypher = format!(
+            "MATCH (caller)-[old:CALLS]->(ct:CallTarget)
+             WHERE caller.path STARTS WITH $repo
+             WITH caller, old, ct, coalesce(old.callee_name, ct.name) AS callee_name
+             MATCH (callee:Function {{name: callee_name}})
+             WHERE callee.path STARTS WITH $repo
+             MERGE (caller)-[r:CALLS]->(callee)
+             SET r.kind = 'Calls', r.properties = old.properties
+             DELETE old
+             RETURN count(r) AS resolved"
+        );
+
+        let rows = self
+            .query_with_param(&cypher, "repo", repository_path)
+            .await?;
 
         let mut resolved = 0usize;
-        while let Ok(Some(row)) = result.next().await {
-            if let Ok(count) = row.get::<i64>("resolved") {
-                resolved += count.max(0) as usize;
+        for row in rows {
+            if let Some(count) = row.get("resolved").and_then(|v| v.as_u64()) {
+                resolved += count as usize;
             }
         }
 
-        // Cleanup only placeholders that became orphaned after resolution.
-        self.graph
-            .run(query(
-                "MATCH (ct:CallTarget)
-                 WHERE NOT ()-[:CALLS]->(ct)
-                 DETACH DELETE ct",
-            ))
-            .await
-            .map_err(|e| CortexError::Database(e.to_string()))?;
+        // Cleanup orphaned call targets
+        self.run(
+            "MATCH (ct:CallTarget)
+             WHERE NOT ()-[:CALLS]->(ct)
+             DETACH DELETE ct",
+        )
+        .await?;
 
         Ok(resolved)
     }
 }
 
+/// Extract properties from a Neo4j node (for Neo4j backend compatibility)
 #[allow(dead_code)]
-pub(crate) fn extract_node_properties(node: &Node) -> Map<String, Value> {
-    let mut out = Map::new();
+pub(crate) fn extract_node_properties(node: &neo4rs::Node) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
     for key in node.keys() {
         if let Ok(v) = node.get::<String>(key) {
             out.insert(key.to_string(), Value::String(v));
@@ -261,9 +430,12 @@ pub(crate) fn extract_node_properties(node: &Node) -> Map<String, Value> {
     out
 }
 
+/// Extract properties from a Neo4j relationship (for Neo4j backend compatibility)
 #[allow(dead_code)]
-pub(crate) fn extract_relation_properties(rel: &Relation) -> Map<String, Value> {
-    let mut out = Map::new();
+pub(crate) fn extract_relation_properties(
+    rel: &neo4rs::Relation,
+) -> serde_json::Map<String, Value> {
+    let mut out = serde_json::Map::new();
     for key in rel.keys() {
         if let Ok(v) = rel.get::<String>(key) {
             out.insert(key.to_string(), Value::String(v));

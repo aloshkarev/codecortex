@@ -215,7 +215,7 @@ impl ConnectionPool {
     pub async fn health_check(&self) -> Result<bool> {
         let guard = self.get().await?;
         // Try a simple query
-        guard.client().raw_query("RETURN 1").await?;
+        guard.client()?.raw_query("RETURN 1").await?;
         Ok(true)
     }
 }
@@ -230,8 +230,13 @@ pub struct PoolConnectionGuard<'a> {
 
 impl<'a> PoolConnectionGuard<'a> {
     /// Get the underlying client
-    pub fn client(&self) -> &crate::GraphClient {
-        self.conn.as_ref().unwrap().client()
+    ///
+    /// Returns an error if the connection has been consumed or is no longer valid.
+    pub fn client(&self) -> Result<&crate::GraphClient> {
+        self.conn
+            .as_ref()
+            .map(|c| c.client())
+            .ok_or_else(|| CortexError::Database("Connection no longer available".to_string()))
     }
 }
 

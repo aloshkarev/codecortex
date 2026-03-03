@@ -129,7 +129,11 @@ impl DuplicationDetector {
         }
 
         // Sort by similarity descending
-        duplicates.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
+        duplicates.sort_by(|a, b| {
+            b.similarity
+                .partial_cmp(&a.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         duplicates
     }
@@ -289,13 +293,17 @@ impl DuplicationDetector {
     /// Normalize a token (replace identifiers with placeholders)
     fn normalize_token(&self, token: &str) -> String {
         // Check if it's an identifier (starts with letter or underscore)
-        if token.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_') {
+        if token
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphabetic() || c == '_')
+        {
             // Check if it's a keyword
             let keywords = [
-                "fn", "let", "const", "if", "else", "for", "while", "loop", "match",
-                "return", "struct", "enum", "impl", "trait", "pub", "mod", "use",
-                "def", "class", "import", "from", "as", "try", "except", "with",
-                "function", "var", "const", "let", "async", "await", "new", "this",
+                "fn", "let", "const", "if", "else", "for", "while", "loop", "match", "return",
+                "struct", "enum", "impl", "trait", "pub", "mod", "use", "def", "class", "import",
+                "from", "as", "try", "except", "with", "function", "var", "const", "let", "async",
+                "await", "new", "this",
             ];
 
             if keywords.contains(&token) {
@@ -343,7 +351,10 @@ impl DuplicationDetector {
     }
 
     /// Find exact duplicate lines
-    pub fn find_duplicate_lines(&self, sources: &[(String, String)]) -> Vec<(String, Vec<CodeLocation>)> {
+    pub fn find_duplicate_lines(
+        &self,
+        sources: &[(String, String)],
+    ) -> Vec<(String, Vec<CodeLocation>)> {
         let mut line_occurrences: HashMap<String, Vec<CodeLocation>> = HashMap::new();
 
         for (file_path, source) in sources {
@@ -355,7 +366,10 @@ impl DuplicationDetector {
                 };
 
                 // Skip empty lines and comments
-                if normalized.is_empty() || normalized.starts_with("//") || normalized.starts_with("#") {
+                if normalized.is_empty()
+                    || normalized.starts_with("//")
+                    || normalized.starts_with("#")
+                {
                     continue;
                 }
 
@@ -483,15 +497,21 @@ fn function_two() {
     #[test]
     fn duplication_percentage() {
         let detector = DuplicationDetector::new();
-        let duplicates = vec![
-            DuplicateBlock {
-                location1: CodeLocation { file_path: "a.rs".to_string(), start_line: 1, end_line: 10 },
-                location2: CodeLocation { file_path: "b.rs".to_string(), start_line: 1, end_line: 10 },
-                similarity: 0.9,
-                line_count: 10,
-                snippet: "...".to_string(),
+        let duplicates = vec![DuplicateBlock {
+            location1: CodeLocation {
+                file_path: "a.rs".to_string(),
+                start_line: 1,
+                end_line: 10,
             },
-        ];
+            location2: CodeLocation {
+                file_path: "b.rs".to_string(),
+                start_line: 1,
+                end_line: 10,
+            },
+            similarity: 0.9,
+            line_count: 10,
+            snippet: "...".to_string(),
+        }];
         let percentage = detector.duplication_percentage(&duplicates, 100);
         assert!((percentage - 10.0).abs() < 0.001);
     }
@@ -500,8 +520,14 @@ fn function_two() {
     fn find_duplicate_lines() {
         let detector = DuplicationDetector::new();
         let sources = vec![
-            ("a.rs".to_string(), "fn main() {}\nfn helper() {}".to_string()),
-            ("b.rs".to_string(), "fn main() {}\nfn other() {}".to_string()),
+            (
+                "a.rs".to_string(),
+                "fn main() {}\nfn helper() {}".to_string(),
+            ),
+            (
+                "b.rs".to_string(),
+                "fn main() {}\nfn other() {}".to_string(),
+            ),
         ];
         let duplicates = detector.find_duplicate_lines(&sources);
         assert!(!duplicates.is_empty());
@@ -536,8 +562,16 @@ fn function_two() {
     #[test]
     fn duplicate_block_serialization() {
         let block = DuplicateBlock {
-            location1: CodeLocation { file_path: "a.rs".to_string(), start_line: 1, end_line: 10 },
-            location2: CodeLocation { file_path: "b.rs".to_string(), start_line: 5, end_line: 15 },
+            location1: CodeLocation {
+                file_path: "a.rs".to_string(),
+                start_line: 1,
+                end_line: 10,
+            },
+            location2: CodeLocation {
+                file_path: "b.rs".to_string(),
+                start_line: 5,
+                end_line: 15,
+            },
             similarity: 0.95,
             line_count: 10,
             snippet: "fn example()".to_string(),

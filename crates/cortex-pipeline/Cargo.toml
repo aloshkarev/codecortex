@@ -1,0 +1,19 @@
+[package]
+name = "cortex-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+cortex-core = { path = "../cortex-core" }
+cortex-graph = { path = "../cortex-graph" }
+cortex-parser = { path = "../cortex-parser" }
+cortex-vector = { path = "../cortex-vector" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+walkdir = "2"

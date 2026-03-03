@@ -24,6 +24,7 @@ pub enum BackendKind {
 impl BackendKind {
     /// Detect backend type from URI
     pub fn from_uri(uri: &str) -> Self {
+        let uri = uri.trim();
         let uri_lower = uri.to_lowercase();
 
         // Check for specific backends by name first (higher priority)
@@ -39,9 +40,18 @@ impl BackendKind {
             return BackendKind::Neptune;
         }
 
-        // Fall back to port-based detection
-        if uri.contains(":7687") {
-            BackendKind::Neo4j // Default to Neo4j for bolt protocol
+        // Scheme-based fallback: bolt/memgraph default to Memgraph unless explicitly overridden
+        if uri_lower.starts_with("memgraph://")
+            || uri_lower.starts_with("bolt://")
+            || uri_lower.starts_with("bolt+s://")
+            || uri_lower.starts_with("bolt+ssc://")
+        {
+            BackendKind::Memgraph
+        } else if uri_lower.starts_with("neo4j://")
+            || uri_lower.starts_with("neo4j+s://")
+            || uri_lower.starts_with("neo4j+ssc://")
+        {
+            BackendKind::Neo4j
         } else if uri.contains(":8182") {
             BackendKind::Neptune
         } else {
@@ -360,6 +370,15 @@ mod tests {
         assert_eq!(
             BackendKind::from_uri("neo4j://localhost:7687"),
             BackendKind::Neo4j
+        );
+        // bolt://127.0.0.1:7687 defaults to Memgraph
+        assert_eq!(
+            BackendKind::from_uri("bolt://127.0.0.1:7687"),
+            BackendKind::Memgraph
+        );
+        assert_eq!(
+            BackendKind::from_uri("bolt://127.0.0.1:17687"),
+            BackendKind::Memgraph
         );
     }
 

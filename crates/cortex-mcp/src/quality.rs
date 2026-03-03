@@ -66,8 +66,8 @@ pub struct QualityConfig {
 impl Default for QualityConfig {
     fn default() -> Self {
         Self {
-            target_error_rate: 0.01,          // 1% target
-            target_p95_latency_ms: 1000,       // 1s target
+            target_error_rate: 0.01,     // 1% target
+            target_p95_latency_ms: 1000, // 1s target
             reliability_weight: 0.6,
             performance_weight: 0.4,
             sample_window: 100,
@@ -167,9 +167,18 @@ impl ToolTracker {
 
                 (
                     avg,
-                    sorted.get(p50_idx).map(|d| d.as_millis() as u64).unwrap_or(0),
-                    sorted.get(p95_idx.min(sorted.len() - 1)).map(|d| d.as_millis() as u64).unwrap_or(0),
-                    sorted.get(p99_idx.min(sorted.len() - 1)).map(|d| d.as_millis() as u64).unwrap_or(0),
+                    sorted
+                        .get(p50_idx)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                    sorted
+                        .get(p95_idx.min(sorted.len() - 1))
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                    sorted
+                        .get(p99_idx.min(sorted.len() - 1))
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
                 )
             }
         } else {

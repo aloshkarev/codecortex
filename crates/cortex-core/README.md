@@ -89,4 +89,29 @@ Run tests with:
 cargo test -p cortex-core -- --test-threads=1
 ```
 
-Current test count: **100 tests**
+Current test count: **111 tests**
+
+## Complexity Analysis
+
+Two complexity metrics are available:
+
+### Cyclomatic Complexity
+Based on control flow graph - counts decision points.
+
+```rust
+use cortex_core::compute_cyclomatic_complexity;
+
+let complexity = compute_cyclomatic_complexity("fn test() { if x { a } else { b } }");
+// Returns: 2
+```
+
+### Cognitive Complexity
+Accounts for nesting level - more accurately reflects code readability.
+
+```rust
+use cortex_core::{compute_cognitive_complexity, ComplexityRating};
+
+let complexity = compute_cognitive_complexity("fn test() { if x { if y { z } } }");
+let rating = ComplexityRating::from_complexity(complexity);
+// rating: Simple (0-5), Moderate (6-10), Complex (11-20), VeryComplex (21+)
+```

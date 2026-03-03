@@ -1,7 +1,7 @@
 /// Live integration tests against a running Memgraph instance on 127.0.0.1:7687.
 ///
 /// These tests do NOT use testcontainers — they require Memgraph to already be
-/// running (e.g. via `docker run -p 7687:7687 memgraph/memgraph:2.19.0`).
+/// running (e.g. via `docker run -p 7687:7687 memgraph/memgraph:3.8.1`).
 ///
 /// Run with:
 ///   cargo test -p cortex-graph --test live_test -- --nocapture
@@ -18,10 +18,17 @@ use std::sync::Once;
 static INIT: Once = Once::new();
 
 /// Point sled cache into a temp dir inside the workspace so the sandbox allows it.
+/// Uses a unique cache directory per test to avoid sled lock contention.
 fn init_cache_path() {
     INIT.call_once(|| {
-        let cache_dir =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-sled-cache");
+        // Use a unique directory per test process to avoid sled lock contention
+        let test_name = std::thread::current()
+            .name()
+            .unwrap_or_default()
+            .replace("::", "_");
+        let cache_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/test-sled-cache")
+            .join(test_name);
         std::fs::create_dir_all(&cache_dir).ok();
         // SAFETY: single-threaded initialisation via `Once`; no other thread reads this var yet.
         unsafe { std::env::set_var("CORTEX_CACHE_PATH", cache_dir.display().to_string()) };
@@ -33,11 +40,11 @@ fn live_uri() -> String {
 }
 
 fn live_user() -> String {
-    std::env::var("BOLT_USER").unwrap_or_else(|_| "neo4j".to_string())
+    std::env::var("BOLT_USER").unwrap_or_default()
 }
 
 fn live_password() -> String {
-    std::env::var("BOLT_PASSWORD").unwrap_or_else(|_| "neo4j".to_string())
+    std::env::var("BOLT_PASSWORD").unwrap_or_default()
 }
 
 fn fixture_path() -> PathBuf {
@@ -52,16 +59,24 @@ fn live_config() -> CortexConfig {
         memgraph_password: live_password(),
         max_batch_size: 100,
         watched_paths: vec![],
+        ..Default::default()
     }
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 async fn connect() -> GraphClient {
+    eprintln!("DEBUG: Starting connect()...");
     init_cache_path();
-    GraphClient::connect(&live_config())
-        .await
-        .expect("connect to live Bolt server on 127.0.0.1:7687")
+    eprintln!("DEBUG: init_cache_path() done");
+    let config = live_config();
+    eprintln!(
+        "DEBUG: Config created: uri={}, user={}, password={}",
+        config.memgraph_uri, config.memgraph_user, config.memgraph_password
+    );
+    let result = GraphClient::connect(&config).await;
+    eprintln!("DEBUG: GraphClient::connect returned");
+    result.expect("connect to live Bolt server on 127.0.0.1:7687")
 }
 
 async fn fresh_client() -> GraphClient {

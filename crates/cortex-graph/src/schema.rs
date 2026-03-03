@@ -8,20 +8,28 @@
 use crate::GraphClient;
 use chrono::{DateTime, Utc};
 use cortex_core::Result;
-use cortex_core::CortexError;
-use neo4rs::query;
 use serde::{Deserialize, Serialize};
 
 /// Schema statements for basic constraints and indexes
+/// Note: Memgraph syntax is used (different from Neo4j)
+/// - Memgraph does NOT support IF NOT EXISTS for indexes/constraints
+/// - Use DROP before CREATE for idempotent schema setup
 const SCHEMA_STATEMENTS: &[&str] = &[
-    // Basic uniqueness constraints
-    "DROP CONSTRAINT ON (r:Repository) ASSERT r.path IS UNIQUE;",
-    "DROP CONSTRAINT ON (d:Directory) ASSERT d.path IS UNIQUE;",
-    "DROP CONSTRAINT ON (f:File) ASSERT f.path IS UNIQUE;",
-    "CREATE CONSTRAINT ON (r:Repository) ASSERT r.path IS UNIQUE;",
-    "CREATE CONSTRAINT ON (d:Directory) ASSERT d.path IS UNIQUE;",
-    "CREATE CONSTRAINT ON (f:File) ASSERT f.path IS UNIQUE;",
-    // Basic name/path indexes
+    // Label indexes (Memgraph supports label-only indexes)
+    "CREATE INDEX ON :Repository;",
+    "CREATE INDEX ON :Directory;",
+    "CREATE INDEX ON :File;",
+    "CREATE INDEX ON :Function;",
+    "CREATE INDEX ON :Class;",
+    "CREATE INDEX ON :Variable;",
+    "CREATE INDEX ON :Parameter;",
+    "CREATE INDEX ON :Module;",
+    "CREATE INDEX ON :CallTarget;",
+    "CREATE INDEX ON :CodeNode;",
+    // Label-property indexes for faster lookups
+    "CREATE INDEX ON :Repository(path);",
+    "CREATE INDEX ON :Directory(path);",
+    "CREATE INDEX ON :File(path);",
     "CREATE INDEX ON :Function(name);",
     "CREATE INDEX ON :Function(path);",
     "CREATE INDEX ON :Class(name);",
@@ -30,31 +38,31 @@ const SCHEMA_STATEMENTS: &[&str] = &[
     "CREATE INDEX ON :Parameter(name);",
     "CREATE INDEX ON :Module(name);",
     "CREATE INDEX ON :CallTarget(name);",
+    "CREATE INDEX ON :CodeNode(id);",
     "CREATE INDEX ON :CodeNode(path);",
     "CREATE INDEX ON :CodeNode(kind);",
     "CREATE INDEX ON :CodeNode(name);",
-    "CREATE INDEX ON :CodeNode(line_number);",
 ];
 
 /// Branch-aware indexes for multi-project support
+/// Note: Memgraph does NOT support IF NOT EXISTS - errors are ignored in ensure_constraints
 const BRANCH_SCHEMA_STATEMENTS: &[&str] = &[
     // Branch property indexes on code nodes
-    "CREATE INDEX ON :CodeNode(branch) IF NOT EXISTS;",
-    "CREATE INDEX ON :CodeNode(repository_path) IF NOT EXISTS;",
-    "CREATE INDEX ON :Function(branch) IF NOT EXISTS;",
-    "CREATE INDEX ON :Function(repository_path) IF NOT EXISTS;",
-    "CREATE INDEX ON :Class(branch) IF NOT EXISTS;",
-    "CREATE INDEX ON :Class(repository_path) IF NOT EXISTS;",
-    "CREATE INDEX ON :File(branch) IF NOT EXISTS;",
-    "CREATE INDEX ON :File(repository_path) IF NOT EXISTS;",
-    "CREATE INDEX ON :Variable(branch) IF NOT EXISTS;",
-    "CREATE INDEX ON :Module(branch) IF NOT EXISTS;",
-    // BranchIndex node constraints and indexes
-    "CREATE CONSTRAINT ON (bi:BranchIndex) ASSERT bi.id IS UNIQUE IF NOT EXISTS;",
-    "CREATE INDEX ON :BranchIndex(repository_path) IF NOT EXISTS;",
-    "CREATE INDEX ON :BranchIndex(branch) IF NOT EXISTS;",
-    "CREATE INDEX ON :BranchIndex(commit_hash) IF NOT EXISTS;",
-    "CREATE INDEX ON :BranchIndex(indexed_at) IF NOT EXISTS;",
+    "CREATE INDEX ON :CodeNode(branch);",
+    "CREATE INDEX ON :CodeNode(repository_path);",
+    "CREATE INDEX ON :Function(branch);",
+    "CREATE INDEX ON :Function(repository_path);",
+    "CREATE INDEX ON :Class(branch);",
+    "CREATE INDEX ON :Class(repository_path);",
+    "CREATE INDEX ON :File(branch);",
+    "CREATE INDEX ON :File(repository_path);",
+    "CREATE INDEX ON :Variable(branch);",
+    "CREATE INDEX ON :Module(branch);",
+    // BranchIndex node indexes (constraints created separately for idempotency)
+    "CREATE INDEX ON :BranchIndex(id);",
+    "CREATE INDEX ON :BranchIndex(repository_path);",
+    "CREATE INDEX ON :BranchIndex(branch);",
+    "CREATE INDEX ON :BranchIndex(commit_hash);",
 ];
 
 /// Record of an indexed branch stored in the graph
@@ -105,15 +113,29 @@ impl BranchIndexRecord {
 }
 
 /// Ensure all schema constraints and indexes exist
+/// Errors are logged but not propagated since indexes/constraints may already exist
 pub async fn ensure_constraints(client: &GraphClient) -> Result<()> {
-    // Apply basic schema
+    // Apply basic schema (ignore errors - indexes may already exist)
     for statement in SCHEMA_STATEMENTS {
-        let _ = client.run(statement).await;
+        if let Err(e) = client.run(statement).await {
+            // Log but continue - index/constraint may already exist
+            tracing::debug!(
+                "Schema statement returned (may already exist): {} - {}",
+                statement,
+                e
+            );
+        }
     }
 
-    // Apply branch-aware schema
+    // Apply branch-aware schema (ignore errors - indexes may already exist)
     for statement in BRANCH_SCHEMA_STATEMENTS {
-        let _ = client.run(statement).await;
+        if let Err(e) = client.run(statement).await {
+            tracing::debug!(
+                "Branch schema statement returned (may already exist): {} - {}",
+                statement,
+                e
+            );
+        }
     }
 
     Ok(())
@@ -121,34 +143,31 @@ pub async fn ensure_constraints(client: &GraphClient) -> Result<()> {
 
 /// Create a BranchIndex node in the graph
 pub async fn create_branch_index(client: &GraphClient, record: &BranchIndexRecord) -> Result<()> {
-    let q = query(
-        r#"
+    let cypher = r#"
         MERGE (bi:BranchIndex {id: $id})
         SET bi.repository_path = $repository_path,
             bi.branch = $branch,
             bi.commit_hash = $commit_hash,
-            bi.indexed_at = datetime($indexed_at),
-            bi.file_count = $file_count,
-            bi.symbol_count = $symbol_count,
-            bi.is_stale = $is_stale,
-            bi.index_duration_ms = $index_duration_ms
-        "#
-    )
-    .param("id", record.id.clone())
-    .param("repository_path", record.repository_path.clone())
-    .param("branch", record.branch.clone())
-    .param("commit_hash", record.commit_hash.clone())
-    .param("indexed_at", record.indexed_at.to_rfc3339())
-    .param("file_count", record.file_count as i64)
-    .param("symbol_count", record.symbol_count as i64)
-    .param("is_stale", record.is_stale)
-    .param("index_duration_ms", record.index_duration_ms as i64);
+            bi.indexed_at = $indexed_at,
+            bi.file_count = toInteger($file_count),
+            bi.symbol_count = toInteger($symbol_count),
+            bi.is_stale = toBoolean($is_stale),
+            bi.index_duration_ms = toInteger($index_duration_ms)
+        "#;
 
-    client.inner()
-        .run(q)
-        .await
-        .map_err(|e| CortexError::Database(e.to_string()))?;
+    let params = vec![
+        ("id", record.id.clone()),
+        ("repository_path", record.repository_path.clone()),
+        ("branch", record.branch.clone()),
+        ("commit_hash", record.commit_hash.clone()),
+        ("indexed_at", record.indexed_at.to_rfc3339()),
+        ("file_count", record.file_count.to_string()),
+        ("symbol_count", record.symbol_count.to_string()),
+        ("is_stale", record.is_stale.to_string()),
+        ("index_duration_ms", record.index_duration_ms.to_string()),
+    ];
 
+    client.query_with_params(cypher, params).await?;
     Ok(())
 }
 
@@ -157,38 +176,63 @@ pub async fn get_branch_indexes(
     client: &GraphClient,
     repository_path: &str,
 ) -> Result<Vec<BranchIndexRecord>> {
-    let q = query(
-        r#"
+    let cypher = r#"
         MATCH (bi:BranchIndex {repository_path: $repository_path})
         RETURN bi.id, bi.repository_path, bi.branch, bi.commit_hash,
                bi.indexed_at, bi.file_count, bi.symbol_count,
                bi.is_stale, bi.index_duration_ms
         ORDER BY bi.indexed_at DESC
-        "#
-    )
-    .param("repository_path", repository_path.to_string());
+        "#;
 
-    let mut result = client.inner()
-        .execute(q)
-        .await
-        .map_err(|e| CortexError::Database(e.to_string()))?;
+    let rows = client
+        .query_with_param(cypher, "repository_path", repository_path)
+        .await?;
 
     let mut indexes = Vec::new();
-    while let Ok(Some(row)) = result.next().await {
-        let id: String = row.get("bi.id").unwrap_or_default();
-        let repo_path: String = row.get("bi.repository_path").unwrap_or_default();
-        let branch: String = row.get("bi.branch").unwrap_or_default();
-        let commit_hash: String = row.get("bi.commit_hash").unwrap_or_default();
-        let file_count: i64 = row.get("bi.file_count").unwrap_or(0);
-        let symbol_count: i64 = row.get("bi.symbol_count").unwrap_or(0);
-        let is_stale: bool = row.get("bi.is_stale").unwrap_or(false);
-        let index_duration_ms: i64 = row.get("bi.index_duration_ms").unwrap_or(0);
+    for row in rows {
+        let id = row
+            .get("bi.id")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_default();
+        let repo_path = row
+            .get("bi.repository_path")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_default();
+        let branch = row
+            .get("bi.branch")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_default();
+        let commit_hash = row
+            .get("bi.commit_hash")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_default();
+        let file_count = row
+            .get("bi.file_count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as usize;
+        let symbol_count = row
+            .get("bi.symbol_count")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as usize;
+        let is_stale = row
+            .get("bi.is_stale")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let index_duration_ms = row
+            .get("bi.index_duration_ms")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as u64;
 
         // Parse indexed_at or use current time as fallback
-        let indexed_at_str: Option<String> = row.get("bi.indexed_at").ok();
-        let indexed_at = indexed_at_str
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
-            .map(|dt: chrono::DateTime<chrono::FixedOffset>| dt.with_timezone(&Utc))
+        let indexed_at = row
+            .get("bi.indexed_at")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc))
             .unwrap_or_else(Utc::now);
 
         indexes.push(BranchIndexRecord {
@@ -197,10 +241,10 @@ pub async fn get_branch_indexes(
             branch,
             commit_hash,
             indexed_at,
-            file_count: file_count as usize,
-            symbol_count: symbol_count as usize,
+            file_count,
+            symbol_count,
             is_stale,
-            index_duration_ms: index_duration_ms as u64,
+            index_duration_ms,
         });
     }
 
@@ -214,42 +258,42 @@ pub async fn delete_branch_index(
     branch: &str,
 ) -> Result<usize> {
     // First, delete all code nodes for this branch
-    let delete_nodes_q = query(
-        r#"
+    let delete_nodes_cypher = r#"
         MATCH (n:CodeNode {repository_path: $repository_path, branch: $branch})
         DETACH DELETE n
         RETURN count(n) as deleted
-        "#
-    )
-    .param("repository_path", repository_path.to_string())
-    .param("branch", branch.to_string());
+        "#;
 
-    let mut result = client.inner()
-        .execute(delete_nodes_q)
-        .await
-        .map_err(|e| CortexError::Database(e.to_string()))?;
+    let params = vec![
+        ("repository_path", repository_path.to_string()),
+        ("branch", branch.to_string()),
+    ];
+
+    let rows = client
+        .query_with_params(delete_nodes_cypher, params)
+        .await?;
 
     let mut deleted_count = 0usize;
-    while let Ok(Some(row)) = result.next().await {
-        if let Ok(count) = row.get::<i64>("deleted") {
+    for row in rows {
+        if let Some(count) = row.get("deleted").and_then(|v| v.as_i64()) {
             deleted_count = count.max(0) as usize;
         }
     }
 
     // Then delete the BranchIndex node
-    let delete_index_q = query(
-        r#"
+    let delete_index_cypher = r#"
         MATCH (bi:BranchIndex {repository_path: $repository_path, branch: $branch})
         DELETE bi
-        "#
-    )
-    .param("repository_path", repository_path.to_string())
-    .param("branch", branch.to_string());
+        "#;
 
-    client.inner()
-        .run(delete_index_q)
-        .await
-        .map_err(|e| CortexError::Database(e.to_string()))?;
+    let params = vec![
+        ("repository_path", repository_path.to_string()),
+        ("branch", branch.to_string()),
+    ];
+
+    client
+        .query_with_params(delete_index_cypher, params)
+        .await?;
 
     Ok(deleted_count)
 }
@@ -261,24 +305,28 @@ pub async fn is_branch_index_current(
     branch: &str,
     commit_hash: &str,
 ) -> Result<bool> {
-    let q = query(
-        r#"
+    let cypher = r#"
         MATCH (bi:BranchIndex {repository_path: $repository_path, branch: $branch})
         RETURN bi.commit_hash = $commit_hash AS is_current, bi.is_stale AS is_stale
-        "#
-    )
-    .param("repository_path", repository_path.to_string())
-    .param("branch", branch.to_string())
-    .param("commit_hash", commit_hash.to_string());
+        "#;
 
-    let mut result = client.inner()
-        .execute(q)
-        .await
-        .map_err(|e| CortexError::Database(e.to_string()))?;
+    let params = vec![
+        ("repository_path", repository_path.to_string()),
+        ("branch", branch.to_string()),
+        ("commit_hash", commit_hash.to_string()),
+    ];
 
-    while let Ok(Some(row)) = result.next().await {
-        let is_current: bool = row.get("is_current").unwrap_or(false);
-        let is_stale: bool = row.get("is_stale").unwrap_or(true);
+    let rows = client.query_with_params(cypher, params).await?;
+
+    for row in rows {
+        let is_current = row
+            .get("is_current")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let is_stale = row
+            .get("is_stale")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         if is_current && !is_stale {
             return Ok(true);
         }
@@ -293,20 +341,17 @@ pub async fn mark_branch_index_stale(
     repository_path: &str,
     branch: &str,
 ) -> Result<()> {
-    let q = query(
-        r#"
+    let cypher = r#"
         MATCH (bi:BranchIndex {repository_path: $repository_path, branch: $branch})
         SET bi.is_stale = true
-        "#
-    )
-    .param("repository_path", repository_path.to_string())
-    .param("branch", branch.to_string());
+        "#;
 
-    client.inner()
-        .run(q)
-        .await
-        .map_err(|e| CortexError::Database(e.to_string()))?;
+    let params = vec![
+        ("repository_path", repository_path.to_string()),
+        ("branch", branch.to_string()),
+    ];
 
+    client.query_with_params(cypher, params).await?;
     Ok(())
 }
 
@@ -325,16 +370,8 @@ mod tests {
     }
 
     #[test]
-    fn schema_contains_constraints() {
-        let constraint_count = SCHEMA_STATEMENTS
-            .iter()
-            .filter(|s| s.contains("CONSTRAINT"))
-            .count();
-        assert!(constraint_count > 0);
-    }
-
-    #[test]
-    fn schema_contains_indexes() {
+    fn schema_contains_only_indexes() {
+        // Memgraph uses indexes, not constraints for this schema
         let index_count = SCHEMA_STATEMENTS
             .iter()
             .chain(BRANCH_SCHEMA_STATEMENTS.iter())
@@ -344,24 +381,39 @@ mod tests {
     }
 
     #[test]
-    fn schema_statements_are_valid_cypher() {
-        for statement in SCHEMA_STATEMENTS.iter().chain(BRANCH_SCHEMA_STATEMENTS.iter()) {
-            assert!(statement.ends_with(';'), "Statement missing semicolon: {}", statement);
+    fn schema_statements_are_valid_memgraph_cypher() {
+        for statement in SCHEMA_STATEMENTS
+            .iter()
+            .chain(BRANCH_SCHEMA_STATEMENTS.iter())
+        {
+            // Must end with semicolon
             assert!(
-                statement.contains("CREATE") || statement.contains("DROP"),
+                statement.ends_with(';'),
+                "Statement missing semicolon: {}",
+                statement
+            );
+            // Must contain CREATE
+            assert!(
+                statement.contains("CREATE"),
                 "Invalid statement: {}",
+                statement
+            );
+            // Must NOT contain IF NOT EXISTS (Memgraph doesn't support this)
+            assert!(
+                !statement.contains("IF NOT EXISTS"),
+                "IF NOT EXISTS not supported by Memgraph: {}",
                 statement
             );
         }
     }
 
     #[test]
-    fn schema_has_repository_constraints() {
-        let repo_constraints: Vec<_> = SCHEMA_STATEMENTS
+    fn schema_has_repository_indexes() {
+        let repo_indexes: Vec<_> = SCHEMA_STATEMENTS
             .iter()
-            .filter(|s| s.contains("Repository"))
+            .filter(|s| s.contains(":Repository"))
             .collect();
-        assert!(!repo_constraints.is_empty());
+        assert!(!repo_indexes.is_empty());
     }
 
     #[test]
@@ -421,14 +473,7 @@ mod tests {
 
     #[test]
     fn branch_index_record_creation() {
-        let record = BranchIndexRecord::new(
-            "/path/to/repo",
-            "main",
-            "abc123",
-            42,
-            256,
-            1500,
-        );
+        let record = BranchIndexRecord::new("/path/to/repo", "main", "abc123", 42, 256, 1500);
 
         assert_eq!(record.id, "branch:/path/to/repo@main");
         assert_eq!(record.repository_path, "/path/to/repo");
@@ -442,14 +487,7 @@ mod tests {
 
     #[test]
     fn branch_index_record_serialization() {
-        let record = BranchIndexRecord::new(
-            "/path/to/repo",
-            "feature/test",
-            "def456",
-            10,
-            50,
-            500,
-        );
+        let record = BranchIndexRecord::new("/path/to/repo", "feature/test", "def456", 10, 50, 500);
 
         let json = serde_json::to_string(&record).unwrap();
         assert!(json.contains("feature/test"));

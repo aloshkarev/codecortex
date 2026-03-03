@@ -126,8 +126,12 @@ mod tests {
     fn is_remote_path_remote() {
         assert!(is_remote_path(Path::new("s3://bucket/file.txt")));
         assert!(is_remote_path(Path::new("gs://bucket/file.txt")));
-        assert!(is_remote_path(Path::new("https://bucket.s3.amazonaws.com/file.txt")));
-        assert!(is_remote_path(Path::new("https://myaccount.blob.core.windows.net/file.txt")));
+        assert!(is_remote_path(Path::new(
+            "https://bucket.s3.amazonaws.com/file.txt"
+        )));
+        assert!(is_remote_path(Path::new(
+            "https://myaccount.blob.core.windows.net/file.txt"
+        )));
     }
 
     #[test]

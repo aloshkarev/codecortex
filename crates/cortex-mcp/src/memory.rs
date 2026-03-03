@@ -6,6 +6,9 @@
 //! - Retention TTL (90 days default)
 //! - Audit append-only log
 //! - Security controls (secret detection, size limits, rate limiting)
+//! - Importance scoring and decay
+//! - Memory linking and relationships
+//! - Developer rules auto-ingestion
 
 #![allow(dead_code)]
 
@@ -14,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::warn;
 
 /// Default retention period in days
 const DEFAULT_RETENTION_DAYS: u64 = 90;
@@ -23,6 +27,12 @@ const MAX_OBSERVATION_SIZE: usize = 8 * 1024;
 
 /// Rate limit: maximum observations per session per minute
 const RATE_LIMIT_PER_MINUTE: usize = 30;
+
+/// Importance decay factor per day (exponential decay)
+const IMPORTANCE_DECAY_FACTOR: f64 = 0.95;
+
+/// Minimum importance threshold for retention
+const MIN_IMPORTANCE_THRESHOLD: f64 = 0.1;
 
 /// Observation classification
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,6 +45,12 @@ pub enum Classification {
     Decision,
     Blocker,
     Note,
+    /// Discovered pattern in codebase
+    Pattern,
+    /// Developer rule (e.g., from .cursorrules)
+    Rule,
+    /// Project context (e.g., CLAUDE.md content)
+    Context,
 }
 
 impl std::fmt::Display for Classification {
@@ -46,6 +62,9 @@ impl std::fmt::Display for Classification {
             Classification::Decision => write!(f, "decision"),
             Classification::Blocker => write!(f, "blocker"),
             Classification::Note => write!(f, "note"),
+            Classification::Pattern => write!(f, "pattern"),
+            Classification::Rule => write!(f, "rule"),
+            Classification::Context => write!(f, "context"),
         }
     }
 }
@@ -61,6 +80,9 @@ impl std::str::FromStr for Classification {
             "decision" => Ok(Self::Decision),
             "blocker" => Ok(Self::Blocker),
             "note" => Ok(Self::Note),
+            "pattern" => Ok(Self::Pattern),
+            "rule" => Ok(Self::Rule),
+            "context" => Ok(Self::Context),
             _ => Err(format!("Unknown classification: {}", s)),
         }
     }
@@ -113,6 +135,10 @@ pub struct Observation {
     pub session_id: String,
     /// Creation timestamp (milliseconds since epoch)
     pub created_at: i64,
+    /// Last access timestamp
+    pub last_accessed: i64,
+    /// Access count
+    pub access_count: u32,
     /// Creator (e.g., "mcp", "cli")
     pub created_by: String,
     /// Observation text content
@@ -121,6 +147,8 @@ pub struct Observation {
     pub symbol_refs: Vec<String>,
     /// Confidence score (0.0 - 1.0)
     pub confidence: f64,
+    /// Importance score (0.0 - 1.0, decays over time)
+    pub importance: f64,
     /// Whether this observation is stale
     pub stale: bool,
     /// Classification
@@ -131,6 +159,10 @@ pub struct Observation {
     pub tags: Vec<String>,
     /// Source revision (git commit hash or similar)
     pub source_revision: String,
+    /// Linked observation IDs
+    pub linked_to: Vec<String>,
+    /// Source file path (for rules/context)
+    pub source_file: Option<String>,
 }
 
 /// Staleness checker for observations
@@ -229,21 +261,27 @@ impl MemoryStore {
                 repo_id TEXT NOT NULL,
                 session_id TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
+                last_accessed INTEGER NOT NULL DEFAULT 0,
+                access_count INTEGER NOT NULL DEFAULT 0,
                 created_by TEXT NOT NULL,
                 text TEXT NOT NULL,
                 symbol_refs TEXT NOT NULL DEFAULT '[]',
                 confidence REAL NOT NULL DEFAULT 0.8,
+                importance REAL NOT NULL DEFAULT 1.0,
                 stale INTEGER NOT NULL DEFAULT 0,
                 classification TEXT NOT NULL DEFAULT 'internal',
                 severity TEXT NOT NULL DEFAULT 'info',
                 tags TEXT NOT NULL DEFAULT '[]',
-                source_revision TEXT NOT NULL DEFAULT ''
+                source_revision TEXT NOT NULL DEFAULT '',
+                linked_to TEXT NOT NULL DEFAULT '[]',
+                source_file TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_observations_repo ON observations(repo_id);
             CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
             CREATE INDEX IF NOT EXISTS idx_observations_created ON observations(created_at);
             CREATE INDEX IF NOT EXISTS idx_observations_stale ON observations(stale);
+            CREATE INDEX IF NOT EXISTS idx_observations_importance ON observations(importance);
 
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -291,25 +329,30 @@ impl MemoryStore {
         conn.execute(
             r#"
             INSERT OR REPLACE INTO observations (
-                observation_id, repo_id, session_id, created_at, created_by,
-                text, symbol_refs, confidence, stale, classification,
-                severity, tags, source_revision
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                observation_id, repo_id, session_id, created_at, last_accessed, access_count,
+                created_by, text, symbol_refs, confidence, importance, stale, classification,
+                severity, tags, source_revision, linked_to, source_file
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
             "#,
             params![
                 obs.observation_id,
                 obs.repo_id,
                 obs.session_id,
                 obs.created_at,
+                obs.last_accessed,
+                obs.access_count,
                 obs.created_by,
                 obs.text,
                 serde_json::to_string(&obs.symbol_refs)?,
                 obs.confidence,
+                obs.importance,
                 if obs.stale { 1 } else { 0 },
                 obs.classification.to_string(),
                 obs.severity.to_string(),
                 serde_json::to_string(&obs.tags)?,
                 obs.source_revision,
+                serde_json::to_string(&obs.linked_to)?,
+                obs.source_file,
             ],
         )?;
 
@@ -325,9 +368,9 @@ impl MemoryStore {
 
         let mut stmt = conn.prepare(
             r#"
-            SELECT observation_id, repo_id, session_id, created_at, created_by,
-                   text, symbol_refs, confidence, stale, classification,
-                   severity, tags, source_revision
+            SELECT observation_id, repo_id, session_id, created_at, last_accessed, access_count,
+                   created_by, text, symbol_refs, confidence, importance, stale, classification,
+                   severity, tags, source_revision, linked_to, source_file
             FROM observations WHERE observation_id = ?1
             "#,
         )?;
@@ -338,15 +381,20 @@ impl MemoryStore {
                 repo_id: row.get(1)?,
                 session_id: row.get(2)?,
                 created_at: row.get(3)?,
-                created_by: row.get(4)?,
-                text: row.get(5)?,
-                symbol_refs: serde_json::from_str(&row.get::<_, String>(6)?).unwrap_or_default(),
-                confidence: row.get(7)?,
-                stale: row.get::<_, i32>(8)? != 0,
-                classification: row.get::<_, String>(9)?.parse().unwrap_or_default(),
-                severity: row.get::<_, String>(10)?.parse().unwrap_or_default(),
-                tags: serde_json::from_str(&row.get::<_, String>(11)?).unwrap_or_default(),
-                source_revision: row.get(12)?,
+                last_accessed: row.get(4)?,
+                access_count: row.get(5)?,
+                created_by: row.get(6)?,
+                text: row.get(7)?,
+                symbol_refs: serde_json::from_str(&row.get::<_, String>(8)?).unwrap_or_default(),
+                confidence: row.get(9)?,
+                importance: row.get(10)?,
+                stale: row.get::<_, i32>(11)? != 0,
+                classification: row.get::<_, String>(12)?.parse().unwrap_or_default(),
+                severity: row.get::<_, String>(13)?.parse().unwrap_or_default(),
+                tags: serde_json::from_str(&row.get::<_, String>(14)?).unwrap_or_default(),
+                source_revision: row.get(15)?,
+                linked_to: serde_json::from_str(&row.get::<_, String>(16)?).unwrap_or_default(),
+                source_file: row.get(17)?,
             })
         });
 
@@ -370,26 +418,26 @@ impl MemoryStore {
 
         let sql = if include_stale {
             r#"
-            SELECT observation_id, repo_id, session_id, created_at, created_by,
-                   text, symbol_refs, confidence, stale, classification,
-                   severity, tags, source_revision
+            SELECT observation_id, repo_id, session_id, created_at, last_accessed, access_count,
+                   created_by, text, symbol_refs, confidence, importance, stale, classification,
+                   severity, tags, source_revision, linked_to, source_file
             FROM observations
             WHERE repo_id = ?1
               AND (?2 IS NULL OR session_id = ?2)
               AND (?3 IS NULL OR text LIKE '%' || ?3 || '%')
-            ORDER BY created_at DESC
+            ORDER BY importance DESC, created_at DESC
             LIMIT ?4
             "#
         } else {
             r#"
-            SELECT observation_id, repo_id, session_id, created_at, created_by,
-                   text, symbol_refs, confidence, stale, classification,
-                   severity, tags, source_revision
+            SELECT observation_id, repo_id, session_id, created_at, last_accessed, access_count,
+                   created_by, text, symbol_refs, confidence, importance, stale, classification,
+                   severity, tags, source_revision, linked_to, source_file
             FROM observations
             WHERE repo_id = ?1 AND stale = 0
               AND (?2 IS NULL OR session_id = ?2)
               AND (?3 IS NULL OR text LIKE '%' || ?3 || '%')
-            ORDER BY created_at DESC
+            ORDER BY importance DESC, created_at DESC
             LIMIT ?4
             "#
         };
@@ -404,16 +452,21 @@ impl MemoryStore {
                     repo_id: row.get(1)?,
                     session_id: row.get(2)?,
                     created_at: row.get(3)?,
-                    created_by: row.get(4)?,
-                    text: row.get(5)?,
-                    symbol_refs: serde_json::from_str(&row.get::<_, String>(6)?)
+                    last_accessed: row.get(4)?,
+                    access_count: row.get(5)?,
+                    created_by: row.get(6)?,
+                    text: row.get(7)?,
+                    symbol_refs: serde_json::from_str(&row.get::<_, String>(8)?)
                         .unwrap_or_default(),
-                    confidence: row.get(7)?,
-                    stale: row.get::<_, i32>(8)? != 0,
-                    classification: row.get::<_, String>(9)?.parse().unwrap_or_default(),
-                    severity: row.get::<_, String>(10)?.parse().unwrap_or_default(),
-                    tags: serde_json::from_str(&row.get::<_, String>(11)?).unwrap_or_default(),
-                    source_revision: row.get(12)?,
+                    confidence: row.get(9)?,
+                    importance: row.get(10)?,
+                    stale: row.get::<_, i32>(11)? != 0,
+                    classification: row.get::<_, String>(12)?.parse().unwrap_or_default(),
+                    severity: row.get::<_, String>(13)?.parse().unwrap_or_default(),
+                    tags: serde_json::from_str(&row.get::<_, String>(14)?).unwrap_or_default(),
+                    source_revision: row.get(15)?,
+                    linked_to: serde_json::from_str(&row.get::<_, String>(16)?).unwrap_or_default(),
+                    source_file: row.get(17)?,
                 })
             },
         )?;
@@ -666,6 +719,219 @@ pub fn generate_observation_id() -> String {
     format!("obs-{}", uuid::Uuid::new_v4())
 }
 
+// ============================================================================
+// Developer Rules Ingestion
+// ============================================================================
+
+/// Developer rules file patterns to auto-detect
+pub const DEV_RULES_FILES: &[&str] = &[
+    ".cursorrules",
+    ".claudeignore",
+    ".cursor/rules",
+    ".windsurfrules",
+    ".aiderules",
+];
+
+/// Developer context files to auto-detect
+pub const DEV_CONTEXT_FILES: &[&str] = &[
+    "CLAUDE.md",
+    "GEMINI.md",
+    "AGENTS.md",
+    "COPILOT.md",
+    "CURSOR.md",
+    ".github/CONTRIBUTING.md",
+    "docs/ARCHITECTURE.md",
+    "docs/CONTRIBUTING.md",
+    "README.md",
+];
+
+/// Ingest developer rules from a repository
+pub fn ingest_developer_rules(
+    repo_path: &Path,
+    store: &MemoryStore,
+    repo_id: &str,
+    session_id: &str,
+) -> Result<Vec<String>, MemoryStoreError> {
+    let mut ingested = Vec::new();
+
+    // Check for rules files
+    for rules_file in DEV_RULES_FILES {
+        let path = repo_path.join(rules_file);
+        if path.exists() {
+            match ingest_file(&path, store, repo_id, session_id, Classification::Rule) {
+                Ok(id) => ingested.push(id),
+                Err(e) => warn!("Failed to ingest {}: {}", rules_file, e),
+            }
+        }
+    }
+
+    // Check for context files
+    for context_file in DEV_CONTEXT_FILES {
+        let path = repo_path.join(context_file);
+        if path.exists() {
+            match ingest_file(&path, store, repo_id, session_id, Classification::Context) {
+                Ok(id) => ingested.push(id),
+                Err(e) => tracing::warn!("Failed to ingest {}: {}", context_file, e),
+            }
+        }
+    }
+
+    Ok(ingested)
+}
+
+/// Ingest a single file as an observation
+fn ingest_file(
+    path: &Path,
+    store: &MemoryStore,
+    repo_id: &str,
+    session_id: &str,
+    classification: Classification,
+) -> Result<String, MemoryStoreError> {
+    let content = std::fs::read_to_string(path)?;
+    let path_str = path.to_string_lossy().to_string();
+
+    // Create observation
+    let obs = Observation {
+        observation_id: generate_observation_id(),
+        repo_id: repo_id.to_string(),
+        session_id: session_id.to_string(),
+        created_at: current_time_ms(),
+        last_accessed: current_time_ms(),
+        access_count: 0,
+        created_by: "dev_rules_ingestor".to_string(),
+        text: content,
+        symbol_refs: vec![],
+        confidence: 1.0,
+        importance: 1.0, // Rules and context have max importance
+        stale: false,
+        classification,
+        severity: Severity::Info,
+        tags: vec!["auto-ingested".to_string(), "dev-rules".to_string()],
+        source_revision: "".to_string(),
+        linked_to: vec![],
+        source_file: Some(path_str),
+    };
+
+    store.save(&obs)?;
+    Ok(obs.observation_id)
+}
+
+// ============================================================================
+// Memory Importance and Decay
+// ============================================================================
+
+/// Calculate decayed importance for an observation
+pub fn calculate_decayed_importance(observation: &Observation, now_ms: i64) -> f64 {
+    let age_days = (now_ms - observation.created_at) as f64 / (24.0 * 60.0 * 60.0 * 1000.0);
+    let decay = IMPORTANCE_DECAY_FACTOR.powf(age_days);
+
+    // Boost importance based on access count
+    let access_boost = 1.0 + (observation.access_count as f64 * 0.05).min(0.5);
+
+    // Rules and context decay slower
+    let classification_factor = match observation.classification {
+        Classification::Rule | Classification::Context => 0.5, // Slower decay
+        Classification::Decision | Classification::Pattern => 0.7,
+        _ => 1.0,
+    };
+
+    let base_importance = observation.confidence * decay * classification_factor;
+    (base_importance * access_boost).clamp(0.0, 1.0)
+}
+
+/// Apply importance decay to all observations and return IDs of those below threshold
+pub fn find_low_importance_observations(
+    store: &MemoryStore,
+    repo_id: &str,
+    threshold: f64,
+) -> Result<Vec<String>, MemoryStoreError> {
+    let observations = store.search(repo_id, None, None, false, 1000)?;
+    let now = current_time_ms();
+
+    let mut low_importance = Vec::new();
+    for obs in observations {
+        let importance = calculate_decayed_importance(&obs, now);
+        if importance < threshold {
+            low_importance.push(obs.observation_id);
+        }
+    }
+
+    Ok(low_importance)
+}
+
+// ============================================================================
+// Memory Linking
+// ============================================================================
+
+/// Link two observations together
+pub fn link_observations(
+    store: &MemoryStore,
+    obs_id_1: &str,
+    obs_id_2: &str,
+) -> Result<(), MemoryStoreError> {
+    // Get both observations
+    let obs1 = store.get(obs_id_1)?.ok_or_else(|| {
+        MemoryStoreError::ValidationError(format!("Observation {} not found", obs_id_1))
+    })?;
+    let obs2 = store.get(obs_id_2)?.ok_or_else(|| {
+        MemoryStoreError::ValidationError(format!("Observation {} not found", obs_id_2))
+    })?;
+
+    // Update links (bidirectional)
+    let mut links1 = obs1.linked_to.clone();
+    if !links1.contains(&obs_id_2.to_string()) {
+        links1.push(obs_id_2.to_string());
+    }
+
+    let mut links2 = obs2.linked_to.clone();
+    if !links2.contains(&obs_id_1.to_string()) {
+        links2.push(obs_id_1.to_string());
+    }
+
+    // Save updated observations
+    let mut obs1_updated = obs1.clone();
+    obs1_updated.linked_to = links1;
+    store.save(&obs1_updated)?;
+
+    let mut obs2_updated = obs2.clone();
+    obs2_updated.linked_to = links2;
+    store.save(&obs2_updated)?;
+
+    Ok(())
+}
+
+/// Find observations related to a given observation through links
+pub fn find_related_observations(
+    store: &MemoryStore,
+    obs_id: &str,
+    max_depth: usize,
+) -> Result<Vec<Observation>, MemoryStoreError> {
+    let mut visited = std::collections::HashSet::new();
+    let mut result = Vec::new();
+    let mut queue = vec![(obs_id.to_string(), 0)];
+
+    while let Some((current_id, depth)) = queue.pop() {
+        if visited.contains(&current_id) || depth > max_depth {
+            continue;
+        }
+        visited.insert(current_id.clone());
+
+        if let Some(obs) = store.get(&current_id)? {
+            // Add linked observations to queue
+            if depth < max_depth {
+                for linked_id in &obs.linked_to {
+                    if !visited.contains(linked_id) {
+                        queue.push((linked_id.clone(), depth + 1));
+                    }
+                }
+            }
+            result.push(obs);
+        }
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -720,15 +986,20 @@ mod tests {
             repo_id: "test-repo".to_string(),
             session_id: "test-session".to_string(),
             created_at: current_time_ms(),
+            last_accessed: current_time_ms(),
+            access_count: 0,
             created_by: "test".to_string(),
             text: "This is a test observation".to_string(),
             symbol_refs: vec!["func:test".to_string()],
             confidence: 0.9,
+            importance: 1.0,
             stale: false,
             classification: Classification::Internal,
             severity: Severity::Info,
             tags: vec!["test".to_string()],
             source_revision: "abc123".to_string(),
+            linked_to: vec![],
+            source_file: None,
         };
 
         store.save(&obs).unwrap();
@@ -750,15 +1021,20 @@ mod tests {
             repo_id: "test-repo".to_string(),
             session_id: "session-1".to_string(),
             created_at: current_time_ms(),
+            last_accessed: current_time_ms(),
+            access_count: 0,
             created_by: "test".to_string(),
             text: "Authentication bug found".to_string(),
             symbol_refs: vec![],
             confidence: 0.9,
+            importance: 1.0,
             stale: false,
             classification: Classification::Blocker,
             severity: Severity::Error,
             tags: vec![],
             source_revision: "".to_string(),
+            linked_to: vec![],
+            source_file: None,
         };
 
         let obs2 = Observation {
@@ -766,15 +1042,20 @@ mod tests {
             repo_id: "test-repo".to_string(),
             session_id: "session-2".to_string(),
             created_at: current_time_ms(),
+            last_accessed: current_time_ms(),
+            access_count: 0,
             created_by: "test".to_string(),
             text: "Refactoring complete".to_string(),
             symbol_refs: vec![],
             confidence: 0.8,
+            importance: 0.9,
             stale: false,
             classification: Classification::Note,
             severity: Severity::Info,
             tags: vec![],
             source_revision: "".to_string(),
+            linked_to: vec![],
+            source_file: None,
         };
 
         store.save(&obs1).unwrap();
@@ -801,15 +1082,20 @@ mod tests {
                 repo_id: "test-repo".to_string(),
                 session_id: "same-session".to_string(),
                 created_at: current_time_ms(),
+                last_accessed: current_time_ms(),
+                access_count: 0,
                 created_by: "test".to_string(),
                 text: format!("Observation {}", i),
                 symbol_refs: vec![],
                 confidence: 0.9,
+                importance: 1.0,
                 stale: false,
                 classification: Classification::Internal,
                 severity: Severity::Info,
                 tags: vec![],
                 source_revision: "".to_string(),
+                linked_to: vec![],
+                source_file: None,
             };
 
             let result = store.save(&obs);
@@ -832,15 +1118,20 @@ mod tests {
             repo_id: "test".to_string(),
             session_id: "test".to_string(),
             created_at: current_time_ms(),
+            last_accessed: current_time_ms(),
+            access_count: 0,
             created_by: "test".to_string(),
             text: "".to_string(),
             symbol_refs: vec![],
             confidence: 0.9,
+            importance: 1.0,
             stale: false,
             classification: Classification::Internal,
             severity: Severity::Info,
             tags: vec![],
             source_revision: "".to_string(),
+            linked_to: vec![],
+            source_file: None,
         };
 
         let result = store.save(&obs);
@@ -852,15 +1143,20 @@ mod tests {
             repo_id: "test".to_string(),
             session_id: "test".to_string(),
             created_at: current_time_ms(),
+            last_accessed: current_time_ms(),
+            access_count: 0,
             created_by: "test".to_string(),
             text: "password=secret123".to_string(),
             symbol_refs: vec![],
             confidence: 0.9,
+            importance: 1.0,
             stale: false,
             classification: Classification::Internal,
             severity: Severity::Info,
             tags: vec![],
             source_revision: "".to_string(),
+            linked_to: vec![],
+            source_file: None,
         };
 
         let result = store.save(&obs);
@@ -879,15 +1175,20 @@ mod tests {
             repo_id: "test-repo".to_string(),
             session_id: "test".to_string(),
             created_at: current_time_ms(),
+            last_accessed: current_time_ms(),
+            access_count: 0,
             created_by: "test".to_string(),
             text: "Test observation".to_string(),
             symbol_refs: vec!["func:changed_func".to_string()],
             confidence: 0.9,
+            importance: 1.0,
             stale: false,
             classification: Classification::Internal,
             severity: Severity::Info,
             tags: vec![],
             source_revision: "".to_string(),
+            linked_to: vec![],
+            source_file: None,
         };
 
         store.save(&obs).unwrap();

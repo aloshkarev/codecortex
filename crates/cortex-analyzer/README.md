@@ -112,4 +112,23 @@ Run tests with:
 cargo test -p cortex-analyzer -- --test-threads=1
 ```
 
-Current test count: **61 tests**
+Current test count: **65 tests**
+
+## Additional Query Methods
+
+The `Analyzer` provides many useful query methods:
+
+| Method | Description |
+|--------|-------------|
+| `find_by_file` | Find all code nodes in a specific file |
+| `find_in_module` | Find all functions in a module/namespace |
+| `find_similar` | Find similar function names (fuzzy match) |
+| `entry_points` | Get entry points (functions not called by others) |
+| `find_tests` | Find all test functions |
+| `find_tests_for` | Find tests for a specific function |
+| `who_calls` | Alias for callers with optional depth |
+| `what_calls` | Alias for callees with optional depth |
+| `analyze_module` | Analyze module cohesion |
+| `find_by_annotation` | Find nodes with a specific annotation/decorator |
+| `unused_imports` | Find potentially unused imports |
+| `dependency_graph` | Get dependency graph for visualization |

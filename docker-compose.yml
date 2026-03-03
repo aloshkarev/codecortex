@@ -1,6 +1,6 @@
 services:
   memgraph:
-    image: memgraph/memgraph:2.19.0
+    image: memgraph/memgraph:3.8.1
     ports:
       - "7687:7687"
       - "7444:7444"
@@ -11,7 +11,7 @@ services:
       - "--query-modules-directory=/usr/lib/memgraph/query_modules"
 
   memgraph_lab:
-    image: memgraph/lab:2.11.1
+    image: memgraph/lab:latest
     ports:
       - "3000:3000"
     depends_on:

@@ -419,15 +419,20 @@ mod memory_store {
             repo_id: "test-repo".to_string(),
             session_id: "test-session".to_string(),
             created_at: current_time_ms(),
+            last_accessed: current_time_ms(),
+            access_count: 0,
             created_by: "test".to_string(),
             text: "Important note about func:auth.authenticate".to_string(),
             symbol_refs: vec!["func:auth.authenticate".to_string()],
             confidence: 0.9,
+            importance: 1.0,
             stale: false,
             classification: Classification::Internal,
             severity: Severity::Info,
             tags: vec![],
             source_revision: "abc123".to_string(),
+            linked_to: vec![],
+            source_file: None,
         };
 
         store.save(&obs).unwrap();
@@ -458,15 +463,20 @@ mod memory_store {
                 repo_id: "test-repo".to_string(),
                 session_id: format!("session-{}", i),
                 created_at: current_time_ms() + i as i64 * 1000, // Stagger timestamps
+                last_accessed: current_time_ms(),
+                access_count: 0,
                 created_by: "test".to_string(),
                 text: format!("Observation about authentication bug {}", i),
                 symbol_refs: vec![],
                 confidence: 0.8 + (i as f64 * 0.02),
+                importance: 1.0,
                 stale: false,
                 classification: Classification::Internal,
                 severity: Severity::Info,
                 tags: vec![],
                 source_revision: "".to_string(),
+                linked_to: vec![],
+                source_file: None,
             };
 
             store.save(&obs).unwrap();

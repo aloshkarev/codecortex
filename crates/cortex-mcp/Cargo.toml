@@ -14,9 +14,9 @@ cortex-indexer = { path = "../cortex-indexer" }
 cortex-parser = { path = "../cortex-parser" }
 cortex-watcher = { path = "../cortex-watcher" }
 dashmap.workspace = true
-lru = "0.12"
+lru = "0.16"
 rmcp.workspace = true
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -26,5 +26,5 @@ tracing.workspace = true
 uuid = { version = "1.10", features = ["v4"] }
 
 [dev-dependencies]
-jsonschema = "0.18"
+jsonschema = "0.44"
 tempfile = "3.10"

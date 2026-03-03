@@ -45,7 +45,7 @@ run-mcp:
 # Start Memgraph with Docker
 run-memgraph:
 	@docker ps --format '{{.Names}}' | grep -q '^memgraph$$' && echo "Memgraph already running" || \
-		docker run -d --name memgraph -p 7687:7687 -p 7444:7444 memgraph/memgraph:2.19.0 --also-log-to-stderr=true
+		docker run -d --name memgraph -p 7687:7687 -p 7444:7444 memgraph/memgraph:3.8.1 --also-log-to-stderr=true
 
 # Stop Memgraph
 stop-memgraph:

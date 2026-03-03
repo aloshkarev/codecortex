@@ -109,9 +109,7 @@ pub use incremental::{
     ChangeStatus, GitAwareIncremental, HashEntry, IncrementalIndexer, IncrementalStats,
 };
 pub use indexer::{IndexConfig, IndexPhase, IndexProgress, IndexReport, Indexer};
-pub use parallel::{
-    AdaptiveBatcher, ParallelConfig, ParallelProcessor, ParallelStats,
-};
+pub use parallel::{AdaptiveBatcher, ParallelConfig, ParallelProcessor, ParallelStats};
 pub use skeleton::{
-    PrecomputedSkeleton, SkeletonBuilder, SkeletonCache, build_skeleton, file_hash,
+    PrecomputedSkeleton, SkeletonBuilder, SkeletonCache, build_skeleton, file_hash, file_hash_fast,
 };

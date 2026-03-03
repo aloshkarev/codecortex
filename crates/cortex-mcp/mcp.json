@@ -6,7 +6,7 @@
         "start"
       ],
       "command": "cortex",
-      "cwd": "/Users/alex/Projects/open/codecortex/crates/cortex-mcp"
+      "cwd": "~/.local/bin/cortex"
     }
   }
 }

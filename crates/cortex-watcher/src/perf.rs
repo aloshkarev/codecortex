@@ -7,8 +7,8 @@
 //! - Resource monitoring and throttling
 
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// Configuration for performance tuning
@@ -145,10 +145,12 @@ impl BackpressureController {
 
         // Check if we should exit backpressure
         if self.in_backpressure.load(Ordering::Relaxed) {
-            let low_water = (self.config.max_queue_size as f64 * self.config.low_water_mark) as usize;
+            let low_water =
+                (self.config.max_queue_size as f64 * self.config.low_water_mark) as usize;
             if queue_size <= low_water
                 && let Some(last) = *self.last_backpressure.lock().unwrap()
-                && now.duration_since(last) >= Duration::from_millis(self.config.backpressure_cooldown_ms)
+                && now.duration_since(last)
+                    >= Duration::from_millis(self.config.backpressure_cooldown_ms)
             {
                 self.in_backpressure.store(false, Ordering::Relaxed);
             }
@@ -265,7 +267,8 @@ impl AdaptivePoller {
             self.config.max_poll_interval_ms
         };
 
-        self.current_interval_ms.store(new_interval, Ordering::Relaxed);
+        self.current_interval_ms
+            .store(new_interval, Ordering::Relaxed);
     }
 
     /// Get current interval in ms

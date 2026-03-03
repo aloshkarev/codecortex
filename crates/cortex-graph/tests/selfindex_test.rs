@@ -19,6 +19,7 @@ fn config_from_env() -> CortexConfig {
             .unwrap_or_else(|_| "memgraph".to_string()),
         max_batch_size: 500,
         watched_paths: vec![],
+        ..Default::default()
     }
 }
 

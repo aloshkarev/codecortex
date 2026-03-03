@@ -3,8 +3,7 @@ use cortex_core::{
     CodeEdge, CodeNode, CortexError, EdgeKind, EntityKind, IndexedFile, Repository, Result,
 };
 use cortex_graph::{
-    BranchIndexRecord, GraphClient, NodeWriter,
-    create_branch_index, is_branch_index_current,
+    BranchIndexRecord, GraphClient, NodeWriter, create_branch_index, is_branch_index_current,
 };
 use cortex_parser::ParserRegistry;
 use ignore::WalkBuilder;
@@ -16,6 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+use tracing::{Level, info, instrument, span, warn};
 
 /// Configuration for indexing operations
 #[derive(Debug, Clone, Serialize)]
@@ -112,14 +112,19 @@ pub struct Indexer {
 }
 
 impl Indexer {
+    #[instrument(skip(client))]
     pub fn new(client: GraphClient, batch_size: usize) -> Result<Self> {
-        Self::with_config(client, IndexConfig {
-            batch_size,
-            ..Default::default()
-        })
+        Self::with_config(
+            client,
+            IndexConfig {
+                batch_size,
+                ..Default::default()
+            },
+        )
     }
 
     /// Create an indexer with custom configuration
+    #[instrument(skip(client))]
     pub fn with_config(client: GraphClient, config: IndexConfig) -> Result<Self> {
         let cache = sled::open(Self::cache_path()).map_err(|e| CortexError::Io(e.to_string()))?;
         Ok(Self {
@@ -195,17 +200,28 @@ impl Indexer {
     }
 
     /// Index with full configuration support including branch awareness
+    #[instrument(skip(self, path, force, config), fields(branch = ?config.branch, commit = ?config.commit_hash))]
     async fn index_path_with_config<P: AsRef<Path>>(
         &self,
         path: P,
         force: bool,
         config: &IndexConfig,
     ) -> Result<IndexReport> {
+        let span = span!(Level::INFO, "indexing");
+        let _enter = span.enter();
         let start = Instant::now();
         let root = normalize_root(path.as_ref());
+        info!(
+            path = %root.display(),
+            force = force,
+            branch = ?config.branch.as_deref(),
+            "Starting index operation"
+        );
 
         // Get repository path (use config or derive from path)
-        let repository_path = config.repository_path.clone()
+        let repository_path = config
+            .repository_path
+            .clone()
             .unwrap_or_else(|| root.display().to_string());
 
         // Get branch info
@@ -654,7 +670,10 @@ mod tests {
         let branch = Some("main".to_string());
         let props = build_branch_properties(&branch, "/path/to/repo");
         assert_eq!(props.get("branch"), Some(&"main".to_string()));
-        assert_eq!(props.get("repository_path"), Some(&"/path/to/repo".to_string()));
+        assert_eq!(
+            props.get("repository_path"),
+            Some(&"/path/to/repo".to_string())
+        );
     }
 
     #[test]
@@ -662,7 +681,10 @@ mod tests {
         let branch = None;
         let props = build_branch_properties(&branch, "/path/to/repo");
         assert_eq!(props.get("branch"), None);
-        assert_eq!(props.get("repository_path"), Some(&"/path/to/repo".to_string()));
+        assert_eq!(
+            props.get("repository_path"),
+            Some(&"/path/to/repo".to_string())
+        );
     }
 
     #[test]

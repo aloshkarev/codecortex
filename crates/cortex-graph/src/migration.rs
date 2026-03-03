@@ -25,31 +25,40 @@ pub struct Migration {
 pub const CURRENT_VERSION: MigrationVersion = 1;
 
 /// All migrations in order
-pub const MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 1,
-        name: "initial_schema",
-        statements: &[
-            // Constraints
-            "CREATE CONSTRAINT ON (r:Repository) ASSERT r.path IS UNIQUE;",
-            "CREATE CONSTRAINT ON (d:Directory) ASSERT d.path IS UNIQUE;",
-            "CREATE CONSTRAINT ON (f:File) ASSERT f.path IS UNIQUE;",
-            // Indexes for common queries
-            "CREATE INDEX ON :Function(name);",
-            "CREATE INDEX ON :Function(path);",
-            "CREATE INDEX ON :Class(name);",
-            "CREATE INDEX ON :Class(path);",
-            "CREATE INDEX ON :Variable(name);",
-            "CREATE INDEX ON :Parameter(name);",
-            "CREATE INDEX ON :Module(name);",
-            "CREATE INDEX ON :CallTarget(name);",
-            "CREATE INDEX ON :CodeNode(path);",
-            "CREATE INDEX ON :CodeNode(kind);",
-            "CREATE INDEX ON :CodeNode(name);",
-            "CREATE INDEX ON :CodeNode(line_number);",
-        ],
-    },
-];
+/// Note: Memgraph does NOT support IF NOT EXISTS - errors are caught and ignored
+pub const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    name: "initial_schema",
+    statements: &[
+        // Label indexes (Memgraph supports these)
+        "CREATE INDEX ON :Repository;",
+        "CREATE INDEX ON :Directory;",
+        "CREATE INDEX ON :File;",
+        "CREATE INDEX ON :Function;",
+        "CREATE INDEX ON :Class;",
+        "CREATE INDEX ON :Variable;",
+        "CREATE INDEX ON :Parameter;",
+        "CREATE INDEX ON :Module;",
+        "CREATE INDEX ON :CallTarget;",
+        "CREATE INDEX ON :CodeNode;",
+        // Label-property indexes for faster lookups
+        "CREATE INDEX ON :Repository(path);",
+        "CREATE INDEX ON :Directory(path);",
+        "CREATE INDEX ON :File(path);",
+        "CREATE INDEX ON :Function(name);",
+        "CREATE INDEX ON :Function(path);",
+        "CREATE INDEX ON :Class(name);",
+        "CREATE INDEX ON :Class(path);",
+        "CREATE INDEX ON :Variable(name);",
+        "CREATE INDEX ON :Parameter(name);",
+        "CREATE INDEX ON :Module(name);",
+        "CREATE INDEX ON :CallTarget(name);",
+        "CREATE INDEX ON :CodeNode(id);",
+        "CREATE INDEX ON :CodeNode(path);",
+        "CREATE INDEX ON :CodeNode(kind);",
+        "CREATE INDEX ON :CodeNode(name);",
+    ],
+}];
 
 /// Migration result
 #[derive(Debug, Clone)]
@@ -84,7 +93,9 @@ impl<'a> MigrationManager<'a> {
 
         let result = self
             .client
-            .raw_query("MATCH (m:SchemaMigration {id: 'schema_version'}) RETURN m.version AS version")
+            .raw_query(
+                "MATCH (m:SchemaMigration {id: 'schema_version'}) RETURN m.version AS version",
+            )
             .await?;
 
         if let Some(row) = result.first()
@@ -194,7 +205,11 @@ impl<'a> MigrationManager<'a> {
             0
         };
 
-        Ok(MIGRATIONS.iter().filter(|m| m.version <= current).map(|m| m.version).collect())
+        Ok(MIGRATIONS
+            .iter()
+            .filter(|m| m.version <= current)
+            .map(|m| m.version)
+            .collect())
     }
 
     /// Check if there are pending migrations
@@ -212,7 +227,11 @@ mod tests {
     fn migrations_are_sequential() {
         let versions: Vec<u64> = MIGRATIONS.iter().map(|m| m.version).collect();
         for (i, v) in versions.iter().enumerate() {
-            assert_eq!(*v, (i + 1) as u64, "Migration versions should be sequential");
+            assert_eq!(
+                *v,
+                (i + 1) as u64,
+                "Migration versions should be sequential"
+            );
         }
     }
 
@@ -225,14 +244,22 @@ mod tests {
     #[test]
     fn migrations_have_names() {
         for migration in MIGRATIONS {
-            assert!(!migration.name.is_empty(), "Migration v{} needs a name", migration.version);
+            assert!(
+                !migration.name.is_empty(),
+                "Migration v{} needs a name",
+                migration.version
+            );
         }
     }
 
     #[test]
     fn migrations_have_statements() {
         for migration in MIGRATIONS {
-            assert!(!migration.statements.is_empty(), "Migration v{} has no statements", migration.version);
+            assert!(
+                !migration.statements.is_empty(),
+                "Migration v{} has no statements",
+                migration.version
+            );
         }
     }
 
@@ -240,28 +267,48 @@ mod tests {
     fn migration_statements_end_with_semicolon() {
         for migration in MIGRATIONS {
             for statement in migration.statements {
-                assert!(statement.ends_with(';'), "Statement doesn't end with semicolon: {}", statement);
+                assert!(
+                    statement.ends_with(';'),
+                    "Statement doesn't end with semicolon: {}",
+                    statement
+                );
             }
         }
     }
 
     #[test]
-    fn initial_migration_has_constraints() {
+    fn initial_migration_has_label_indexes() {
         let initial = MIGRATIONS.iter().find(|m| m.version == 1);
         assert!(initial.is_some());
 
         let initial = initial.unwrap();
-        let constraint_count = initial.statements.iter().filter(|s| s.contains("CONSTRAINT")).count();
-        assert!(constraint_count >= 3, "Initial migration should have at least 3 constraints");
+        // Should have label-only indexes
+        let label_index_count = initial
+            .statements
+            .iter()
+            .filter(|s| s.contains("INDEX ON :") && !s.contains("("))
+            .count();
+        assert!(
+            label_index_count >= 5,
+            "Initial migration should have label indexes"
+        );
     }
 
     #[test]
-    fn initial_migration_has_indexes() {
+    fn initial_migration_has_property_indexes() {
         let initial = MIGRATIONS.iter().find(|m| m.version == 1);
         assert!(initial.is_some());
 
         let initial = initial.unwrap();
-        let index_count = initial.statements.iter().filter(|s| s.contains("INDEX")).count();
-        assert!(index_count >= 10, "Initial migration should have at least 10 indexes");
+        // Should have label-property indexes (statements containing INDEX ON :Label(property))
+        let prop_index_count = initial
+            .statements
+            .iter()
+            .filter(|s| s.contains("INDEX ON :") && s.contains("(") && s.contains(")"))
+            .count();
+        assert!(
+            prop_index_count >= 10,
+            "Initial migration should have at least 10 property indexes"
+        );
     }
 }

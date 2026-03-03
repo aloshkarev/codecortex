@@ -10,16 +10,16 @@ This crate provides parsing capabilities for multiple programming languages usin
 
 | Language | Extensions | Entities Extracted |
 |----------|------------|-------------------|
-| Rust | `.rs` | Functions, structs, enums, traits, impls |
+| Rust | `.rs` | Functions, structs, enums, traits, impl blocks, type aliases, constants, macros |
 | C | `.c`, `.h` | Functions, structs, enums |
-| C++ | `.cpp`, `.hpp`, `.cc`, `.cxx` | Functions, classes, structs, namespaces |
+| C++ | `.cpp`, `.hpp`, `.cc`, `.cxx` | Functions, classes, structs, enums, inheritance |
 | Python | `.py` | Functions, classes, methods, decorators |
 | Go | `.go` | Functions, structs, interfaces |
-| TypeScript | `.ts`, `.tsx` | Functions, classes, interfaces |
+| TypeScript | `.ts`, `.tsx` | Functions, classes, interfaces, type aliases, enums |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Functions, classes |
-| Java | `.java` | Classes, methods, interfaces, annotations |
-| PHP | `.php` | Classes, functions, traits |
-| Ruby | `.rb` | Classes, methods, modules |
+| Java | `.java` | Classes, methods, interfaces, enums, constructors |
+| PHP | `.php` | Classes, functions, traits, interfaces |
+| Ruby | `.rb` | Classes, methods, modules, singleton methods |
 
 ## Usage
 
@@ -65,4 +65,4 @@ Run tests with:
 cargo test -p cortex-parser -- --test-threads=1
 ```
 
-Current test count: **26 tests**
+Current test count: **41 tests**

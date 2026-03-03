@@ -176,12 +176,12 @@ impl TimeoutExecutor {
         let query_type = QueryType::detect(query);
         let timeout_duration = self.config.get_timeout(query_type);
 
-        timeout(timeout_duration, f)
-            .await
-            .map_err(|_| CortexError::Database(format!(
+        timeout(timeout_duration, f).await.map_err(|_| {
+            CortexError::Database(format!(
                 "Query timed out after {:?} (type: {:?})",
                 timeout_duration, query_type
-            )))?
+            ))
+        })?
     }
 
     /// Execute with explicit timeout
@@ -191,12 +191,9 @@ impl TimeoutExecutor {
     {
         let clamped_timeout = timeout_duration.clamp(MIN_QUERY_TIMEOUT, MAX_QUERY_TIMEOUT * 2);
 
-        timeout(clamped_timeout, f)
-            .await
-            .map_err(|_| CortexError::Database(format!(
-                "Query timed out after {:?}",
-                clamped_timeout
-            )))?
+        timeout(clamped_timeout, f).await.map_err(|_| {
+            CortexError::Database(format!("Query timed out after {:?}", clamped_timeout))
+        })?
     }
 
     /// Execute a read query
@@ -204,12 +201,12 @@ impl TimeoutExecutor {
     where
         F: std::future::Future<Output = Result<T>>,
     {
-        timeout(self.config.read_timeout, f)
-            .await
-            .map_err(|_| CortexError::Database(format!(
+        timeout(self.config.read_timeout, f).await.map_err(|_| {
+            CortexError::Database(format!(
                 "Read query timed out after {:?}",
                 self.config.read_timeout
-            )))?
+            ))
+        })?
     }
 
     /// Execute a write query
@@ -217,12 +214,12 @@ impl TimeoutExecutor {
     where
         F: std::future::Future<Output = Result<T>>,
     {
-        timeout(self.config.write_timeout, f)
-            .await
-            .map_err(|_| CortexError::Database(format!(
+        timeout(self.config.write_timeout, f).await.map_err(|_| {
+            CortexError::Database(format!(
                 "Write query timed out after {:?}",
                 self.config.write_timeout
-            )))?
+            ))
+        })?
     }
 
     /// Execute a batch operation
@@ -230,12 +227,12 @@ impl TimeoutExecutor {
     where
         F: std::future::Future<Output = Result<T>>,
     {
-        timeout(self.config.batch_timeout, f)
-            .await
-            .map_err(|_| CortexError::Database(format!(
+        timeout(self.config.batch_timeout, f).await.map_err(|_| {
+            CortexError::Database(format!(
                 "Batch operation timed out after {:?}",
                 self.config.batch_timeout
-            )))?
+            ))
+        })?
     }
 
     /// Execute a schema operation
@@ -243,12 +240,12 @@ impl TimeoutExecutor {
     where
         F: std::future::Future<Output = Result<T>>,
     {
-        timeout(self.config.schema_timeout, f)
-            .await
-            .map_err(|_| CortexError::Database(format!(
+        timeout(self.config.schema_timeout, f).await.map_err(|_| {
+            CortexError::Database(format!(
                 "Schema operation timed out after {:?}",
                 self.config.schema_timeout
-            )))?
+            ))
+        })?
     }
 }
 
@@ -324,8 +321,14 @@ mod tests {
     fn query_type_detect_read() {
         assert_eq!(QueryType::detect("MATCH (n) RETURN n"), QueryType::Read);
         assert_eq!(QueryType::detect("RETURN 1"), QueryType::Read);
-        assert_eq!(QueryType::detect("PROFILE MATCH (n) RETURN n"), QueryType::Read);
-        assert_eq!(QueryType::detect("EXPLAIN MATCH (n) RETURN n"), QueryType::Read);
+        assert_eq!(
+            QueryType::detect("PROFILE MATCH (n) RETURN n"),
+            QueryType::Read
+        );
+        assert_eq!(
+            QueryType::detect("EXPLAIN MATCH (n) RETURN n"),
+            QueryType::Read
+        );
     }
 
     #[test]

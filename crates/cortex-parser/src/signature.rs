@@ -623,15 +623,22 @@ impl SignatureExtractor {
                 // C++ params: "type name" or "type name = default"
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    let name = parts.last().unwrap().to_string();
+                    let name = parts.last().unwrap_or(&"").to_string();
                     let name = if name.contains('=') {
-                        name.split('=').next().unwrap().trim().to_string()
+                        name.split('=').next().unwrap_or("").trim().to_string()
                     } else {
                         name
                     };
                     let param_type = Some(parts[..parts.len() - 1].join(" "));
                     let default_value = if trimmed.contains('=') {
-                        Some(trimmed.split('=').next_back().unwrap().trim().to_string())
+                        Some(
+                            trimmed
+                                .split('=')
+                                .next_back()
+                                .unwrap_or("")
+                                .trim()
+                                .to_string(),
+                        )
                     } else {
                         None
                     };
@@ -721,7 +728,7 @@ impl SignatureExtractor {
                 // Java params: "Type name" or "final Type name"
                 let parts: Vec<&str> = trimmed.split_whitespace().collect();
                 if parts.len() >= 2 {
-                    let name = parts.last().unwrap().to_string();
+                    let name = parts.last().unwrap_or(&"").to_string();
                     let param_type = if parts.len() > 2 {
                         Some(parts[..parts.len() - 1].join(" "))
                     } else {
@@ -747,9 +754,23 @@ impl SignatureExtractor {
             let words: Vec<&str> = before_paren.split_whitespace().collect();
             if words.len() >= 2 {
                 // Skip modifiers like public, static, etc.
-                let type_start = words.iter().position(|w| {
-                    !["public", "private", "protected", "static", "final", "abstract", "synchronized", "native", "strictfp"].contains(w)
-                }).unwrap_or(0);
+                let type_start = words
+                    .iter()
+                    .position(|w| {
+                        ![
+                            "public",
+                            "private",
+                            "protected",
+                            "static",
+                            "final",
+                            "abstract",
+                            "synchronized",
+                            "native",
+                            "strictfp",
+                        ]
+                        .contains(w)
+                    })
+                    .unwrap_or(0);
                 let name_idx = words.len() - 1; // Last word is method name
                 if name_idx > type_start {
                     return Some(words[type_start..name_idx].join(" "));
@@ -836,13 +857,20 @@ impl SignatureExtractor {
                 // PHP params: "$name", "Type $name", "$name = default"
                 let has_default = trimmed.contains('=');
                 let default_value = if has_default {
-                    Some(trimmed.split('=').next_back().unwrap().trim().to_string())
+                    Some(
+                        trimmed
+                            .split('=')
+                            .next_back()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string(),
+                    )
                 } else {
                     None
                 };
 
                 let without_default = if has_default {
-                    trimmed.split('=').next().unwrap().trim()
+                    trimmed.split('=').next().unwrap_or("").trim()
                 } else {
                     trimmed
                 };
@@ -878,9 +906,9 @@ impl SignatureExtractor {
             // Skip whitespace
             let trimmed = after_colon.trim_start();
             // Find end of return type (either { or end)
-            let end_pos = trimmed.find('{').unwrap_or_else(|| {
-                trimmed.find(';').unwrap_or(trimmed.len())
-            });
+            let end_pos = trimmed
+                .find('{')
+                .unwrap_or_else(|| trimmed.find(';').unwrap_or(trimmed.len()));
             let return_type = trimmed[..end_pos].trim();
             if !return_type.is_empty() && !return_type.starts_with('$') {
                 // Make sure it's not a ternary operator
@@ -923,7 +951,11 @@ impl SignatureExtractor {
             is_async: false,
             generics: vec![],
             is_method: true,
-            self_type: if is_self_method { Some(SelfType::Value) } else { None },
+            self_type: if is_self_method {
+                Some(SelfType::Value)
+            } else {
+                None
+            },
             modifiers,
         })
     }
@@ -943,9 +975,10 @@ impl SignatureExtractor {
                 }
 
                 // Keyword argument: name:
-                if trimmed.ends_with(':') && !trimmed.starts_with('*') && !trimmed.starts_with('&') {
+                if trimmed.ends_with(':') && !trimmed.starts_with('*') && !trimmed.starts_with('&')
+                {
                     parameters.push(Parameter {
-                        name: trimmed[..trimmed.len()-1].to_string(),
+                        name: trimmed[..trimmed.len() - 1].to_string(),
                         param_type: None,
                         is_optional: true,
                         default_value: None,

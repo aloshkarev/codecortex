@@ -15,11 +15,13 @@ cortex-core = { path = "../cortex-core" }
 cortex-graph = { path = "../cortex-graph" }
 cortex-indexer = { path = "../cortex-indexer" }
 cortex-mcp = { path = "../cortex-mcp" }
+cortex-vector = { path = "../cortex-vector" }
 cortex-watcher = { path = "../cortex-watcher" }
 dialoguer.workspace = true
+glob = "0.3"
 indicatif.workspace = true
 owo-colors.workspace = true
-rustyline = "14"
+rustyline = "17"
 serde_json.workspace = true
 serde_yaml = "0.9"
 tokio.workspace = true

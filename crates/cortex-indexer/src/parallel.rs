@@ -9,8 +9,8 @@
 use rayon::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 /// Configuration for parallel indexing
@@ -155,11 +155,7 @@ impl ParallelProcessor {
     }
 
     /// Process items in parallel using the configured thread pool
-    pub fn process_parallel<T, R, F>(
-        &self,
-        items: Vec<T>,
-        processor: F,
-    ) -> Vec<R>
+    pub fn process_parallel<T, R, F>(&self, items: Vec<T>, processor: F) -> Vec<R>
     where
         T: Send,
         R: Send,

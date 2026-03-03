@@ -14,14 +14,14 @@ tree-sitter-cpp.workspace = true
 tree-sitter-go.workspace = true
 tree-sitter-java = "0.23"
 tree-sitter-javascript.workspace = true
-tree-sitter-php = "0.23"
+tree-sitter-php = "0.24"
 tree-sitter-python.workspace = true
 tree-sitter-ruby = "0.23"
 tree-sitter-rust.workspace = true
 tree-sitter-typescript.workspace = true
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"
 
 [[bench]]
 name = "indexing_throughput"

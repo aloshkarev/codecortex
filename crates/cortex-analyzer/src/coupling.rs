@@ -202,7 +202,7 @@ impl CouplingAnalyzer {
                     from: module.to_string(),
                     to: dep.clone(),
                     coupling_type: CouplingType::Data, // Simplified
-                    strength: 0.5, // Simplified
+                    strength: 0.5,                     // Simplified
                     dependency_count: 1,
                 });
             }
@@ -212,7 +212,12 @@ impl CouplingAnalyzer {
     }
 
     /// Calculate cohesion metrics for a module
-    pub fn analyze_cohesion(&self, module: &str, methods: &[String], fields: &[String]) -> CohesionMetrics {
+    pub fn analyze_cohesion(
+        &self,
+        module: &str,
+        methods: &[String],
+        fields: &[String],
+    ) -> CohesionMetrics {
         let method_count = methods.len();
         let field_count = fields.len();
 
@@ -237,9 +242,7 @@ impl CouplingAnalyzer {
 
         for i in 0..methods.len() {
             for j in (i + 1)..methods.len() {
-                let common: HashSet<_> = method_fields[i]
-                    .intersection(&method_fields[j])
-                    .collect();
+                let common: HashSet<_> = method_fields[i].intersection(&method_fields[j]).collect();
 
                 if common.is_empty() {
                     non_shared_pairs += 1;
@@ -273,7 +276,12 @@ impl CouplingAnalyzer {
         }
     }
 
-    fn determine_cohesion_type(&self, lcom: f64, method_count: usize, field_count: usize) -> CohesionType {
+    fn determine_cohesion_type(
+        &self,
+        lcom: f64,
+        method_count: usize,
+        field_count: usize,
+    ) -> CohesionType {
         if method_count == 0 || field_count == 0 {
             return CohesionType::Coincidental;
         }
@@ -463,7 +471,11 @@ mod tests {
         analyzer.add_field_access("set_name", "name");
         analyzer.add_field_access("get_age", "age");
 
-        let methods = vec!["get_name".to_string(), "set_name".to_string(), "get_age".to_string()];
+        let methods = vec![
+            "get_name".to_string(),
+            "set_name".to_string(),
+            "get_age".to_string(),
+        ];
         let fields = vec!["name".to_string(), "age".to_string()];
 
         let metrics = analyzer.analyze_cohesion("Person", &methods, &fields);

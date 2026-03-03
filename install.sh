@@ -15,14 +15,16 @@ set -e
 # Configuration
 # ═══════════════════════════════════════════════════════════════════════════════
 
-CORTEX_VERSION="0.1.0"
+CORTEX_VERSION="1.0.0"
 CORTEX_BIN_NAME="cortex"
 CORTEX_CONFIG_DIR="${HOME}/.cortex"
 CORTEX_BIN_DIR="${HOME}/.local/bin"
 CORTEX_DATA_DIR="${HOME}/.cortex/data"
-MEMGRAPH_URI="bolt://localhost:7687"
-MEMGRAPH_USER=""
-MEMGRAPH_PASSWORD=""
+MEMGRAPH_URI="memgraph://localhost:7687"
+MEMGRAPH_USER="memgraph"
+MEMGRAPH_PASSWORD="memgraph"
+CONTAINER_NAME="codecortex-memgraph"
+VECTOR_PATH="${HOME}/.cortex/vectors"
 
 # Colors
 RED='\033[0;31m'
@@ -304,6 +306,34 @@ verify_installation() {
 # Memgraph Installation
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Check if a port is available
+check_port_available() {
+    local port=$1
+    if command_exists lsof; then
+        ! lsof -i :$port &>/dev/null
+    elif command_exists ss; then
+        ! ss -ln | grep -q ":$port "
+    elif command_exists netstat; then
+        ! netstat -an | grep -q ":$port "
+    else
+        return 0  # Assume available if we can't check
+    fi
+}
+
+# Find an available port starting from the given one
+find_available_port() {
+    local start_port=$1
+    local max_attempts=${2:-10}
+
+    for port in $(seq $start_port $((start_port + max_attempts - 1))); do
+        if check_port_available $port; then
+            echo $port
+            return 0
+        fi
+    done
+    echo $start_port  # Fallback to start port
+}
+
 install_memgraph_docker() {
     log_step "Setting up Memgraph with Docker"
 
@@ -335,40 +365,56 @@ install_memgraph_docker() {
         esac
     fi
 
-    # Pull Memgraph image
-    log_info "Pulling Memgraph Docker image..."
-    docker pull memgraph/memgraph:2.19.0
-
-    # Check if Memgraph container already exists
-    if docker ps -a --format '{{.Names}}' | grep -q '^memgraph$'; then
-        log_info "Memgraph container already exists"
-
-        if docker ps --format '{{.Names}}' | grep -q '^memgraph$'; then
-            log_success "Memgraph is already running"
-        else
-            log_info "Starting existing Memgraph container..."
-            docker start memgraph
-        fi
-    else
-        log_info "Creating Memgraph container..."
-        docker run -d \
-            --name memgraph \
-            -p 7687:7687 \
-            -p 7444:7444 \
-            -v memgraph_data:/var/lib/memgraph \
-            memgraph/memgraph:2.19.0 \
-            --also-log-to-stderr=true
+    # Check for existing container FIRST (before any port checking)
+    local existing_container=""
+    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        existing_container="${CONTAINER_NAME}"
+    elif docker ps -a --format '{{.Names}}' | grep -q '^memgraph$'; then
+        existing_container="memgraph"
     fi
 
-    # Wait for Memgraph to be ready
-    log_info "Waiting for Memgraph to be ready..."
-    sleep 5
+    if [ -n "$existing_container" ]; then
+        log_info "Found existing Memgraph container (${existing_container})"
 
-    # Verify connection
-    if docker exec memgraph mgm_client 1 &>/dev/null; then
-        log_success "Memgraph is running on bolt://localhost:7687"
+        # Get port from existing container before starting it
+        local port
+        port=$(docker port "$existing_container" 7687 2>/dev/null | cut -d: -f2 || echo "7687")
+        MEMGRAPH_URI="memgraph://localhost:${port}"
+
+        if docker ps --format '{{.Names}}' | grep -q "^${existing_container}$"; then
+            log_success "Memgraph is already running on port ${port}"
+        else
+            log_info "Starting existing Memgraph container..."
+            docker start "$existing_container"
+            sleep 3
+            log_success "Memgraph started on port ${port}"
+        fi
     else
-        log_warning "Memgraph started but connection test inconclusive"
+        # No existing container - find available port BEFORE pulling image
+        local port=7687
+
+        if ! check_port_available 7687; then
+            log_info "Port 7687 is in use, finding available port..."
+            port=$(find_available_port 7688 10)
+            log_info "Will use port ${port}"
+        fi
+
+        MEMGRAPH_URI="memgraph://localhost:${port}"
+
+        # Now pull and create container
+        log_info "Pulling Memgraph Docker image..."
+        docker pull memgraph/memgraph:3.8.1
+
+        log_info "Creating Memgraph container on port ${port}..."
+        docker run -d \
+            --name "${CONTAINER_NAME}" \
+            -p "${port}:7687" \
+            -v codecortex-memgraph:/var/lib/memgraph \
+            memgraph/memgraph:3.8.1 \
+            --also-log-to-stderr=true
+
+        sleep 3
+        log_success "Memgraph started on port ${port}"
     fi
 }
 
@@ -449,8 +495,9 @@ setup_config() {
     # Create config directory
     mkdir -p "$CORTEX_CONFIG_DIR"
     mkdir -p "$CORTEX_DATA_DIR"
+    mkdir -p "$VECTOR_PATH"
 
-    local config_file="${CORTEX_CONFIG_DIR}/config.json"
+    local config_file="${CORTEX_CONFIG_DIR}/config.toml"
 
     if [ -f "$config_file" ]; then
         log_info "Configuration file already exists at ${config_file}"
@@ -462,22 +509,90 @@ setup_config() {
         read -rp "Memgraph URI [${MEMGRAPH_URI}]: " uri_input
         MEMGRAPH_URI="${uri_input:-$MEMGRAPH_URI}"
 
-        read -rp "Memgraph username (leave empty if none): " MEMGRAPH_USER
-        read -rsp "Memgraph password (leave empty if none): " MEMGRAPH_PASSWORD
+        read -rp "Memgraph username [${MEMGRAPH_USER}]: " user_input
+        MEMGRAPH_USER="${user_input:-$MEMGRAPH_USER}"
+
+        read -rsp "Memgraph password [${MEMGRAPH_PASSWORD}]: " pass_input
         echo
+        MEMGRAPH_PASSWORD="${pass_input:-$MEMGRAPH_PASSWORD}"
     fi
 
-    # Create config file
+    # Detect LLM provider
+    local llm_provider="none"
+    local embedding_model=""
+
+    if command_exists ollama && curl -s http://127.0.0.1:11434/api/tags &>/dev/null; then
+        llm_provider="ollama"
+        embedding_model="nomic-embed-text"
+        log_info "Detected Ollama - will use for embeddings"
+    elif [ -n "$OPENAI_API_KEY" ]; then
+        llm_provider="openai"
+        embedding_model="text-embedding-3-small"
+        log_info "Detected OPENAI_API_KEY - will use OpenAI for embeddings"
+    else
+        log_warning "No LLM provider detected - embeddings disabled"
+    fi
+
+    # Create TOML config file
     cat > "$config_file" <<EOF
-{
-  "memgraph_uri": "${MEMGRAPH_URI}",
-  "memgraph_user": "${MEMGRAPH_USER}",
-  "memgraph_password": "${MEMGRAPH_PASSWORD}",
-  "max_batch_size": 1000
-}
+# CodeCortex Configuration
+# Generated by install.sh
+
+# Graph Database (Memgraph or Neo4j)
+memgraph_uri = "${MEMGRAPH_URI}"
+memgraph_user = "${MEMGRAPH_USER}"
+memgraph_password = "${MEMGRAPH_PASSWORD}"
+# Backend type: "memgraph" (default) or "neo4j"
+# Can also be set via CORTEX_BACKEND_TYPE environment variable
+backend_type = "memgraph"
+
+# Vector Store Configuration
+[vector]
+store_type = "lancedb"
+store_path = "${VECTOR_PATH}"
+qdrant_uri = "http://127.0.0.1:6333"
+qdrant_api_key = ""
+embedding_dim = 1536
+
+# LLM/Embedding Provider Configuration
+[llm]
+provider = "${llm_provider}"
+openai_api_key = ""
+openai_embedding_model = "text-embedding-3-small"
+ollama_base_url = "http://127.0.0.1:11434"
+ollama_embedding_model = "${embedding_model}"
+
+# Indexer Settings
+max_batch_size = 500
+indexer_timeout_secs = 300
+indexer_max_files = 0
+
+# Analyzer Settings
+analyzer_query_limit = 1000
+analyzer_cache_ttl_secs = 300
+
+# Watcher Settings
+watcher_debounce_secs = 2
+watcher_max_events = 128
+
+# Connection Pool Settings
+pool_max_connections = 10
+pool_min_idle = 2
+pool_connection_timeout_secs = 30
+
+# Watched Paths
+watched_paths = []
 EOF
 
     log_success "Configuration saved to ${config_file}"
+
+    # Pull Ollama model if needed
+    if [ "$llm_provider" = "ollama" ] && [ -n "$embedding_model" ]; then
+        if ! ollama list 2>/dev/null | grep -q "$embedding_model"; then
+            log_info "Pulling Ollama embedding model: ${embedding_model}..."
+            ollama pull "$embedding_model" || log_warning "Failed to pull model - run manually: ollama pull ${embedding_model}"
+        fi
+    fi
 }
 
 setup_mcp_config() {
@@ -692,39 +807,71 @@ run_verification() {
 
     export PATH="${CORTEX_BIN_DIR}:${PATH}"
 
+    local all_ok=true
+
     # Verify binary
     log_info "Testing CodeCortex binary..."
     if cortex --version &>/dev/null; then
-        log_success "CodeCortex binary: OK"
+        local version=$(cortex --version 2>&1 | head -1)
+        log_success "Binary: ${version}"
     else
-        log_error "CodeCortex binary: FAILED"
-        return 1
+        log_error "Binary: FAILED"
+        all_ok=false
     fi
 
     # Verify config
     log_info "Testing configuration..."
     if cortex config show &>/dev/null; then
-        log_success "Configuration: OK"
+        log_success "Configuration: Valid"
     else
         log_warning "Configuration: Check manually with 'cortex config show'"
     fi
 
-    # Verify Memgraph connection
-    log_info "Testing Memgraph connection..."
-    if cortex doctor &>/dev/null; then
-        log_success "Memgraph connection: OK"
+    # Verify database connection (quick check)
+    log_info "Testing database connection..."
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "${CONTAINER_NAME}\|memgraph"; then
+        log_success "Database: Container running"
     else
-        log_warning "Memgraph connection: Check if Memgraph is running"
+        log_warning "Database: Container not running"
+        log_info "  Start with: docker start ${CONTAINER_NAME}"
+    fi
+
+    # Verify vector store path
+    log_info "Testing vector store..."
+    if [ -d "${VECTOR_PATH}" ]; then
+        log_success "Vector store: Directory exists"
+    else
+        log_info "Vector store: Will be created on first use"
+    fi
+
+    # Verify LLM provider
+    log_info "Testing LLM provider..."
+    if command_exists ollama && curl -s http://127.0.0.1:11434/api/tags &>/dev/null; then
+        log_success "LLM: Ollama running"
+    elif [ -n "$OPENAI_API_KEY" ]; then
+        log_success "LLM: OpenAI API key configured"
+    else
+        log_info "LLM: Not configured (optional for basic usage)"
     fi
 
     # Test MCP tools
     log_info "Listing MCP tools..."
-    local tools=$(cortex mcp tools 2>/dev/null || echo "unavailable")
-    if [ "$tools" != "unavailable" ]; then
-        log_success "MCP tools available: $(echo "$tools" | wc -l | tr -d ' ') tools"
+    local tools=$(cortex mcp tools 2>/dev/null || echo "")
+    if [ -n "$tools" ]; then
+        local tool_count=$(echo "$tools" | wc -l | tr -d ' ')
+        log_success "MCP tools: ${tool_count} available"
     else
-        log_warning "MCP tools: Could not list tools"
+        log_warning "MCP tools: Could not list"
     fi
+
+    echo ""
+    if [ "$all_ok" = true ]; then
+        log_success "Verification complete!"
+    else
+        log_warning "Verification complete with some issues"
+    fi
+    echo ""
+    log_info "Run 'cortex doctor' for detailed health check"
 }
 
 print_summary() {
@@ -736,7 +883,8 @@ print_summary() {
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "  ${CYAN}Binary:${NC}     ${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
-    echo -e "  ${CYAN}Config:${NC}    ${CORTEX_CONFIG_DIR}/config.json"
+    echo -e "  ${CYAN}Config:${NC}    ${CORTEX_CONFIG_DIR}/config.toml"
+    echo -e "  ${CYAN}Vectors:${NC}   ${VECTOR_PATH}"
     echo -e "  ${CYAN}MCP Logs:${NC}  ${CORTEX_CONFIG_DIR}/logs/"
     echo ""
     echo -e "  ${YELLOW}Quick Start:${NC}"
@@ -783,12 +931,18 @@ print_summary() {
     echo -e "  ${YELLOW}Memgraph:${NC}"
     echo ""
     echo "    # Check Memgraph status (Docker)"
-    echo "    docker ps | grep memgraph"
+    echo "    docker ps | grep ${CONTAINER_NAME}"
     echo ""
     echo "    # Start Memgraph if stopped"
-    echo "    docker start memgraph"
+    echo "    docker start ${CONTAINER_NAME}"
     echo ""
-    echo -e "${GREEN}Happy coding! 🚀${NC}"
+
+    if [ "$NON_INTERACTIVE" = true ]; then
+        echo -e "  ${YELLOW}Note:${NC} Run 'cortex setup' for interactive configuration"
+        echo ""
+    fi
+
+    echo -e "${GREEN}Happy coding!${NC}"
     echo ""
 }
 

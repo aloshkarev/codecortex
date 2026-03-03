@@ -3140,7 +3140,9 @@ mod tests {
     async fn context_capsule_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .get_context_capsule(Parameters(ContextCapsuleReq {
@@ -3155,14 +3157,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn impact_graph_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_IMPACT_GRAPH_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_IMPACT_GRAPH_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .get_impact_graph(Parameters(ImpactGraphReq {
@@ -3176,14 +3182,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_IMPACT_GRAPH_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_IMPACT_GRAPH_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn logic_flow_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_LOGIC_FLOW_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_LOGIC_FLOW_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .search_logic_flow(Parameters(LogicFlowReq {
@@ -3197,14 +3207,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_LOGIC_FLOW_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_LOGIC_FLOW_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn skeleton_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_SKELETON_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_SKELETON_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .get_skeleton(Parameters(SkeletonReq {
@@ -3215,14 +3229,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_SKELETON_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_SKELETON_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn index_status_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_INDEX_STATUS_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_INDEX_STATUS_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .index_status(Parameters(IndexStatusReq {
@@ -3233,14 +3251,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_INDEX_STATUS_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_INDEX_STATUS_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn workspace_setup_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_WORKSPACE_SETUP_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_WORKSPACE_SETUP_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .workspace_setup(Parameters(WorkspaceSetupReq {
@@ -3254,14 +3276,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_WORKSPACE_SETUP_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_WORKSPACE_SETUP_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn submit_lsp_edges_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_LSP_INGEST_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_LSP_INGEST_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .submit_lsp_edges(Parameters(SubmitLspEdgesReq {
@@ -3272,14 +3298,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_LSP_INGEST_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_LSP_INGEST_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn save_observation_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .save_observation(Parameters(SaveObservationReq {
@@ -3295,14 +3325,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn get_session_context_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .get_session_context(Parameters(SessionContextReq {
@@ -3315,14 +3349,18 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED");
+        }
     }
 
     #[tokio::test]
     async fn search_memory_respects_feature_flag() {
         // Test that setting the env var to 0 disables the tool
         let _lock = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED", "0"); }
+        unsafe {
+            std::env::set_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED", "0");
+        }
         let h = CortexHandler::new(CortexConfig::default());
         let out = h
             .search_memory(Parameters(SearchMemoryReq {
@@ -3334,7 +3372,9 @@ mod tests {
             .await
             .expect("tool response");
         assert!(as_text(out).contains("\"code\":\"UNAVAILABLE\""));
-        unsafe { std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED"); }
+        unsafe {
+            std::env::remove_var("CORTEX_FLAG_MCP_MEMORY_READ_ENABLED");
+        }
     }
 
     // Pattern detection unit tests
@@ -3447,5 +3487,71 @@ mod tests {
                 name.contains("State") || name.contains("Machine") || name.contains("FSM");
             assert!(is_state, "Name {} should indicate state", name);
         }
+    }
+
+    // Helper function tests
+
+    #[test]
+    fn escape_cypher_escapes_quotes() {
+        assert_eq!(super::escape_cypher("hello"), "hello");
+        assert_eq!(super::escape_cypher("it's"), "it\\'s");
+        assert_eq!(super::escape_cypher("'quoted'"), "\\'quoted\\'");
+    }
+
+    #[test]
+    fn default_repo_path_returns_current_dir() {
+        let path = super::default_repo_path();
+        // Should return a valid path string
+        assert!(!path.is_empty());
+    }
+
+    #[test]
+    fn build_skeleton_minimal_mode() {
+        let src = r#"
+            fn main() {
+                println!("hello");
+            }
+
+            pub struct User {
+                name: String,
+            }
+
+            impl User {
+                fn new() -> Self { User { name: String::new() } }
+            }
+        "#;
+        let skeleton = super::build_skeleton(src, "minimal");
+        assert!(skeleton.contains("fn main"));
+        assert!(skeleton.contains("pub struct User"));
+        assert!(skeleton.contains("impl User"));
+    }
+
+    #[test]
+    fn build_skeleton_standard_mode_includes_comments() {
+        let src = r#"
+            /// Documentation comment
+            fn documented() {}
+
+            // Regular comment
+            fn regular() {}
+        "#;
+        let skeleton = super::build_skeleton(src, "standard");
+        assert!(skeleton.contains("fn documented"));
+        assert!(skeleton.contains("///"));
+    }
+
+    #[test]
+    fn build_skeleton_empty_returns_fallback() {
+        let src = "let x = 1;\nlet y = 2;";
+        let skeleton = super::build_skeleton(src, "minimal");
+        // Should return fallback when no signatures found
+        assert!(skeleton.contains("let x") || skeleton.is_empty());
+    }
+
+    #[test]
+    fn cortex_handler_new_creates_instance() {
+        let handler = CortexHandler::new(CortexConfig::default());
+        // Just verify we can create one
+        let _ = handler.tool_enabled("test", true);
     }
 }

@@ -540,11 +540,7 @@ impl GitOperations {
     ///
     /// * `file_path` - Path to the file (relative to repo root)
     /// * `limit` - Maximum number of commits to return
-    pub fn file_history(
-        &self,
-        file_path: &str,
-        limit: usize,
-    ) -> Result<Vec<CommitInfo>, GitError> {
+    pub fn file_history(&self, file_path: &str, limit: usize) -> Result<Vec<CommitInfo>, GitError> {
         if !self.is_git_repo() {
             return Ok(vec![]);
         }
@@ -629,12 +625,7 @@ impl GitOperations {
         }
 
         // Format: line_number|hash|author|timestamp|content
-        let args = vec![
-            "blame",
-            "--line-porcelain",
-            "--",
-            file_path,
-        ];
+        let args = vec!["blame", "--line-porcelain", "--", file_path];
 
         let output = self.run_git_raw_command(&args)?;
 
@@ -681,8 +672,8 @@ impl GitOperations {
             if let Some(rest) = line.strip_prefix("author-time ")
                 && let Ok(timestamp) = rest.parse::<i64>()
             {
-                current_time = DateTime::from_timestamp(timestamp, 0)
-                    .map(|d| d.with_timezone(&Utc));
+                current_time =
+                    DateTime::from_timestamp(timestamp, 0).map(|d| d.with_timezone(&Utc));
             }
         }
 
@@ -718,12 +709,8 @@ impl GitOperations {
 
         // Get ahead/behind counts
         let ahead_behind_range = format!("{}...{}", source_branch, target_branch);
-        let ahead_behind = self.run_git_command(&[
-            "rev-list",
-            "--left-right",
-            "--count",
-            &ahead_behind_range,
-        ])?;
+        let ahead_behind =
+            self.run_git_command(&["rev-list", "--left-right", "--count", &ahead_behind_range])?;
 
         let (ahead_count, behind_count) = if let Some(line) = ahead_behind.first() {
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -814,12 +801,7 @@ impl GitOperations {
         target: &str,
     ) -> Result<Vec<FileDiff>, GitError> {
         let diff_range = format!("{}...{}", target, source);
-        let args = vec![
-            "diff",
-            "--numstat",
-            "--name-status",
-            &diff_range,
-        ];
+        let args = vec!["diff", "--numstat", "--name-status", &diff_range];
 
         let output = self.run_git_command(&args)?;
         let mut files = HashMap::new();
@@ -1160,7 +1142,9 @@ mod tests {
         let current_branch = git.get_current_branch().unwrap();
 
         // Comparing branch with itself
-        let diff = git.compare_branches(&current_branch, &current_branch).unwrap();
+        let diff = git
+            .compare_branches(&current_branch, &current_branch)
+            .unwrap();
         assert_eq!(diff.ahead_count, 0);
         assert_eq!(diff.behind_count, 0);
         assert!(diff.changed_files.is_empty());
@@ -1182,7 +1166,12 @@ mod tests {
             .args(["checkout", "-b", "feature"])
             .output();
 
-        create_commit(&repo_path, "feature.txt", "feature content", "Feature commit");
+        create_commit(
+            &repo_path,
+            "feature.txt",
+            "feature content",
+            "Feature commit",
+        );
 
         let diff = git.compare_branches("feature", &main_branch).unwrap();
 

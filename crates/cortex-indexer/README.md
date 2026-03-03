@@ -135,4 +135,20 @@ Run tests with:
 cargo test -p cortex-indexer -- --test-threads=1
 ```
 
-Current test count: **56 tests**
+Current test count: **69 tests**
+
+## Hash Functions
+
+Two hash functions are available:
+
+| Function | Algorithm | Use Case |
+|----------|-----------|----------|
+| `file_hash` | SHA-256 | Default, cryptographically secure |
+| `file_hash_fast` | BLAKE3 | Fast hashing for large files |
+
+```rust
+use cortex_indexer::{file_hash, file_hash_fast};
+
+let sha256_hash = file_hash("content");     // 64 hex chars
+let blake3_hash = file_hash_fast("content"); // 64 hex chars, faster
+```

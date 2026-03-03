@@ -54,17 +54,23 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
             kind: EntityKind::Class,
         },
         DefCaptures {
-            entity: def_q.capture_index_for_name("module_entity").unwrap_or(u32::MAX),
+            entity: def_q
+                .capture_index_for_name("module_entity")
+                .unwrap_or(u32::MAX),
             name: def_q.capture_index_for_name("name").unwrap_or(1),
             kind: EntityKind::Module,
         },
         DefCaptures {
-            entity: def_q.capture_index_for_name("method_entity").unwrap_or(u32::MAX),
+            entity: def_q
+                .capture_index_for_name("method_entity")
+                .unwrap_or(u32::MAX),
             name: def_q.capture_index_for_name("name").unwrap_or(1),
             kind: EntityKind::Function,
         },
         DefCaptures {
-            entity: def_q.capture_index_for_name("singleton_method_entity").unwrap_or(u32::MAX),
+            entity: def_q
+                .capture_index_for_name("singleton_method_entity")
+                .unwrap_or(u32::MAX),
             name: def_q.capture_index_for_name("name").unwrap_or(1),
             kind: EntityKind::Function,
         },
@@ -86,11 +92,14 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
             module: import_q.capture_index_for_name("module").unwrap_or(0),
         },
         inherit_q.as_ref(),
-        inherit_q.as_ref().map(|q| InheritCaptures {
-            child: q.capture_index_for_name("child").unwrap_or(0),
-            parent: q.capture_index_for_name("parent").unwrap_or(1),
-            edge_kind: EdgeKind::Inherits,
-        }).as_ref(),
+        inherit_q
+            .as_ref()
+            .map(|q| InheritCaptures {
+                child: q.capture_index_for_name("child").unwrap_or(0),
+                parent: q.capture_index_for_name("parent").unwrap_or(1),
+                edge_kind: EdgeKind::Inherits,
+            })
+            .as_ref(),
         None,
         None,
         None,
@@ -105,7 +114,9 @@ mod tests {
 
     fn parse_ruby(source: &str) -> tree_sitter::Tree {
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_ruby::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_ruby::LANGUAGE.into())
+            .unwrap();
         parser.parse(source, None).unwrap()
     }
 
@@ -138,7 +149,12 @@ mod tests {
         let path = Path::new("my_module.rb");
         let result = extract(source, path, &tree);
 
-        assert!(result.nodes.iter().any(|n| n.name == "MyModule" && n.kind == EntityKind::Module));
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "MyModule" && n.kind == EntityKind::Module)
+        );
     }
 
     #[test]
@@ -152,7 +168,12 @@ mod tests {
         let path = Path::new("greet.rb");
         let result = extract(source, path, &tree);
 
-        assert!(result.nodes.iter().any(|n| n.name == "greet" && n.kind == EntityKind::Function));
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "greet" && n.kind == EntityKind::Function)
+        );
     }
 
     #[test]
@@ -166,6 +187,11 @@ mod tests {
         let result = extract(source, path, &tree);
 
         assert!(result.nodes.iter().any(|n| n.name == "Child"));
-        assert!(result.edges.iter().any(|e| matches!(e.kind, EdgeKind::Inherits)));
+        assert!(
+            result
+                .edges
+                .iter()
+                .any(|e| matches!(e.kind, EdgeKind::Inherits))
+        );
     }
 }

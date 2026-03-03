@@ -498,16 +498,14 @@ mod tests {
 
     #[test]
     fn branch_index_info_with_counts() {
-        let info = BranchIndexInfo::new("main".to_string(), "abc".to_string())
-            .with_counts(10, 50);
+        let info = BranchIndexInfo::new("main".to_string(), "abc".to_string()).with_counts(10, 50);
         assert_eq!(info.file_count, 10);
         assert_eq!(info.symbol_count, 50);
     }
 
     #[test]
     fn branch_index_info_with_duration() {
-        let info = BranchIndexInfo::new("main".to_string(), "abc".to_string())
-            .with_duration(5000);
+        let info = BranchIndexInfo::new("main".to_string(), "abc".to_string()).with_duration(5000);
         assert_eq!(info.index_duration_ms, 5000);
     }
 
@@ -581,16 +579,14 @@ mod tests {
             current_branch: "main".to_string(),
             current_commit: "abc".to_string(),
             short_commit: "abc".to_string(),
-            branches: vec![
-                BranchInfo {
-                    name: "main".to_string(),
-                    is_remote: false,
-                    last_commit: "abc".to_string(),
-                    last_commit_date: None,
-                    last_commit_message: None,
-                    is_current: true,
-                },
-            ],
+            branches: vec![BranchInfo {
+                name: "main".to_string(),
+                is_remote: false,
+                last_commit: "abc".to_string(),
+                last_commit_date: None,
+                last_commit_message: None,
+                is_current: true,
+            }],
             remote_url: None,
             is_git_repo: true,
             uncommitted_changes: 0,

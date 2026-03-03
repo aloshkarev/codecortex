@@ -34,6 +34,8 @@ pub enum BuildSystem {
     Npm,
     /// Node.js/yarn
     Yarn,
+    /// Node.js/pnpm
+    Pnpm,
     /// Mixed/multiple build systems
     Mixed,
 }
@@ -47,7 +49,9 @@ impl BuildSystem {
             BuildSystem::Make => vec!["c", "cpp"],
             BuildSystem::GoModules => vec!["go"],
             BuildSystem::Python => vec!["python"],
-            BuildSystem::Npm | BuildSystem::Yarn => vec!["javascript", "typescript"],
+            BuildSystem::Npm | BuildSystem::Yarn | BuildSystem::Pnpm => {
+                vec!["javascript", "typescript"]
+            }
             BuildSystem::Mixed => vec![],
         }
     }
@@ -67,6 +71,7 @@ impl BuildSystem {
             ],
             BuildSystem::Npm => vec!["package.json", "package-lock.json"],
             BuildSystem::Yarn => vec!["package.json", "yarn.lock"],
+            BuildSystem::Pnpm => vec!["package.json", "pnpm-lock.yaml"],
             BuildSystem::Mixed => vec![],
         }
     }
@@ -82,6 +87,7 @@ impl std::fmt::Display for BuildSystem {
             BuildSystem::Python => write!(f, "python"),
             BuildSystem::Npm => write!(f, "npm"),
             BuildSystem::Yarn => write!(f, "yarn"),
+            BuildSystem::Pnpm => write!(f, "pnpm"),
             BuildSystem::Mixed => write!(f, "mixed"),
         }
     }
@@ -292,6 +298,11 @@ impl BuildDetector {
             detected.push(BuildSystem::Yarn);
         }
 
+        if self.has_pnpm() {
+            detected.push(BuildSystem::Pnpm);
+            self.enrich_pnpm_config(&mut config);
+        }
+
         // Load compile_commands.json if present (for C/C++ projects)
         if detected.contains(&BuildSystem::CMake) || detected.contains(&BuildSystem::Make) {
             self.load_compile_commands(&mut config);
@@ -358,6 +369,11 @@ impl BuildDetector {
     /// Check for yarn.lock
     fn has_yarn(&self) -> bool {
         self.root.join("package.json").exists() && self.root.join("yarn.lock").exists()
+    }
+
+    /// Check for pnpm-lock.yaml
+    fn has_pnpm(&self) -> bool {
+        self.root.join("package.json").exists() && self.root.join("pnpm-lock.yaml").exists()
     }
 
     /// Enrich config with Cargo information
@@ -489,6 +505,57 @@ impl BuildDetector {
         config.exclude_patterns.push("node_modules/**".to_string());
     }
 
+    /// Enrich config with pnpm package information
+    fn enrich_pnpm_config(&self, config: &mut ProjectConfig) {
+        let package_json = self.root.join("package.json");
+        if let Ok(content) = std::fs::read_to_string(&package_json)
+            && let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&content)
+        {
+            if config.name.is_none() {
+                config.name = pkg["name"].as_str().map(|s| s.to_string());
+            }
+            if config.version.is_none() {
+                config.version = pkg["version"].as_str().map(|s| s.to_string());
+            }
+
+            // Add dependencies if not already present
+            if let Some(deps) = pkg["dependencies"].as_object() {
+                for (name, value) in deps {
+                    // Avoid duplicates
+                    if !config.dependencies.iter().any(|d| &d.name == name) {
+                        config.dependencies.push(Dependency {
+                            name: name.clone(),
+                            version: value.as_str().map(|s| s.to_string()),
+                            path: None,
+                            dep_type: DependencyType::Production,
+                        });
+                    }
+                }
+            }
+            if let Some(deps) = pkg["devDependencies"].as_object() {
+                for (name, value) in deps {
+                    if !config.dependencies.iter().any(|d| &d.name == name) {
+                        config.dependencies.push(Dependency {
+                            name: name.clone(),
+                            version: value.as_str().map(|s| s.to_string()),
+                            path: None,
+                            dep_type: DependencyType::Development,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Exclude node_modules (same as npm)
+        if !config
+            .exclude_patterns
+            .iter()
+            .any(|p| p == "node_modules/**")
+        {
+            config.exclude_patterns.push("node_modules/**".to_string());
+        }
+    }
+
     /// Load compile_commands.json for C/C++ projects
     fn load_compile_commands(&self, config: &mut ProjectConfig) {
         // Check common locations for compile_commands.json
@@ -564,7 +631,7 @@ fn count_language_groups(systems: &[BuildSystem]) -> usize {
             BuildSystem::CMake | BuildSystem::Make => "cpp",
             BuildSystem::GoModules => "go",
             BuildSystem::Python => "python",
-            BuildSystem::Npm | BuildSystem::Yarn => "js",
+            BuildSystem::Npm | BuildSystem::Yarn | BuildSystem::Pnpm => "js",
             BuildSystem::Mixed => continue,
         };
         groups.insert(group);
@@ -726,5 +793,34 @@ version = "0.1.0"
 
         let result = shlex::split("gcc -I\"path with spaces\" test.c").unwrap();
         assert_eq!(result, vec!["gcc", "-Ipath with spaces", "test.c"]);
+    }
+
+    #[test]
+    fn test_detect_pnpm_project() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        fs::write(
+            root.join("package.json"),
+            r#"{"name": "pnpm-project", "version": "1.0.0"}"#,
+        )
+        .unwrap();
+        fs::write(root.join("pnpm-lock.yaml"), "lockfileVersion: '6.0'\n").unwrap();
+
+        let detector = BuildDetector::new(root);
+        let config = detector.detect();
+
+        assert!(config.build_systems.contains(&BuildSystem::Pnpm));
+        assert_eq!(config.name, Some("pnpm-project".to_string()));
+    }
+
+    #[test]
+    fn test_build_system_pnpm_config_files() {
+        assert!(BuildSystem::Pnpm.config_files().contains(&"pnpm-lock.yaml"));
+        assert!(
+            BuildSystem::Pnpm
+                .primary_languages()
+                .contains(&"javascript")
+        );
     }
 }

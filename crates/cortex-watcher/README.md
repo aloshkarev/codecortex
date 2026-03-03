@@ -36,6 +36,34 @@ let paths = session.list();
 println!("Watching {} paths", paths.len());
 ```
 
+### Smart Watch Session (Recommended)
+
+The `SmartWatchSession` integrates all components: smart debouncing, event filtering, and performance management.
+
+```rust
+use cortex_watcher::{SmartWatchSession, SmartWatchConfig};
+use std::path::Path;
+
+let session = SmartWatchSession::with_defaults();
+
+// Add paths to watch
+session.watch(Path::new("/path/to/repo"))?;
+
+// Record events (automatically filtered and debounced)
+session.record_event(Path::new("/src/main.rs"), FileEventKind::Modified);
+
+// Get ready events after debouncing
+let ready = session.get_ready_events();
+for event in ready {
+    println!("Processing: {} (coalesced {} times)",
+        event.path.display(), event.coalesced_count);
+}
+
+// Check performance stats
+let stats = session.perf_stats();
+println!("Processed: {}, Dropped: {}", stats.events_processed, stats.events_dropped);
+```
+
 ### Project Registry
 
 ```rust
@@ -67,15 +95,15 @@ registry.refresh_project("/path/to/repo")?;
 use cortex_watcher::{SmartDebouncer, DebounceConfig, EventPriority};
 
 let config = DebounceConfig {
-    delay_ms: 100,
+    min_delay_ms: 100,
     max_delay_ms: 1000,
     coalesce_window_ms: 50,
     ..Default::default()
 };
-let debouncer = SmartDebouncer::with_config(config);
+let debouncer = SmartDebouncer::new(config);
 
-// Record events
-debouncer.record_event("/path/to/file.rs", EventPriority::Normal);
+// Add events
+debouncer.add_event(PathBuf::from("/path/to/file.rs"), FileEventKind::Modified);
 
 // Get ready events after delay
 let ready = debouncer.get_ready_events();
@@ -142,6 +170,8 @@ if is_remote_path("/Volumes/remote") {
 
 - `notify` - File system notifications
 - `cortex-core` - Core types
+- `dashmap` - Concurrent map for thread-safe registry
+- `parking_lot` - High-performance synchronization primitives
 
 ## Tests
 
@@ -150,4 +180,4 @@ Run tests with:
 cargo test -p cortex-watcher -- --test-threads=1
 ```
 
-Current test count: **60 tests**
+Current test count: **85 tests**

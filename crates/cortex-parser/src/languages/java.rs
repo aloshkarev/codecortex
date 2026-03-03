@@ -1,6 +1,8 @@
 //! Java language parser using Tree-sitter queries
 
-use super::common::{CallCaptures, DefCaptures, ImportCaptures, InheritCaptures, ParamCaptures, extract_all};
+use super::common::{
+    CallCaptures, DefCaptures, ImportCaptures, InheritCaptures, ParamCaptures, extract_all,
+};
 use crate::parser_impl::ParseResult;
 use cortex_core::{EdgeKind, EntityKind, Language};
 use std::path::Path;
@@ -65,22 +67,30 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
             kind: EntityKind::Class,
         },
         DefCaptures {
-            entity: def_q.capture_index_for_name("interface_entity").unwrap_or(u32::MAX),
+            entity: def_q
+                .capture_index_for_name("interface_entity")
+                .unwrap_or(u32::MAX),
             name: def_q.capture_index_for_name("name").unwrap_or(1),
             kind: EntityKind::Interface,
         },
         DefCaptures {
-            entity: def_q.capture_index_for_name("enum_entity").unwrap_or(u32::MAX),
+            entity: def_q
+                .capture_index_for_name("enum_entity")
+                .unwrap_or(u32::MAX),
             name: def_q.capture_index_for_name("name").unwrap_or(1),
             kind: EntityKind::Enum,
         },
         DefCaptures {
-            entity: def_q.capture_index_for_name("method_entity").unwrap_or(u32::MAX),
+            entity: def_q
+                .capture_index_for_name("method_entity")
+                .unwrap_or(u32::MAX),
             name: def_q.capture_index_for_name("name").unwrap_or(1),
             kind: EntityKind::Function,
         },
         DefCaptures {
-            entity: def_q.capture_index_for_name("ctor_entity").unwrap_or(u32::MAX),
+            entity: def_q
+                .capture_index_for_name("ctor_entity")
+                .unwrap_or(u32::MAX),
             name: def_q.capture_index_for_name("name").unwrap_or(1),
             kind: EntityKind::Function,
         },
@@ -102,11 +112,14 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
             module: import_q.capture_index_for_name("module").unwrap_or(0),
         },
         inherit_q.as_ref(),
-        inherit_q.as_ref().map(|q| InheritCaptures {
-            child: q.capture_index_for_name("child").unwrap_or(0),
-            parent: q.capture_index_for_name("parent").unwrap_or(1),
-            edge_kind: EdgeKind::Inherits,
-        }).as_ref(),
+        inherit_q
+            .as_ref()
+            .map(|q| InheritCaptures {
+                child: q.capture_index_for_name("child").unwrap_or(0),
+                parent: q.capture_index_for_name("parent").unwrap_or(1),
+                edge_kind: EdgeKind::Inherits,
+            })
+            .as_ref(),
         Some(&param_q),
         Some(&ParamCaptures {
             param: param_q.capture_index_for_name("param").unwrap_or(0),
@@ -123,7 +136,9 @@ mod tests {
 
     fn parse_java(source: &str) -> tree_sitter::Tree {
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_java::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_java::LANGUAGE.into())
+            .unwrap();
         parser.parse(source, None).unwrap()
     }
 
@@ -157,7 +172,12 @@ mod tests {
         let path = Path::new("Runnable.java");
         let result = extract(source, path, &tree);
 
-        assert!(result.nodes.iter().any(|n| n.name == "Runnable" && n.kind == EntityKind::Interface));
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.name == "Runnable" && n.kind == EntityKind::Interface)
+        );
     }
 
     #[test]

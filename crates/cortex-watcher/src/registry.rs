@@ -481,4 +481,131 @@ mod tests {
         let pr = ProjectRef::new(PathBuf::from("/project"), "main".into());
         assert_eq!(pr.context_id(), "/project@main");
     }
+
+    #[test]
+    fn registry_new_is_empty() {
+        // Use a temp path to ensure clean state
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state_path = temp_dir.path().join("registry.json");
+        let registry = ProjectRegistry::with_state_path(&state_path);
+        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 0);
+    }
+
+    #[test]
+    fn registry_default() {
+        // Default uses default_state_path which may have existing state
+        // Just test that it can be created
+        let _registry = ProjectRegistry::default();
+    }
+
+    #[test]
+    fn registry_list_projects_empty() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state_path = temp_dir.path().join("registry.json");
+        let registry = ProjectRegistry::with_state_path(&state_path);
+        let projects = registry.list_projects();
+        assert!(projects.is_empty());
+    }
+
+    #[test]
+    fn registry_get_project_not_found() {
+        let registry = ProjectRegistry::new();
+        let result = registry.get_project("/nonexistent/path");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn registry_get_current_project_empty() {
+        let registry = ProjectRegistry::new();
+        let result = registry.get_current_project();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn registry_error_display() {
+        let err = RegistryError::ProjectNotFound("/path".to_string());
+        assert!(err.to_string().contains("Project not found"));
+
+        let err = RegistryError::ProjectAlreadyExists("/path".to_string());
+        assert!(err.to_string().contains("already exists"));
+
+        let err = RegistryError::NoCurrentProject;
+        assert!(err.to_string().contains("No current project"));
+
+        let err = RegistryError::BranchNotIndexed("feature".to_string());
+        assert!(err.to_string().contains("Branch not indexed"));
+
+        let err = RegistryError::InvalidPath("bad path".to_string());
+        assert!(err.to_string().contains("Invalid path"));
+    }
+
+    #[test]
+    fn project_ref_new_with_commit() {
+        let pr = ProjectRef {
+            path: PathBuf::from("/project"),
+            branch: "main".to_string(),
+            commit: Some("abc123".to_string()),
+        };
+        assert_eq!(pr.branch, "main");
+        assert_eq!(pr.commit, Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn registry_set_status() {
+        let registry = ProjectRegistry::new();
+
+        // Try to set status on nonexistent project
+        let result = registry.set_status("/nonexistent", ProjectStatus::Watching);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn registry_update_project_not_found() {
+        let registry = ProjectRegistry::new();
+
+        let result = registry.update_project("/nonexistent", |state| {
+            state.status = ProjectStatus::Watching;
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn registry_check_branch_change_no_project() {
+        let registry = ProjectRegistry::new();
+
+        let result = registry.check_branch_change("/nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn registry_record_branch_index_no_project() {
+        let registry = ProjectRegistry::new();
+
+        let result = registry.record_branch_index(
+            "/nonexistent",
+            "main".to_string(),
+            "abc123".to_string(),
+            10,
+            100,
+            500,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn registry_cleanup_old_branches_no_project() {
+        let registry = ProjectRegistry::new();
+
+        let result = registry.cleanup_old_branches("/nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn registry_refresh_git_info_no_project() {
+        let registry = ProjectRegistry::new();
+
+        let result = registry.refresh_git_info("/nonexistent");
+        assert!(result.is_err());
+    }
 }

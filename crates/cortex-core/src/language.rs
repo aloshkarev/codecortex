@@ -107,13 +107,19 @@ mod tests {
 
     #[test]
     fn language_from_str_typescript() {
-        assert_eq!("typescript".parse::<Language>().unwrap(), Language::TypeScript);
+        assert_eq!(
+            "typescript".parse::<Language>().unwrap(),
+            Language::TypeScript
+        );
         assert_eq!("ts".parse::<Language>().unwrap(), Language::TypeScript);
     }
 
     #[test]
     fn language_from_str_javascript() {
-        assert_eq!("javascript".parse::<Language>().unwrap(), Language::JavaScript);
+        assert_eq!(
+            "javascript".parse::<Language>().unwrap(),
+            Language::JavaScript
+        );
         assert_eq!("js".parse::<Language>().unwrap(), Language::JavaScript);
     }
 
@@ -157,31 +163,58 @@ mod tests {
 
     #[test]
     fn language_from_path_rust() {
-        assert_eq!(Language::from_path(Path::new("src/main.rs")), Some(Language::Rust));
+        assert_eq!(
+            Language::from_path(Path::new("src/main.rs")),
+            Some(Language::Rust)
+        );
     }
 
     #[test]
     fn language_from_path_python() {
-        assert_eq!(Language::from_path(Path::new("app.py")), Some(Language::Python));
+        assert_eq!(
+            Language::from_path(Path::new("app.py")),
+            Some(Language::Python)
+        );
     }
 
     #[test]
     fn language_from_path_go() {
-        assert_eq!(Language::from_path(Path::new("main.go")), Some(Language::Go));
+        assert_eq!(
+            Language::from_path(Path::new("main.go")),
+            Some(Language::Go)
+        );
     }
 
     #[test]
     fn language_from_path_typescript() {
-        assert_eq!(Language::from_path(Path::new("app.ts")), Some(Language::TypeScript));
-        assert_eq!(Language::from_path(Path::new("component.tsx")), Some(Language::TypeScript));
+        assert_eq!(
+            Language::from_path(Path::new("app.ts")),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("component.tsx")),
+            Some(Language::TypeScript)
+        );
     }
 
     #[test]
     fn language_from_path_javascript() {
-        assert_eq!(Language::from_path(Path::new("index.js")), Some(Language::JavaScript));
-        assert_eq!(Language::from_path(Path::new("component.jsx")), Some(Language::JavaScript));
-        assert_eq!(Language::from_path(Path::new("module.mjs")), Some(Language::JavaScript));
-        assert_eq!(Language::from_path(Path::new("common.cjs")), Some(Language::JavaScript));
+        assert_eq!(
+            Language::from_path(Path::new("index.js")),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("component.jsx")),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("module.mjs")),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("common.cjs")),
+            Some(Language::JavaScript)
+        );
     }
 
     #[test]
@@ -191,10 +224,22 @@ mod tests {
 
     #[test]
     fn language_from_path_cpp() {
-        assert_eq!(Language::from_path(Path::new("main.cpp")), Some(Language::Cpp));
-        assert_eq!(Language::from_path(Path::new("header.hpp")), Some(Language::Cpp));
-        assert_eq!(Language::from_path(Path::new("impl.cc")), Some(Language::Cpp));
-        assert_eq!(Language::from_path(Path::new("impl.cxx")), Some(Language::Cpp));
+        assert_eq!(
+            Language::from_path(Path::new("main.cpp")),
+            Some(Language::Cpp)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("header.hpp")),
+            Some(Language::Cpp)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("impl.cc")),
+            Some(Language::Cpp)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("impl.cxx")),
+            Some(Language::Cpp)
+        );
     }
 
     #[test]
@@ -210,17 +255,26 @@ mod tests {
 
     #[test]
     fn language_from_path_java() {
-        assert_eq!(Language::from_path(Path::new("Main.java")), Some(Language::Java));
+        assert_eq!(
+            Language::from_path(Path::new("Main.java")),
+            Some(Language::Java)
+        );
     }
 
     #[test]
     fn language_from_path_php() {
-        assert_eq!(Language::from_path(Path::new("index.php")), Some(Language::Php));
+        assert_eq!(
+            Language::from_path(Path::new("index.php")),
+            Some(Language::Php)
+        );
     }
 
     #[test]
     fn language_from_path_ruby() {
-        assert_eq!(Language::from_path(Path::new("app.rb")), Some(Language::Ruby));
+        assert_eq!(
+            Language::from_path(Path::new("app.rb")),
+            Some(Language::Ruby)
+        );
     }
 
     #[test]

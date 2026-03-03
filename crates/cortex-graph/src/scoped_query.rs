@@ -173,7 +173,8 @@ impl ScopedQueryBuilder {
               AND n.branch = $branch
             RETURN n
             ORDER BY n.path
-            "#.to_string()
+            "#
+        .to_string()
     }
 
     /// Build a query to get callers of a function, scoped to the current branch
@@ -184,7 +185,8 @@ impl ScopedQueryBuilder {
               AND caller.branch = $branch
             RETURN caller
             ORDER BY caller.name
-            "#.to_string()
+            "#
+        .to_string()
     }
 
     /// Build a query to get callees of a function, scoped to the current branch
@@ -195,7 +197,8 @@ impl ScopedQueryBuilder {
               AND callee.branch = $branch
             RETURN callee
             ORDER BY callee.name
-            "#.to_string()
+            "#
+        .to_string()
     }
 
     /// Build a query to get the class hierarchy, scoped to the current branch
@@ -206,7 +209,8 @@ impl ScopedQueryBuilder {
               AND subclass.branch = $branch
               AND superclass.branch = $branch
             RETURN nodes(path) as hierarchy
-            "#.to_string()
+            "#
+        .to_string()
     }
 
     /// Build a query to find tests for a symbol, scoped to the current branch
@@ -254,7 +258,8 @@ impl ScopedQueryBuilder {
               AND NOT ()-[:CALLS]->(n)
             RETURN n
             ORDER BY n.name
-            "#.to_string()
+            "#
+        .to_string()
     }
 
     /// Build a query to get statistics for the scoped branch
@@ -269,7 +274,8 @@ impl ScopedQueryBuilder {
               count(CASE WHEN n:Class THEN 1 END) as class_count,
               count(CASE WHEN n:Variable THEN 1 END) as variable_count,
               count(CASE WHEN n:File THEN 1 END) as file_count
-            "#.to_string()
+            "#
+        .to_string()
     }
 
     /// Build a query to count nodes by kind, scoped to the current branch
@@ -280,7 +286,8 @@ impl ScopedQueryBuilder {
               AND n.branch = $branch
             RETURN n.kind as kind, count(n) as count
             ORDER BY count DESC
-            "#.to_string()
+            "#
+        .to_string()
     }
 
     /// Build a query to find the most complex functions, scoped to the current branch
@@ -353,12 +360,8 @@ mod tests {
     #[test]
     fn scoped_result_creation() {
         let scope = QueryScope::new("/repo", "main");
-        let result: ScopedResult<Vec<String>> = ScopedResult::new(
-            vec!["item1".to_string()],
-            scope.clone(),
-            10,
-            1,
-        );
+        let result: ScopedResult<Vec<String>> =
+            ScopedResult::new(vec!["item1".to_string()], scope.clone(), 10, 1);
         assert_eq!(result.data.len(), 1);
         assert_eq!(result.total_unscoped, 10);
         assert_eq!(result.total_scoped, 1);
