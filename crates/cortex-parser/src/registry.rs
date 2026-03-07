@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ParserRegistry {
     parsers: HashMap<Language, Arc<dyn Parser>>,
 }
@@ -39,6 +39,12 @@ impl ParserRegistry {
     }
 }
 
+impl Default for ParserRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,8 +60,7 @@ mod tests {
     #[test]
     fn parser_registry_default() {
         let registry = ParserRegistry::default();
-        // Default registry is empty
-        assert!(registry.parsers.is_empty());
+        assert_eq!(registry.parsers.len(), ParserRegistry::new().parsers.len());
     }
 
     #[test]

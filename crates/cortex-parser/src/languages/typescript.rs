@@ -52,6 +52,9 @@ const INHERIT_QUERY: &str = r#"
 const PARAM_QUERY: &str = r#"
 (required_parameter
   pattern: (identifier) @param)
+
+(optional_parameter
+  pattern: (identifier) @param)
 "#;
 
 const VARIABLE_QUERY: &str = r#"
@@ -119,6 +122,7 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         &import_q,
         &ImportCaptures {
             module: import_q.capture_index_for_name("module").unwrap_or(0),
+            method_filter: None,
         },
         inherit_q.as_ref(),
         inherit_q
@@ -246,6 +250,34 @@ mod tests {
                 .nodes
                 .iter()
                 .any(|n| n.name == "greet" && n.kind == EntityKind::Function)
+        );
+    }
+
+    #[test]
+    fn test_optional_param_detected() {
+        let source = r#"
+            function greet(name: string, title?: string): string {
+                return "Hello, " + name;
+            }
+        "#;
+        let tree = parse_typescript(source);
+        let path = Path::new("greet.ts");
+        let result = extract(source, path, &tree);
+        let param_names: Vec<_> = result
+            .nodes
+            .iter()
+            .filter(|n| n.kind == EntityKind::Parameter)
+            .map(|n| n.name.as_str())
+            .collect();
+        assert!(
+            param_names.contains(&"name"),
+            "required param 'name' should be detected; got: {:?}",
+            param_names
+        );
+        assert!(
+            param_names.contains(&"title"),
+            "optional param 'title' should be detected; got: {:?}",
+            param_names
         );
     }
 

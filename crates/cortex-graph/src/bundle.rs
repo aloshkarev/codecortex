@@ -3,6 +3,8 @@ use cortex_core::{CodeEdge, CodeNode, CortexError, EdgeKind, EntityKind, Languag
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+#[allow(unused_imports)]
+use tracing::warn;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphBundle {
@@ -64,11 +66,9 @@ impl BundleStore {
                 .get("rel_type")
                 .and_then(|v| v.as_str())
                 .unwrap_or_default();
-            let properties_raw = row
+            let properties = row
                 .get("properties")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let properties = serde_json::from_str::<HashMap<String, String>>(&properties_raw)
+                .map(decode_properties)
                 .unwrap_or_default();
 
             if let (Some(from), Some(to)) = (from, to) {
@@ -89,8 +89,16 @@ impl BundleStore {
 fn decode_node_from_json(node: &serde_json::Value) -> CodeNode {
     // Handle both Neo4j format (node with id, labels, properties)
     // and Memgraph format (direct properties)
-    let (kind_str, name, id, path, line_number, lang, source, docstring, properties_raw) =
-        if let Some(props) = node.get("properties") {
+    let neo4j_wrapped = node.get("labels").is_some()
+        || node
+            .get("properties")
+            .and_then(|value| value.as_object())
+            .map(|props| props.contains_key("id") || props.contains_key("kind"))
+            .unwrap_or(false);
+
+    let (kind_str, name, id, path, line_number, lang, source, docstring, properties_value) =
+        if neo4j_wrapped {
+            let props = node.get("properties").unwrap_or(&serde_json::Value::Null);
             // Neo4j-style: {labels: [...], properties: {kind, name, ...}}
             let kind = props.get("kind").and_then(|v| v.as_str()).unwrap_or("File");
             let name = props
@@ -106,7 +114,7 @@ fn decode_node_from_json(node: &serde_json::Value) -> CodeNode {
             let lang = props.get("lang").and_then(|v| v.as_str());
             let source = props.get("source").and_then(|v| v.as_str());
             let docstring = props.get("docstring").and_then(|v| v.as_str());
-            let props_str = props.get("properties").and_then(|v| v.as_str());
+            let properties = props.get("properties");
             (
                 kind,
                 name,
@@ -116,7 +124,7 @@ fn decode_node_from_json(node: &serde_json::Value) -> CodeNode {
                 lang,
                 source,
                 docstring,
-                props_str,
+                properties,
             )
         } else {
             // Direct format: {kind, name, id, path, ...}
@@ -134,7 +142,7 @@ fn decode_node_from_json(node: &serde_json::Value) -> CodeNode {
             let lang = node.get("lang").and_then(|v| v.as_str());
             let source = node.get("source").and_then(|v| v.as_str());
             let docstring = node.get("docstring").and_then(|v| v.as_str());
-            let props_str = node.get("properties").and_then(|v| v.as_str());
+            let properties = node.get("properties");
             (
                 kind,
                 name,
@@ -144,13 +152,28 @@ fn decode_node_from_json(node: &serde_json::Value) -> CodeNode {
                 lang,
                 source,
                 docstring,
-                props_str,
+                properties,
             )
         };
 
-    let properties = properties_raw
-        .and_then(|v| serde_json::from_str::<HashMap<String, String>>(v).ok())
-        .unwrap_or_default();
+    let mut properties = properties_value.map(decode_properties).unwrap_or_default();
+
+    // Restore top-level branch/repository_path written by upsert_node into
+    // the properties map so round-tripped bundles preserve scoping metadata.
+    let src = if neo4j_wrapped {
+        node.get("properties").unwrap_or(node)
+    } else {
+        node
+    };
+    for key in &["branch", "repository_path"] {
+        if let Some(val) = src.get(*key).and_then(|v| v.as_str()) {
+            if !val.is_empty() {
+                properties
+                    .entry(key.to_string())
+                    .or_insert_with(|| val.to_string());
+            }
+        }
+    }
 
     CodeNode {
         id: id.to_string(),
@@ -162,6 +185,30 @@ fn decode_node_from_json(node: &serde_json::Value) -> CodeNode {
         source: source.map(String::from),
         docstring: docstring.map(String::from),
         properties,
+    }
+}
+
+fn decode_properties(value: &serde_json::Value) -> HashMap<String, String> {
+    match value {
+        serde_json::Value::String(raw) => serde_json::from_str::<serde_json::Value>(raw)
+            .ok()
+            .map(|parsed| decode_properties(&parsed))
+            .unwrap_or_default(),
+        serde_json::Value::Object(map) => map
+            .iter()
+            .map(|(key, value)| (key.clone(), property_value_to_string(value)))
+            .collect(),
+        _ => HashMap::new(),
+    }
+}
+
+fn property_value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::Bool(flag) => flag.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -186,7 +233,16 @@ fn decode_entity_kind(value: &str) -> EntityKind {
         "Module" => EntityKind::Module,
         "Property" => EntityKind::Property,
         "Field" => EntityKind::Field,
-        _ => EntityKind::File,
+        // CallTarget is an ephemeral graph label, not a real EntityKind.
+        // Map to File to avoid losing the node entirely on decode.
+        "CallTarget" => EntityKind::File,
+        other => {
+            tracing::warn!(
+                kind = other,
+                "Unknown entity kind in bundle; defaulting to File"
+            );
+            EntityKind::File
+        }
     }
 }
 
@@ -208,7 +264,13 @@ fn decode_edge_kind(value: &str) -> EdgeKind {
         "HAS_PROPERTY" => EdgeKind::HasProperty,
         "DOCUMENTS" => EdgeKind::Documents,
         "ANNOTATES" => EdgeKind::Annotates,
-        _ => EdgeKind::Contains,
+        other => {
+            tracing::warn!(
+                kind = other,
+                "Unknown edge kind in bundle; defaulting to Contains"
+            );
+            EdgeKind::Contains
+        }
     }
 }
 
@@ -221,6 +283,9 @@ fn decode_lang(value: &str) -> Option<Language> {
         "go" => Some(Language::Go),
         "typescript" => Some(Language::TypeScript),
         "javascript" => Some(Language::JavaScript),
+        "java" => Some(Language::Java),
+        "php" => Some(Language::Php),
+        "ruby" => Some(Language::Ruby),
         _ => None,
     }
 }
@@ -288,9 +353,12 @@ mod tests {
         assert_eq!(decode_lang("go"), Some(Language::Go));
         assert_eq!(decode_lang("typescript"), Some(Language::TypeScript));
         assert_eq!(decode_lang("javascript"), Some(Language::JavaScript));
+        assert_eq!(decode_lang("java"), Some(Language::Java));
+        assert_eq!(decode_lang("php"), Some(Language::Php));
+        assert_eq!(decode_lang("ruby"), Some(Language::Ruby));
         // Unknown values return None
-        assert_eq!(decode_lang("ruby"), None);
         assert_eq!(decode_lang(""), None);
+        assert_eq!(decode_lang("kotlin"), None);
     }
 
     #[test]
@@ -429,5 +497,89 @@ mod tests {
 
         assert_eq!(parsed.nodes.len(), 100);
         assert_eq!(parsed.edges.len(), 50);
+    }
+
+    #[test]
+    fn decode_node_preserves_object_properties() {
+        let node = serde_json::json!({
+            "kind": "Function",
+            "name": "demo",
+            "id": "func:demo",
+            "properties": {
+                "visibility": "public",
+                "async": true,
+                "arity": 2
+            }
+        });
+
+        let parsed = decode_node_from_json(&node);
+
+        assert_eq!(
+            parsed.properties.get("visibility").map(String::as_str),
+            Some("public")
+        );
+        assert_eq!(
+            parsed.properties.get("async").map(String::as_str),
+            Some("true")
+        );
+        assert_eq!(
+            parsed.properties.get("arity").map(String::as_str),
+            Some("2")
+        );
+    }
+
+    #[test]
+    fn decode_properties_supports_direct_objects() {
+        let properties = decode_properties(&serde_json::json!({
+            "line": 12,
+            "generated": false
+        }));
+
+        assert_eq!(properties.get("line").map(String::as_str), Some("12"));
+        assert_eq!(
+            properties.get("generated").map(String::as_str),
+            Some("false")
+        );
+    }
+
+    #[test]
+    fn decode_node_captures_top_level_branch_and_repository_path() {
+        let node = serde_json::json!({
+            "kind": "Function",
+            "name": "demo",
+            "id": "func:demo",
+            "branch": "feature/x",
+            "repository_path": "/repo",
+            "properties": "{}"
+        });
+        let parsed = decode_node_from_json(&node);
+        assert_eq!(
+            parsed.properties.get("branch").map(String::as_str),
+            Some("feature/x"),
+            "top-level branch must be captured into properties"
+        );
+        assert_eq!(
+            parsed.properties.get("repository_path").map(String::as_str),
+            Some("/repo"),
+            "top-level repository_path must be captured into properties"
+        );
+    }
+
+    #[test]
+    fn decode_node_does_not_overwrite_nested_branch() {
+        let node = serde_json::json!({
+            "kind": "Function",
+            "name": "demo",
+            "id": "func:demo",
+            "branch": "top-level-branch",
+            "repository_path": "/top",
+            "properties": "{\"branch\":\"nested-branch\",\"repository_path\":\"/nested\"}"
+        });
+        let parsed = decode_node_from_json(&node);
+        assert_eq!(
+            parsed.properties.get("branch").map(String::as_str),
+            Some("nested-branch"),
+            "nested properties should take precedence over top-level"
+        );
     }
 }

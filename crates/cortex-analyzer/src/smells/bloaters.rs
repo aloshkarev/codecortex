@@ -26,14 +26,10 @@ pub fn detect_long_functions(
     let mut function_start = 0;
     let mut brace_count = 0;
     let mut function_name = String::new();
-    let mut paren_depth = 0;
+    let mut function_is_python_style = false;
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
-
-        // Track parenthesis depth for multi-line function signatures
-        paren_depth += trimmed.matches('(').count() as i32;
-        paren_depth -= trimmed.matches(')').count() as i32;
 
         // Detect function start (works for Rust, Python, JS, Java, C#, etc.)
         if !in_function
@@ -51,17 +47,15 @@ pub fn detect_long_functions(
             function_start = i;
             brace_count = 0;
             function_name = extract_function_name(trimmed);
+            function_is_python_style = trimmed.starts_with("def ") && !source.contains('{');
         }
 
         if in_function {
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            // Also track Python-style functions (using indentation)
-            let is_python_style = !source.contains('{') && trimmed.starts_with("def ");
-
-            if (brace_count == 0 && i > function_start && !is_python_style)
-                || (is_python_style && is_python_function_end(&lines, i, function_start))
+            if (brace_count == 0 && i > function_start && !function_is_python_style)
+                || (function_is_python_style && is_python_function_end(&lines, i, function_start))
             {
                 let function_lines = i - function_start + 1;
 
@@ -89,6 +83,7 @@ pub fn detect_long_functions(
                 }
 
                 in_function = false;
+                function_is_python_style = false;
             }
         }
     }
@@ -337,7 +332,7 @@ pub fn detect_data_clumps(source: &str, file_path: &str, config: &SmellConfig) -
     for i in 0..param_groups.len() {
         for j in (i + 1)..param_groups.len() {
             let (_, params1, line1) = &param_groups[i];
-            let (func2, params2, line2) = &param_groups[j];
+            let (func2, params2, _line2) = &param_groups[j];
 
             // Calculate Jaccard similarity
             let intersection = params1.iter().filter(|p| params2.contains(p)).count();
@@ -691,12 +686,19 @@ fn is_python_function_end(lines: &[&str], current_idx: usize, function_start: us
         return false;
     }
 
-    let current_indent = get_indent_level(lines[current_idx]);
     let function_indent = get_indent_level(lines[function_start]);
 
-    // Python function ends when we return to same or lesser indentation
-    // and we're past the first line of the function
-    current_indent <= function_indent && current_idx > function_start + 1
+    for next_line in lines.iter().skip(current_idx + 1) {
+        let trimmed = next_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let next_indent = get_indent_level(next_line);
+        return next_indent <= function_indent;
+    }
+
+    true
 }
 
 fn get_indent_level(line: &str) -> usize {
@@ -740,6 +742,28 @@ mod tests {
         let smells = detect_long_functions(&source, "test.rs", &config);
         assert!(!smells.is_empty());
         assert_eq!(smells[0].smell_type, SmellType::LongFunction);
+    }
+
+    #[test]
+    fn test_detect_long_python_function() {
+        let config = SmellConfig {
+            max_function_lines: 4,
+            ..Default::default()
+        };
+
+        let source = r#"
+def long_function():
+    step_one()
+    if ready:
+        step_two()
+        step_three()
+    finalize()
+"#;
+
+        let smells = detect_long_functions(source, "test.py", &config);
+        assert!(!smells.is_empty());
+        assert_eq!(smells[0].smell_type, SmellType::LongFunction);
+        assert_eq!(smells[0].symbol_name, "long_function");
     }
 
     #[test]

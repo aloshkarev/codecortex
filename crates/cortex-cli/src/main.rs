@@ -1028,19 +1028,23 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
             println!("   Base URL: {}", config.llm.ollama_base_url);
             println!("   Model: {}", config.llm.ollama_embedding_model);
 
-            // Try to connect to Ollama using TCP
-            let ollama_addr = config
+            // Try to connect to Ollama using TCP (use configured host:port)
+            let authority = config
                 .llm
                 .ollama_base_url
                 .replace("http://", "")
-                .replace("https://", "");
-
-            let addr: std::net::SocketAddr = format!(
-                "{}:11434",
-                ollama_addr.split(':').next().unwrap_or("127.0.0.1")
-            )
-            .parse()
-            .unwrap_or_else(|_| "127.0.0.1:11434".parse().unwrap());
+                .replace("https://", "")
+                .trim_end_matches('/')
+                .to_string();
+            let (host, port) = authority
+                .rsplit_once(':')
+                .and_then(|(h, p)| p.parse::<u16>().ok().map(|port| (h.to_string(), port)))
+                .unwrap_or_else(|| (authority, 11434));
+            let default_addr: std::net::SocketAddr = "127.0.0.1:11434"
+                .parse()
+                .expect("valid default Ollama address");
+            let addr: std::net::SocketAddr =
+                format!("{}:{}", host, port).parse().unwrap_or(default_addr);
 
             match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5)) {
                 Ok(_) => {
@@ -1233,11 +1237,18 @@ fn matches_exclude_pattern(path: &Path, pattern: &str) -> bool {
     if pattern.is_empty() {
         return false;
     }
-    if pattern.ends_with("/**") {
-        let prefix = pattern.trim_end_matches("/**");
+    if let Some(dir) = pattern.strip_suffix("/**") {
+        if dir.contains('/') || dir.contains('\\') {
+            // Multi-segment pattern like "src/generated/**": same logic as indexer
+            let dir_with_sep = format!("{}/", dir.replace('\\', "/"));
+            let normalized = path.to_string_lossy().replace('\\', "/");
+            return normalized.contains(&dir_with_sep)
+                || normalized.ends_with(&dir_with_sep[..dir_with_sep.len() - 1]);
+        }
+        // Single-segment pattern like "target/**": match any path component
         return path
             .components()
-            .any(|component| component.as_os_str() == std::ffi::OsStr::new(prefix));
+            .any(|c| c.as_os_str() == std::ffi::OsStr::new(dir));
     }
     if pattern.starts_with("*.") {
         let ext = &pattern[1..];
@@ -1432,6 +1443,10 @@ async fn run_index(
         unsafe {
             std::env::set_var("CORTEX_INDEX_INCLUDE_FILES", include_files);
         }
+    } else {
+        unsafe {
+            std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
+        }
     }
     if let Some(cfg) = project_config.as_ref()
         && !cfg.exclude_patterns.is_empty()
@@ -1442,13 +1457,17 @@ async fn run_index(
                 cfg.exclude_patterns.join("\n"),
             );
         }
+    } else {
+        unsafe {
+            std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
+        }
     }
 
     let (report, repo_root) = match index_with_git_context(
         config,
         &target_path,
-        force && effective_mode == IndexModeArg::Full,
-        !(force && effective_mode == IndexModeArg::Full),
+        effective_mode == IndexModeArg::Full,
+        effective_mode != IndexModeArg::Full,
     )
     .await
     {
@@ -5947,5 +5966,46 @@ mod tests {
 
         assert!(global_flags.contains(&"format"));
         assert!(global_flags.contains(&"verbose"));
+    }
+
+    #[test]
+    fn test_matches_exclude_pattern_directory_component_semantics() {
+        let matching = Path::new("/repo/src/node_modules/index.ts");
+        let non_matching_substring = Path::new("/repo/src/my-node_modules-copy/index.ts");
+
+        assert!(matches_exclude_pattern(matching, "node_modules/**"));
+        assert!(!matches_exclude_pattern(
+            non_matching_substring,
+            "node_modules/**"
+        ));
+    }
+
+    #[test]
+    fn test_matches_exclude_pattern_extension_semantics() {
+        assert!(matches_exclude_pattern(
+            Path::new("/repo/build/app.pyc"),
+            "*.pyc"
+        ));
+        assert!(!matches_exclude_pattern(
+            Path::new("/repo/build/app.py"),
+            "*.pyc"
+        ));
+    }
+
+    #[test]
+    fn test_matches_exclude_pattern_multi_segment_directory() {
+        // Multi-segment "src/generated/**" must match path under that dir (same as indexer)
+        assert!(matches_exclude_pattern(
+            Path::new("/repo/src/generated/foo.rs"),
+            "src/generated/**"
+        ));
+        assert!(matches_exclude_pattern(
+            Path::new("repo/src/generated/bar.py"),
+            "src/generated/**"
+        ));
+        assert!(!matches_exclude_pattern(
+            Path::new("/repo/src/other/foo.rs"),
+            "src/generated/**"
+        ));
     }
 }

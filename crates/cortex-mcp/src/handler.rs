@@ -381,6 +381,10 @@ impl CortexHandler {
         feature_flag_enabled(key, default_value)
     }
 
+    fn current_watch_config(&self) -> CortexConfig {
+        CortexConfig::load().unwrap_or_else(|_| self.config.clone())
+    }
+
     // ── indexing ─────────────────────────────────────────────────────────────
 
     #[tool(description = "Index a directory or file into the Memgraph code graph")]
@@ -431,11 +435,11 @@ impl CortexHandler {
         &self,
         Parameters(req): Parameters<PathReq>,
     ) -> Result<CallToolResult, McpError> {
-        let session = WatchSession::new(&self.config);
+        let mut cfg = self.current_watch_config();
+        let session = WatchSession::new(&cfg);
         session
             .watch(PathBuf::from(&req.path).as_path())
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let mut cfg = self.config.clone();
         session
             .persist_to_config(&mut cfg)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -444,7 +448,7 @@ impl CortexHandler {
         self.jobs
             .mark_running(&job_id, format!("Watching {}", req.path));
         let jobs = self.jobs.clone();
-        let cfg = self.config.clone();
+        let cfg = cfg.clone();
         let watch_path = req.path.clone();
         let job_id_for_task = job_id.clone();
         tokio::spawn(async move {
@@ -474,7 +478,8 @@ impl CortexHandler {
 
     #[tool(description = "List all currently watched paths")]
     async fn list_watched_paths(&self) -> Result<CallToolResult, McpError> {
-        let paths = WatchSession::new(&self.config).list();
+        let cfg = self.current_watch_config();
+        let paths = WatchSession::new(&cfg).list();
         Ok(Self::ok(
             serde_json::to_string_pretty(&paths).unwrap_or_default(),
         ))
@@ -485,8 +490,13 @@ impl CortexHandler {
         &self,
         Parameters(req): Parameters<PathReq>,
     ) -> Result<CallToolResult, McpError> {
-        let removed = WatchSession::new(&self.config)
+        let mut cfg = self.current_watch_config();
+        let session = WatchSession::new(&cfg);
+        let removed = session
             .unwatch(PathBuf::from(&req.path).as_path())
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        session
+            .persist_to_config(&mut cfg)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(Self::ok(format!("removed={}", removed)))
     }

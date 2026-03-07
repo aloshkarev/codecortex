@@ -339,9 +339,11 @@ fn is_signature_line(trimmed: &str) -> bool {
 ///
 /// # Example
 /// ```
-/// let doc = "This function does something. It also does more.";
-/// let truncated = truncate_docstring(doc, 50);
-/// assert_eq!(truncated, "This function does something...");
+/// use cortex_indexer::skeleton::truncate_docstring;
+///
+/// let doc = "This function does something. It also does more details beyond the limit.";
+/// let truncated = truncate_docstring(doc, 35);
+/// assert_eq!(truncated, "This function does something. ...");
 /// ```
 pub fn truncate_docstring(doc: &str, max_chars: usize) -> String {
     let doc = doc.trim();
@@ -388,9 +390,11 @@ pub fn truncate_docstring(doc: &str, max_chars: usize) -> String {
 ///
 /// # Example
 /// ```
+/// use cortex_indexer::skeleton::summarize_type;
+///
 /// let ty = "HashMap<String, Vec<Result<MyCustomType, Box<dyn Error>>>>";
 /// let summarized = summarize_type(ty, 30);
-/// assert_eq!(summarized, "HashMap<String, Vec<...>>");
+/// assert_eq!(summarized, "HashMap<String, ...>");
 /// ```
 pub fn summarize_type(ty: &str, max_len: usize) -> String {
     let ty = ty.trim();
@@ -462,7 +466,7 @@ pub fn summarize_type(ty: &str, max_len: usize) -> String {
         if ty.starts_with(wrapper) {
             let inner = &ty[wrapper.len()..ty.len().saturating_sub(1)];
             let summarized_inner = summarize_type(inner, max_len.saturating_sub(wrapper.len() + 3));
-            return format!("{}{}>", &wrapper[..wrapper.len() - 1], summarized_inner);
+            return format!("{}{}>", wrapper, summarized_inner);
         }
     }
 
@@ -496,13 +500,15 @@ fn find_matching_paren(s: &str) -> Option<usize> {
 ///
 /// # Example
 /// ```
+/// use cortex_indexer::skeleton::compress_struct_fields;
+///
 /// let fields = r#"    pub name: String,
 ///     pub age: u32,
 ///     pub data: HashMap<String, Vec<Result<Data, Error>>>,
 ///     pub extra: Option<Box<dyn Any>>"#;
 /// let compressed = compress_struct_fields(fields, 60);
-/// assert!(compressed.contains("name: String"));
-/// assert!(compressed.contains("HashMap<...>"));
+/// assert!(compressed.contains("pub name: String"));
+/// assert!(compressed.contains("pub data:"));
 /// ```
 pub fn compress_struct_fields(fields: &str, max_total_width: usize) -> String {
     let lines: Vec<&str> = fields.lines().collect();

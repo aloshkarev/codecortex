@@ -346,8 +346,16 @@ impl DuplicationDetector {
             return 0.0;
         }
 
-        let duplicated_lines: usize = duplicates.iter().map(|d| d.line_count).sum();
-        (duplicated_lines as f64 / total_lines as f64) * 100.0
+        let mut duplicated_lines: HashSet<(String, usize)> = HashSet::new();
+        for d in duplicates {
+            for line in d.location1.start_line..=d.location1.end_line {
+                duplicated_lines.insert((d.location1.file_path.clone(), line));
+            }
+            for line in d.location2.start_line..=d.location2.end_line {
+                duplicated_lines.insert((d.location2.file_path.clone(), line));
+            }
+        }
+        (duplicated_lines.len() as f64 / total_lines as f64) * 100.0
     }
 
     /// Find exact duplicate lines
@@ -512,8 +520,39 @@ fn function_two() {
             line_count: 10,
             snippet: "...".to_string(),
         }];
+        // Unique lines: a.rs 1-10 (10) + b.rs 1-10 (10) = 20 lines
         let percentage = detector.duplication_percentage(&duplicates, 100);
-        assert!((percentage - 10.0).abs() < 0.001);
+        assert!((percentage - 20.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_duplication_percentage_no_overcount() {
+        let detector = DuplicationDetector::new();
+        // Overlapping blocks: lines 1-10 and 5-15 in same file - lines 5-10 are double-counted
+        // without deduplication. With HashSet: location1 contributes 1-10, location2 contributes
+        // 5-15. Unique (file, line) pairs: 1-15 = 15 lines per location. Both blocks share
+        // the same file for overlapping region. Actually each block has location1 and location2.
+        // Block 1: loc1 (a.rs, 1-10), loc2 (a.rs, 5-15)
+        // Unique lines from both: 1-15 = 15 lines
+        let duplicates = vec![DuplicateBlock {
+            location1: CodeLocation {
+                file_path: "a.rs".to_string(),
+                start_line: 1,
+                end_line: 10,
+            },
+            location2: CodeLocation {
+                file_path: "a.rs".to_string(),
+                start_line: 5,
+                end_line: 15,
+            },
+            similarity: 0.9,
+            line_count: 10,
+            snippet: "...".to_string(),
+        }];
+        let percentage = detector.duplication_percentage(&duplicates, 100);
+        // Unique lines: 1-15 = 15 lines, so 15%
+        assert!((percentage - 15.0).abs() < 0.001);
+        assert!(percentage <= 100.0);
     }
 
     #[test]

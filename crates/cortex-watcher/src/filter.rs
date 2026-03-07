@@ -267,26 +267,6 @@ impl EventFilter {
             return false;
         }
 
-        // Check extension exclusions/inclusions
-        if let Some(ext) = path.extension() {
-            let ext_str = ext.to_string_lossy().to_string();
-
-            // Explicitly excluded extension
-            if self.config.exclude_extensions.contains(&ext_str) {
-                return false;
-            }
-
-            // If we have include_extensions and this IS in it, include immediately
-            if self.config.include_extensions.contains(&ext_str) {
-                return true;
-            }
-
-            // If we have include_extensions and this isn't in it, exclude
-            if !self.config.include_extensions.is_empty() {
-                return false;
-            }
-        }
-
         // Check file size if path exists
         if (self.config.min_file_size > 0 || self.config.max_file_size > 0)
             && let Ok(metadata) = std::fs::metadata(path)
@@ -311,7 +291,23 @@ impl EventFilter {
             }
         }
 
-        // No rule matched, use default
+        // Check extension exclusions/inclusions after explicit rules.
+        if let Some(ext) = path.extension() {
+            let ext_str = ext.to_string_lossy().to_string();
+
+            if self.config.exclude_extensions.contains(&ext_str) {
+                return false;
+            }
+
+            if self.config.include_extensions.contains(&ext_str) {
+                return true;
+            }
+
+            if !self.config.include_extensions.is_empty() {
+                return false;
+            }
+        }
+
         self.config.default_pass
     }
 
@@ -517,6 +513,15 @@ mod tests {
         filter.add_exclude("docs", "*.md");
 
         assert!(!filter.should_process(Path::new("README.md"), WatchEventKind::Modified));
+        assert!(filter.should_process(Path::new("src/main.rs"), WatchEventKind::Modified));
+    }
+
+    #[test]
+    fn event_filter_rules_override_extension_allowlist() {
+        let mut filter = EventFilter::new();
+        filter.add_exclude("generated", "generated.rs");
+
+        assert!(!filter.should_process(Path::new("src/generated.rs"), WatchEventKind::Modified));
         assert!(filter.should_process(Path::new("src/main.rs"), WatchEventKind::Modified));
     }
 

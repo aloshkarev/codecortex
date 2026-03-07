@@ -150,12 +150,60 @@ impl GitOperations {
 
     /// Check if the path is a Git repository
     pub fn is_git_repo(&self) -> bool {
-        self.repo_path.join(".git").exists()
+        let git_path = self.repo_path.join(".git");
+        git_path.is_dir() || Self::resolve_git_dir_from_path(&self.repo_path, &git_path).is_some()
     }
 
     /// Get the .git directory path
     pub fn git_dir(&self) -> std::path::PathBuf {
-        self.repo_path.join(".git")
+        let git_path = self.repo_path.join(".git");
+        Self::resolve_git_dir_from_path(&self.repo_path, &git_path).unwrap_or(git_path)
+    }
+
+    /// Get the common/shared git directory.
+    ///
+    /// In linked worktrees, `git_dir()` points at the per-worktree admin dir while refs,
+    /// packed-refs, and config typically live under the shared common dir.
+    fn common_git_dir(&self) -> std::path::PathBuf {
+        let git_dir = self.git_dir();
+        let commondir_path = git_dir.join("commondir");
+        if !commondir_path.exists() {
+            return git_dir;
+        }
+
+        let Ok(content) = std::fs::read_to_string(&commondir_path) else {
+            return git_dir;
+        };
+        let commondir = content.trim();
+        if commondir.is_empty() {
+            return git_dir;
+        }
+
+        let common = Path::new(commondir);
+        if common.is_absolute() {
+            common.to_path_buf()
+        } else {
+            git_dir.join(common)
+        }
+    }
+
+    fn resolve_git_dir_from_path(repo_path: &Path, git_path: &Path) -> Option<std::path::PathBuf> {
+        if git_path.is_dir() {
+            return Some(git_path.to_path_buf());
+        }
+        if !git_path.is_file() {
+            return None;
+        }
+
+        let content = std::fs::read_to_string(git_path).ok()?;
+        let git_dir = content.trim().strip_prefix("gitdir:")?.trim();
+        let git_dir = Path::new(git_dir);
+
+        Some(if git_dir.is_absolute() {
+            git_dir.to_path_buf()
+        } else {
+            repo_path.join(git_dir)
+        })
     }
 
     /// Get comprehensive Git information
@@ -236,7 +284,11 @@ impl GitOperations {
         }
 
         // Read from refs/heads/{branch}
-        let ref_path = self.git_dir().join("refs").join("heads").join(&branch);
+        let ref_path = self
+            .common_git_dir()
+            .join("refs")
+            .join("heads")
+            .join(&branch);
         if ref_path.exists() {
             let content = std::fs::read_to_string(&ref_path)
                 .map_err(|e| GitError::FileReadError(e.to_string()))?;
@@ -244,7 +296,7 @@ impl GitOperations {
         }
 
         // Fallback to packed-refs
-        let packed_refs = self.git_dir().join("packed-refs");
+        let packed_refs = self.common_git_dir().join("packed-refs");
         if packed_refs.exists() {
             let content = std::fs::read_to_string(&packed_refs)
                 .map_err(|e| GitError::FileReadError(e.to_string()))?;
@@ -279,15 +331,16 @@ impl GitOperations {
     pub fn list_branches(&self) -> Result<Vec<BranchInfo>, GitError> {
         let mut branches = Vec::new();
         let current_branch = self.get_current_branch().unwrap_or_default();
+        let common_git_dir = self.common_git_dir();
 
         // List local branches from refs/heads
-        let heads_dir = self.git_dir().join("refs").join("heads");
+        let heads_dir = common_git_dir.join("refs").join("heads");
         if heads_dir.exists() {
             self.collect_branches_from_dir(&heads_dir, "", false, &current_branch, &mut branches)?;
         }
 
         // List remote branches from refs/remotes
-        let remotes_dir = self.git_dir().join("refs").join("remotes");
+        let remotes_dir = common_git_dir.join("refs").join("remotes");
         if remotes_dir.exists() {
             self.collect_branches_from_dir(&remotes_dir, "", true, &current_branch, &mut branches)?;
         }
@@ -395,7 +448,7 @@ impl GitOperations {
 
     /// Get the remote URL (origin)
     pub fn get_remote_url(&self) -> Result<Option<String>, GitError> {
-        let config_path = self.git_dir().join("config");
+        let config_path = self.common_git_dir().join("config");
         if !config_path.exists() {
             return Ok(None);
         }
@@ -478,16 +531,14 @@ impl GitOperations {
             return Ok(vec![]);
         }
 
-        let limit_arg = if limit > 0 {
-            format!("-{}", limit)
-        } else {
-            String::new()
-        };
-
         // Format: hash|author|email|timestamp|subject|body|parents
         let format_str = "%H|%an|%ae|%at|%s|%b|%P";
         let format_arg = format!("--format={}", format_str);
-        let args = vec!["log", &format_arg, &limit_arg];
+        let mut owned_args = vec!["log".to_string(), format_arg];
+        if limit > 0 {
+            owned_args.push(format!("-{}", limit));
+        }
+        let args: Vec<&str> = owned_args.iter().map(String::as_str).collect();
 
         let output = self.run_git_command_with_empty(&args)?;
         let mut commits = Vec::new();
@@ -809,10 +860,10 @@ impl GitOperations {
         for line in &output {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
-                let change_type = match parts[0] {
-                    "A" => FileChangeType::Added,
-                    "D" => FileChangeType::Deleted,
-                    "R" => FileChangeType::Renamed,
+                let change_type = match parts[0].chars().next() {
+                    Some('A') => FileChangeType::Added,
+                    Some('D') => FileChangeType::Deleted,
+                    Some('R') => FileChangeType::Renamed,
                     _ => FileChangeType::Modified,
                 };
 
@@ -995,6 +1046,26 @@ mod tests {
     }
 
     #[test]
+    fn test_git_dir_resolves_gitdir_file() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        create_commit(&repo_path, "test.txt", "content", "Initial commit");
+
+        let linked_worktree = TempDir::new().expect("Failed to create linked worktree dir");
+        let git_file_path = linked_worktree.path().join(".git");
+        fs::write(
+            &git_file_path,
+            format!("gitdir: {}\n", repo_path.join(".git").display()),
+        )
+        .expect("Failed to write .git file");
+
+        let git = GitOperations::new(linked_worktree.path());
+        assert!(git.is_git_repo());
+        assert_eq!(git.git_dir(), repo_path.join(".git"));
+        assert!(!git.get_current_branch().unwrap().is_empty());
+        assert_eq!(git.get_current_commit().unwrap().len(), 40);
+    }
+
+    #[test]
     fn test_get_current_branch_initial() {
         let (_temp_dir, repo_path) = create_test_repo();
         let git = GitOperations::new(&repo_path);
@@ -1002,6 +1073,42 @@ mod tests {
         // Initial branch should be main or master
         let branch = git.get_current_branch().unwrap();
         assert!(branch == "main" || branch == "master" || branch.starts_with("detached"));
+    }
+
+    #[test]
+    fn test_worktree_common_dir_reads_branch_commit_and_remote() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        create_commit(&repo_path, "test.txt", "content", "Initial commit");
+        let branch = GitOperations::new(&repo_path).get_current_branch().unwrap();
+        let commit = GitOperations::new(&repo_path).get_current_commit().unwrap();
+        let _ = Command::new("git")
+            .current_dir(&repo_path)
+            .args(["remote", "add", "origin", "git@example.com:repo.git"])
+            .output();
+
+        let linked_worktree = TempDir::new().expect("Failed to create linked worktree dir");
+        let worktree_git_dir = repo_path.join(".git").join("worktrees").join("linked");
+        fs::create_dir_all(&worktree_git_dir).expect("Failed to create worktree git dir");
+        fs::write(
+            linked_worktree.path().join(".git"),
+            format!("gitdir: {}\n", worktree_git_dir.display()),
+        )
+        .expect("Failed to write worktree .git file");
+        fs::write(
+            worktree_git_dir.join("HEAD"),
+            format!("ref: refs/heads/{}\n", branch),
+        )
+        .expect("Failed to write worktree HEAD");
+        fs::write(worktree_git_dir.join("commondir"), "../..\n")
+            .expect("Failed to write commondir");
+
+        let git = GitOperations::new(linked_worktree.path());
+        assert_eq!(git.get_current_branch().unwrap(), branch);
+        assert_eq!(git.get_current_commit().unwrap(), commit);
+        assert_eq!(
+            git.get_remote_url().unwrap(),
+            Some("git@example.com:repo.git".to_string())
+        );
     }
 
     #[test]
@@ -1066,6 +1173,21 @@ mod tests {
         // Most recent commit first
         assert_eq!(history[0].message, "Commit 3");
         assert_eq!(history[1].message, "Commit 2");
+    }
+
+    #[test]
+    fn test_traverse_history_zero_limit_returns_all_commits() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        create_commit(&repo_path, "test1.txt", "content1", "Commit 1");
+        create_commit(&repo_path, "test2.txt", "content2", "Commit 2");
+        create_commit(&repo_path, "test3.txt", "content3", "Commit 3");
+
+        let git = GitOperations::new(&repo_path);
+        let history = git.traverse_history(0).unwrap();
+
+        assert_eq!(history.len(), 3);
+        assert_eq!(history[0].message, "Commit 3");
+        assert_eq!(history[2].message, "Commit 1");
     }
 
     #[test]
@@ -1208,6 +1330,32 @@ mod tests {
         let diff = git.compare_branches("feature2", &branch).unwrap();
 
         assert!(!diff.changed_files.is_empty());
+    }
+
+    #[test]
+    fn test_compare_branches_reports_renames() {
+        let (_temp_dir, repo_path) = create_test_repo();
+        create_commit(&repo_path, "before.txt", "initial", "Initial");
+
+        let git = GitOperations::new(&repo_path);
+        let base_branch = git.get_current_branch().unwrap();
+        let _ = Command::new("git")
+            .current_dir(&repo_path)
+            .args(["checkout", "-b", "rename-branch"])
+            .output();
+        let _ = Command::new("git")
+            .current_dir(&repo_path)
+            .args(["mv", "before.txt", "after.txt"])
+            .output();
+        let _ = Command::new("git")
+            .current_dir(&repo_path)
+            .args(["commit", "-m", "Rename file"])
+            .output();
+
+        let diff = git.compare_branches("rename-branch", &base_branch).unwrap();
+        assert!(diff.changed_files.iter().any(|file| {
+            file.path == "after.txt" && file.change_type == FileChangeType::Renamed
+        }));
     }
 
     #[test]

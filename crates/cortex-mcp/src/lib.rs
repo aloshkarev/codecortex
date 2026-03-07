@@ -49,7 +49,8 @@
 //!
 //! // Tools are automatically registered and available to MCP clients
 //! let tools = cortex_mcp::tool_names();
-//! assert_eq!(tools.len(), 40);
+//! assert!(!tools.is_empty());
+//! assert_eq!(tools.len(), 46);
 //! ```
 //!
 //! ## Quality Metrics
@@ -175,4 +176,26 @@ pub fn tool_names() -> &'static [&'static str] {
         "project_queue_status",
         "project_metrics",
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tool_names;
+    use std::collections::HashSet;
+
+    #[test]
+    fn exported_tool_names_are_unique() {
+        let tools = tool_names();
+        let unique: HashSet<_> = tools.iter().copied().collect();
+        assert_eq!(tools.len(), unique.len());
+    }
+
+    #[test]
+    fn tool_names_include_context_capsule() {
+        let tools = tool_names();
+        assert!(
+            tools.contains(&"get_context_capsule"),
+            "get_context_capsule must be in tool_names (used by handler and docs)"
+        );
+    }
 }

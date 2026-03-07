@@ -170,6 +170,27 @@ impl OpenAIEmbedder {
         let api_key = std::env::var("OPENAI_API_KEY").map_err(|_| EmbeddingError::MissingApiKey)?;
         Ok(Self::new(api_key))
     }
+
+    fn validate_embedding_count(actual: usize, expected: usize) -> Result<(), EmbeddingError> {
+        if actual != expected {
+            return Err(EmbeddingError::InvalidResponse(format!(
+                "expected {} embeddings, got {}",
+                expected, actual
+            )));
+        }
+        Ok(())
+    }
+
+    fn validate_embedding_dimension(embedding: &[f32]) -> Result<(), EmbeddingError> {
+        if embedding.len() != EMBEDDING_DIMENSION {
+            return Err(EmbeddingError::InvalidResponse(format!(
+                "expected embedding dimension {}, got {}",
+                EMBEDDING_DIMENSION,
+                embedding.len()
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize)]
@@ -235,12 +256,16 @@ impl Embedder for OpenAIEmbedder {
             .json()
             .await
             .map_err(|e| EmbeddingError::InvalidResponse(e.to_string()))?;
+        Self::validate_embedding_count(embed_response.data.len(), 1)?;
 
-        embed_response
+        let embedding = embed_response
             .data
-            .first()
-            .map(|e| e.embedding.clone())
-            .ok_or_else(|| EmbeddingError::InvalidResponse("No embedding in response".to_string()))
+            .into_iter()
+            .next()
+            .ok_or_else(|| EmbeddingError::InvalidResponse("No embedding in response".to_string()))?
+            .embedding;
+        Self::validate_embedding_dimension(&embedding)?;
+        Ok(embedding)
     }
 
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
@@ -282,8 +307,13 @@ impl Embedder for OpenAIEmbedder {
             // Sort by index to maintain order
             let mut sorted: Vec<_> = embed_response.data.into_iter().collect();
             sorted.sort_by_key(|e| e.index);
+            let embeddings: Vec<Vec<f32>> = sorted.into_iter().map(|e| e.embedding).collect();
+            Self::validate_embedding_count(embeddings.len(), chunk.len())?;
+            for embedding in &embeddings {
+                Self::validate_embedding_dimension(embedding)?;
+            }
 
-            all_embeddings.extend(sorted.into_iter().map(|e| e.embedding));
+            all_embeddings.extend(embeddings);
         }
 
         Ok(all_embeddings)
@@ -533,12 +563,23 @@ impl OllamaEmbedder {
             .json()
             .await
             .map_err(|e| EmbeddingError::InvalidResponse(e.to_string()))?;
+        Self::validate_embedding_count(embed_response.embeddings.len(), 1)?;
 
         embed_response
             .embeddings
-            .first()
-            .cloned()
+            .into_iter()
+            .next()
             .ok_or_else(|| EmbeddingError::InvalidResponse("No embedding in response".to_string()))
+    }
+
+    fn validate_embedding_count(actual: usize, expected: usize) -> Result<(), EmbeddingError> {
+        if actual != expected {
+            return Err(EmbeddingError::InvalidResponse(format!(
+                "expected {} embeddings, got {}",
+                expected, actual
+            )));
+        }
+        Ok(())
     }
 
     async fn embed_single_with_retry(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
@@ -659,6 +700,7 @@ impl Embedder for OllamaEmbedder {
             .json()
             .await
             .map_err(|e| EmbeddingError::InvalidResponse(e.to_string()))?;
+        Self::validate_embedding_count(embed_response.embeddings.len(), prepared.len())?;
 
         Ok(embed_response
             .embeddings
@@ -802,5 +844,26 @@ mod tests {
         let embedder = OllamaEmbedder::new();
         assert_eq!(embedder.model(), OllamaEmbedder::DEFAULT_MODEL);
         assert_eq!(embedder.provider(), EmbeddingProvider::Ollama);
+    }
+
+    #[test]
+    fn test_openai_validate_embedding_count() {
+        let err =
+            OpenAIEmbedder::validate_embedding_count(1, 2).expect_err("count mismatch should fail");
+        assert!(matches!(err, EmbeddingError::InvalidResponse(_)));
+    }
+
+    #[test]
+    fn test_openai_validate_embedding_dimension() {
+        let err = OpenAIEmbedder::validate_embedding_dimension(&[0.0, 1.0, 2.0])
+            .expect_err("dimension mismatch should fail");
+        assert!(matches!(err, EmbeddingError::InvalidResponse(_)));
+    }
+
+    #[test]
+    fn test_ollama_validate_embedding_count() {
+        let err =
+            OllamaEmbedder::validate_embedding_count(1, 2).expect_err("count mismatch should fail");
+        assert!(matches!(err, EmbeddingError::InvalidResponse(_)));
     }
 }

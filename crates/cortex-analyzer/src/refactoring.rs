@@ -524,11 +524,6 @@ impl SmellType {
     }
 }
 
-/// Placeholder - not a real refactoring technique
-#[allow(non_upper_case_globals)]
-pub const PreserveWholeObject: RefactoringTechnique =
-    RefactoringTechnique::IntroduceParameterObject;
-
 /// Refactoring recommendation engine
 #[derive(Debug, Clone)]
 pub struct RefactoringEngine {
@@ -731,6 +726,14 @@ mod tests {
         assert_eq!(
             RefactoringTechnique::ReplaceConditionalWithPolymorphism.to_string(),
             "Replace Conditional with Polymorphism"
+        );
+    }
+
+    #[test]
+    fn test_preserve_whole_object_is_distinct() {
+        assert_ne!(
+            RefactoringTechnique::PreserveWholeObject,
+            RefactoringTechnique::IntroduceParameterObject
         );
     }
 }

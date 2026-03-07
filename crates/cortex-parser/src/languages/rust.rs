@@ -153,6 +153,7 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         &import_q,
         &ImportCaptures {
             module: import_q.capture_index_for_name("module").unwrap_or(0),
+            method_filter: None,
         },
         Some(&inherit_q),
         Some(&InheritCaptures {
@@ -357,5 +358,46 @@ mod tests {
                 .iter()
                 .any(|e| matches!(e.kind, EdgeKind::Implements))
         );
+    }
+
+    #[test]
+    fn test_parse_result_populates_calls_and_imports() {
+        let source = r#"
+            use foo;
+
+            fn helper() {}
+
+            fn main() {
+                helper();
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("main.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(result.calls.iter().any(|call| call == "helper"));
+        assert!(result.imports.iter().any(|module| module == "foo"));
+    }
+
+    #[test]
+    fn test_parse_long_utf8_function_source_does_not_panic() {
+        let body = "€".repeat(2000);
+        let source = format!("fn unicode() {{ let text = \"{body}\"; }}");
+        let tree = parse_rust(&source);
+        let path = Path::new("unicode.rs");
+        let result = extract(&source, path, &tree);
+
+        let function = result
+            .nodes
+            .iter()
+            .find(|node| node.name == "unicode" && node.kind == EntityKind::Function)
+            .expect("unicode function should be extracted");
+
+        let snippet = function
+            .source
+            .as_deref()
+            .expect("function snippet should be present");
+        assert!(snippet.len() <= 4096);
+        assert!(snippet.contains("fn unicode()"));
     }
 }

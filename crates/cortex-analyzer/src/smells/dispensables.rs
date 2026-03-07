@@ -19,7 +19,7 @@ pub fn detect_comments(source: &str, file_path: &str, config: &SmellConfig) -> V
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
 
-    let total_lines = lines.len();
+    let _total_lines = lines.len();
     let mut comment_lines = 0;
     let mut code_lines = 0;
     let mut todo_count = 0;
@@ -247,7 +247,7 @@ pub fn detect_data_classes(source: &str, file_path: &str, config: &SmellConfig) 
 }
 
 /// Detect dead code - unreachable or unused code
-pub fn detect_dead_code(source: &str, file_path: &str, config: &SmellConfig) -> Vec<CodeSmell> {
+pub fn detect_dead_code(source: &str, file_path: &str, _config: &SmellConfig) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
 
@@ -281,7 +281,12 @@ pub fn detect_dead_code(source: &str, file_path: &str, config: &SmellConfig) -> 
         // Code after return/throw/break/continue
         if i > 0 {
             let prev_line = lines[i - 1].trim();
-            if is_exit_statement(prev_line) && !is_comment_line(trimmed) && !trimmed.is_empty() {
+            if is_exit_statement(prev_line)
+                && !is_comment_line(trimmed)
+                && !trimmed.is_empty()
+                && trimmed != "}"
+                && trimmed != "{"
+            {
                 smells.push(CodeSmell {
                     smell_type: SmellType::DeadCode,
                     severity: Severity::Warning,
@@ -361,7 +366,7 @@ pub fn detect_lazy_classes(source: &str, file_path: &str, config: &SmellConfig) 
 pub fn detect_speculative_generality(
     source: &str,
     file_path: &str,
-    config: &SmellConfig,
+    _config: &SmellConfig,
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
@@ -667,6 +672,7 @@ fn extract_class_info(lines: &[&str]) -> HashMap<String, ClassInfo> {
     let mut classes: HashMap<String, ClassInfo> = HashMap::new();
     let mut current_class: Option<String> = None;
     let mut brace_count = 0;
+    #[allow(unused_assignments)]
     let mut class_start = 0u32;
 
     for (i, line) in lines.iter().enumerate() {
@@ -798,6 +804,7 @@ fn is_exit_statement(line: &str) -> bool {
     let trimmed = line.trim();
     trimmed.starts_with("return ")
         || trimmed == "return"
+        || trimmed == "return;"
         || trimmed.starts_with("throw ")
         || trimmed.starts_with("raise ")
         || trimmed == "break"
@@ -1153,5 +1160,44 @@ mod tests {
         let tokens = tokenize_line("let x = calculate(y) + 1;");
         assert!(!tokens.contains(&"let".to_string()));
         assert!(tokens.contains(&"calculate".to_string()));
+    }
+
+    #[test]
+    fn test_detect_dead_code_no_false_positive_on_closing_brace() {
+        let config = SmellConfig::default();
+        // Closing brace after return should NOT be flagged as dead code
+        let source_with_brace = r#"
+fn example() {
+    if true {
+        return;
+    }
+    other_code();
+}
+"#;
+        let smells_brace = detect_dead_code(source_with_brace, "test.rs", &config);
+        let brace_false_positives: Vec<_> = smells_brace
+            .iter()
+            .filter(|s| s.message.contains("unreachable") && s.symbol_name == "unreachable")
+            .collect();
+        assert!(
+            brace_false_positives.is_empty(),
+            "Closing brace }} should not be reported as unreachable; got: {:?}",
+            brace_false_positives
+        );
+
+        // Actual unreachable code after return SHOULD be flagged
+        let source_unreachable = r#"
+fn example() {
+    return;
+    unreachable_code();
+}
+"#;
+        let smells_unreachable = detect_dead_code(source_unreachable, "test.rs", &config);
+        assert!(
+            smells_unreachable
+                .iter()
+                .any(|s| s.message.contains("unreachable")),
+            "Actual unreachable code should be flagged"
+        );
     }
 }

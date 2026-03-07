@@ -90,6 +90,12 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         &import_q,
         &ImportCaptures {
             module: import_q.capture_index_for_name("module").unwrap_or(0),
+            method_filter: Some((
+                import_q
+                    .capture_index_for_name("method")
+                    .unwrap_or(u32::MAX),
+                &["require", "require_relative", "load", "autoload"],
+            )),
         },
         inherit_q.as_ref(),
         inherit_q
@@ -173,6 +179,35 @@ mod tests {
                 .nodes
                 .iter()
                 .any(|n| n.name == "greet" && n.kind == EntityKind::Function)
+        );
+    }
+
+    #[test]
+    fn test_require_import_detected() {
+        let source = r#"
+            require "json"
+            require_relative "helper"
+        "#;
+        let tree = parse_ruby(source);
+        let path = Path::new("app.rb");
+        let result = extract(source, path, &tree);
+        assert!(result.imports.contains(&"json".to_string()));
+        assert!(result.imports.contains(&"helper".to_string()));
+    }
+
+    #[test]
+    fn test_non_require_calls_not_imported() {
+        let source = r#"
+            puts "hello"
+            print "world"
+        "#;
+        let tree = parse_ruby(source);
+        let path = Path::new("app.rb");
+        let result = extract(source, path, &tree);
+        assert!(
+            result.imports.is_empty(),
+            "puts/print should not produce import edges; got: {:?}",
+            result.imports
         );
     }
 

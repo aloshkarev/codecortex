@@ -10,7 +10,7 @@
 //! - Middle Man
 
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Detect feature envy - method uses other class more than its own
 pub fn detect_feature_envy(source: &str, file_path: &str, config: &SmellConfig) -> Vec<CodeSmell> {
@@ -224,6 +224,7 @@ struct MethodInfo {
     line_number: u32,
     own_class_accesses: usize,
     other_class_accesses: usize,
+    #[allow(dead_code)]
     class_name: String,
 }
 
@@ -236,6 +237,7 @@ struct ClassDelegationData {
     line_number: u32,
     total_methods: usize,
     delegating_methods: usize,
+    #[allow(dead_code)]
     delegate_target: Option<String>,
 }
 
@@ -284,7 +286,7 @@ fn extract_methods_with_access_patterns(lines: &[&str]) -> HashMap<String, Metho
             // Count accesses
             if let Some(ref mut info) = method_info {
                 let accesses = extract_member_accesses(trimmed);
-                for (var, is_self) in accesses {
+                for (_var, is_self) in accesses {
                     if is_self {
                         info.own_class_accesses += 1;
                     } else {
@@ -408,7 +410,7 @@ fn extract_message_chains(line: &str) -> Vec<MessageChain> {
     let cleaned = remove_strings_and_comments(line);
 
     // Find patterns like var.method().method2().method3()
-    let mut current_chain = String::new();
+    let mut _current_chain = String::new();
     let mut chain_length = 0;
     let mut start_var = String::new();
     let mut in_chain = false;
@@ -432,7 +434,7 @@ fn extract_message_chains(line: &str) -> Vec<MessageChain> {
                     start_var = ident.clone();
                     in_chain = true;
                 }
-                current_chain = ident;
+                _current_chain = ident;
                 chain_length = 0;
             } else if i < chars.len() && chars[i] == '(' {
                 // Method call - continue chain
@@ -548,7 +550,7 @@ fn extract_foreign_class_accesses(line: &str) -> Vec<String> {
         (".create(", ")"),
     ];
 
-    for (start_pattern, end_pattern) in patterns {
+    for (start_pattern, _end_pattern) in patterns {
         if let Some(start) = cleaned.find(start_pattern) {
             let before = &cleaned[..start];
             // Get the class name before the pattern

@@ -21,6 +21,9 @@ pub struct HashEntry {
     pub file_size: u64,
     /// Last modification time (Unix timestamp)
     pub modified_time: u64,
+    /// Last modification time subsecond nanoseconds
+    #[serde(default)]
+    pub modified_time_nanos: u32,
     /// When this entry was cached
     pub cached_at: u64,
     /// Repository revision when indexed
@@ -133,6 +136,7 @@ impl IncrementalIndexer {
             && let Ok(modified) = metadata.modified()
             && let Ok(modified_ts) = modified.duration_since(SystemTime::UNIX_EPOCH)
             && modified_ts.as_secs() == entry.modified_time
+            && modified_ts.subsec_nanos() == entry.modified_time_nanos
         {
             // If mtime hasn't changed, file hasn't changed
             return false;
@@ -151,9 +155,7 @@ impl IncrementalIndexer {
         let modified_time = std::fs::metadata(path)
             .ok()
             .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok());
 
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -165,7 +167,8 @@ impl IncrementalIndexer {
             HashEntry {
                 content_hash,
                 file_size: content.len() as u64,
-                modified_time,
+                modified_time: modified_time.map(|d| d.as_secs()).unwrap_or(0),
+                modified_time_nanos: modified_time.map(|d| d.subsec_nanos()).unwrap_or(0),
                 cached_at: now,
                 repo_revision: self.current_revision.clone(),
             },
@@ -534,6 +537,30 @@ mod tests {
 
         // Should use fast path and not detect change
         assert!(!indexer.has_file_changed_fast(&file_path, "content"));
+    }
+
+    #[test]
+    fn mtime_precision_change_falls_back_to_hash() {
+        let mut indexer = IncrementalIndexer::new();
+        indexer.set_mtime_optimization(true);
+
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        std::fs::write(&file_path, "content-one").unwrap();
+        indexer.record_file(&file_path, "content-one");
+
+        let metadata = std::fs::metadata(&file_path).unwrap();
+        let modified = metadata
+            .modified()
+            .unwrap()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        let key = file_path.to_string_lossy().to_string();
+        let entry = indexer.hash_cache.get_mut(&key).unwrap();
+        entry.modified_time = modified.as_secs();
+        entry.modified_time_nanos = modified.subsec_nanos().saturating_sub(1);
+
+        assert!(indexer.has_file_changed_fast(&file_path, "content-two"));
     }
 
     #[test]

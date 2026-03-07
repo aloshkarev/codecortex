@@ -182,13 +182,16 @@ impl CouplingAnalyzer {
         // Build relations
         let relations = self.build_coupling_relations(module, ce);
 
+        let abstractness = 0.0; // Would need abstract class detection
+        let distance = (abstractness + instability - 1.0).abs();
+
         CouplingMetrics {
             module: module.to_string(),
             ca,
             ce,
             instability,
-            abstractness: 0.0, // Would need abstract class detection
-            distance: (0.0 + instability - 1.0).abs(),
+            abstractness,
+            distance,
             relations,
         }
     }
@@ -276,7 +279,7 @@ impl CouplingAnalyzer {
         }
     }
 
-    fn determine_cohesion_type(
+    pub(crate) fn determine_cohesion_type(
         &self,
         lcom: f64,
         method_count: usize,
@@ -290,8 +293,10 @@ impl CouplingAnalyzer {
             CohesionType::Functional
         } else if lcom < 0.4 {
             CohesionType::Sequential
-        } else if lcom < 0.6 {
+        } else if lcom < 0.5 {
             CohesionType::Communicational
+        } else if lcom < 0.6 {
+            CohesionType::Temporal
         } else if lcom < 0.75 {
             CohesionType::Procedural
         } else if lcom < 0.9 {
@@ -570,5 +575,12 @@ mod tests {
         let json = serde_json::to_string(&metrics).unwrap();
         assert!(json.contains("MyClass"));
         assert!(json.contains("functional"));
+    }
+
+    #[test]
+    fn test_temporal_cohesion_reachable() {
+        let analyzer = CouplingAnalyzer::new();
+        let cohesion_type = analyzer.determine_cohesion_type(0.55, 5, 3);
+        assert_eq!(cohesion_type, CohesionType::Temporal);
     }
 }

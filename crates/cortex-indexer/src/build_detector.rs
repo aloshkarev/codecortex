@@ -171,6 +171,15 @@ pub struct CompileCommand {
 }
 
 impl CompileCommand {
+    /// Resolve the source file path relative to the compile command directory.
+    pub fn resolved_file_path(&self) -> PathBuf {
+        if self.file.is_absolute() {
+            self.file.clone()
+        } else {
+            self.directory.join(&self.file)
+        }
+    }
+
     /// Extract include paths from this compile command
     pub fn include_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
@@ -201,6 +210,20 @@ impl CompileCommand {
             }
         }
         paths
+    }
+
+    /// Extract include paths resolved relative to the compile command directory.
+    pub fn resolved_include_paths(&self) -> Vec<PathBuf> {
+        self.include_paths()
+            .into_iter()
+            .map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    self.directory.join(path)
+                }
+            })
+            .collect()
     }
 
     /// Extract preprocessor definitions from this compile command
@@ -575,8 +598,19 @@ impl BuildDetector {
                 let mut all_includes = HashSet::new();
                 let mut all_defines = HashMap::new();
 
-                for cmd in &commands {
-                    for inc in cmd.include_paths() {
+                let mut normalized_commands = commands;
+
+                for cmd in &mut normalized_commands {
+                    cmd.file = cmd.resolved_file_path();
+                    if let Some(output) = &cmd.output
+                        && !output.is_absolute()
+                    {
+                        cmd.output = Some(cmd.directory.join(output));
+                    }
+                }
+
+                for cmd in &normalized_commands {
+                    for inc in cmd.resolved_include_paths() {
                         all_includes.insert(inc);
                     }
                     all_defines.extend(cmd.defines());
@@ -584,7 +618,7 @@ impl BuildDetector {
 
                 config.include_paths.extend(all_includes);
                 config.defines.extend(all_defines);
-                config.compile_commands = commands;
+                config.compile_commands = normalized_commands;
 
                 tracing::info!(
                     "Loaded {} compile commands from {:?}",
@@ -601,9 +635,13 @@ impl BuildDetector {
         config: &'a ProjectConfig,
         file: &Path,
     ) -> Option<&'a CompileCommand> {
+        let normalized_file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
         config.compile_commands.iter().find(|cmd| {
-            // Normalize paths for comparison
-            cmd.file == file || cmd.file.canonicalize().ok() == file.canonicalize().ok()
+            let normalized_cmd = cmd
+                .file
+                .canonicalize()
+                .unwrap_or_else(|_| cmd.resolved_file_path());
+            normalized_cmd == normalized_file
         })
     }
 }
@@ -728,6 +766,29 @@ mod tests {
     }
 
     #[test]
+    fn test_compile_command_resolved_paths() {
+        let cmd = CompileCommand {
+            file: PathBuf::from("src/test.c"),
+            command: Some("gcc -I./include -I/usr/include test.c".to_string()),
+            directory: PathBuf::from("/project"),
+            arguments: None,
+            output: Some(PathBuf::from("build/test.o")),
+        };
+
+        assert_eq!(
+            cmd.resolved_file_path(),
+            PathBuf::from("/project/src/test.c")
+        );
+        assert_eq!(
+            cmd.resolved_include_paths(),
+            vec![
+                PathBuf::from("/project/include"),
+                PathBuf::from("/usr/include")
+            ]
+        );
+    }
+
+    #[test]
     fn test_compile_command_defines() {
         let cmd = CompileCommand {
             file: PathBuf::from("test.c"),
@@ -812,6 +873,25 @@ version = "0.1.0"
 
         assert!(config.build_systems.contains(&BuildSystem::Pnpm));
         assert_eq!(config.name, Some("pnpm-project".to_string()));
+    }
+
+    #[test]
+    fn test_get_compile_command_for_relative_file() {
+        let command = CompileCommand {
+            file: PathBuf::from("src/test.c"),
+            command: None,
+            directory: PathBuf::from("/project"),
+            arguments: None,
+            output: None,
+        };
+        let config = ProjectConfig {
+            compile_commands: vec![command],
+            ..Default::default()
+        };
+
+        let found =
+            BuildDetector::get_compile_command_for_file(&config, Path::new("/project/src/test.c"));
+        assert!(found.is_some());
     }
 
     #[test]

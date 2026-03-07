@@ -53,7 +53,7 @@ impl Language {
         let extension = path.extension()?.to_str()?.to_ascii_lowercase();
         match extension.as_str() {
             "rs" => Some(Self::Rust),
-            "c" => Some(Self::C),
+            "c" | "h" => Some(Self::C),
             "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => Some(Self::Cpp),
             "py" => Some(Self::Python),
             "go" => Some(Self::Go),
@@ -220,6 +220,10 @@ mod tests {
     #[test]
     fn language_from_path_c() {
         assert_eq!(Language::from_path(Path::new("main.c")), Some(Language::C));
+        assert_eq!(
+            Language::from_path(Path::new("header.h")),
+            Some(Language::C)
+        );
     }
 
     #[test]

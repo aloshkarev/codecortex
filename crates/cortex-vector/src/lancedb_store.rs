@@ -34,7 +34,6 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use async_trait::async_trait;
-use futures::TryStreamExt;
 use lancedb::connection::Connection;
 use lancedb::index::Index;
 use lancedb::query::{ExecutableQuery, QueryBase};
@@ -68,7 +67,7 @@ impl LanceStore {
             VectorError::DatabaseError(format!("Failed to connect to LanceDB: {}", e))
         })?;
 
-        let schema = Self::create_schema();
+        let mut schema = Self::create_schema();
 
         // Check if table exists, create if not
         let table_names = conn
@@ -93,6 +92,16 @@ impl LanceStore {
                 })?;
         } else {
             info!("Opening existing LanceDB table: {}", TABLE_NAME);
+            schema = conn
+                .open_table(TABLE_NAME)
+                .execute()
+                .await
+                .map_err(|e| VectorError::DatabaseError(format!("Failed to open table: {}", e)))?
+                .schema()
+                .await
+                .map_err(|e| {
+                    VectorError::DatabaseError(format!("Failed to read table schema: {}", e))
+                })?;
         }
 
         Ok(Self { conn, schema })
@@ -120,6 +129,7 @@ impl LanceStore {
             Field::new("branch", DataType::Utf8, true),
             Field::new("line_number", DataType::Int64, true),
             Field::new("doc_type", DataType::Utf8, true),
+            Field::new("extra_metadata", DataType::Utf8, true),
         ];
 
         Arc::new(Schema::new(fields))
@@ -127,6 +137,7 @@ impl LanceStore {
 
     /// Convert VectorDocument to RecordBatch
     fn documents_to_batch(&self, documents: &[VectorDocument]) -> Result<RecordBatch, VectorError> {
+        let supports_extra_metadata = self.schema.column_with_name("extra_metadata").is_some();
         let mut ids: Vec<String> = Vec::new();
         let mut contents: Vec<String> = Vec::new();
         let mut paths: Vec<Option<String>> = Vec::new();
@@ -137,6 +148,7 @@ impl LanceStore {
         let mut branches: Vec<Option<String>> = Vec::new();
         let mut line_numbers: Vec<Option<i64>> = Vec::new();
         let mut doc_types: Vec<Option<String>> = Vec::new();
+        let mut extra_metadata: Vec<Option<String>> = Vec::new();
 
         for doc in documents {
             ids.push(doc.id.clone());
@@ -149,6 +161,18 @@ impl LanceStore {
             branches.push(doc.metadata.branch.clone());
             line_numbers.push(doc.metadata.line_number.map(|n| n as i64));
             doc_types.push(doc.metadata.doc_type.clone());
+            if supports_extra_metadata {
+                extra_metadata.push(if doc.metadata.extra.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::to_string(&doc.metadata.extra).map_err(|e| {
+                        VectorError::DatabaseError(format!(
+                            "Failed to serialize extra metadata: {}",
+                            e
+                        ))
+                    })?)
+                });
+            }
         }
 
         // Create embedding FixedSizeListArray
@@ -164,24 +188,26 @@ impl LanceStore {
         let branch_array: ArrayRef = Arc::new(StringArray::from(branches));
         let line_number_array: ArrayRef = Arc::new(Int64Array::from(line_numbers));
         let doc_type_array: ArrayRef = Arc::new(StringArray::from(doc_types));
+        let mut columns = vec![
+            id_array,
+            embedding_array,
+            content_array,
+            path_array,
+            name_array,
+            kind_array,
+            language_array,
+            repository_array,
+            branch_array,
+            line_number_array,
+            doc_type_array,
+        ];
+        if supports_extra_metadata {
+            columns.push(Arc::new(StringArray::from(extra_metadata)));
+        }
 
-        RecordBatch::try_new(
-            self.schema.clone(),
-            vec![
-                id_array,
-                embedding_array,
-                content_array,
-                path_array,
-                name_array,
-                kind_array,
-                language_array,
-                repository_array,
-                branch_array,
-                line_number_array,
-                doc_type_array,
-            ],
-        )
-        .map_err(|e| VectorError::DatabaseError(format!("Failed to create record batch: {}", e)))
+        RecordBatch::try_new(self.schema.clone(), columns).map_err(|e| {
+            VectorError::DatabaseError(format!("Failed to create record batch: {}", e))
+        })
     }
 
     /// Create FixedSizeListArray for embeddings
@@ -245,12 +271,38 @@ impl LanceStore {
         let get_int = |key: &str| -> Option<usize> {
             metadata.get(key).and_then(|v| {
                 if let MetadataValue::Integer(i) = v {
-                    Some(*i as usize)
+                    usize::try_from(*i).ok()
                 } else {
                     None
                 }
             })
         };
+
+        let mut extra = HashMap::new();
+        for (key, value) in metadata {
+            if matches!(
+                key.as_str(),
+                "path"
+                    | "name"
+                    | "kind"
+                    | "language"
+                    | "repository"
+                    | "branch"
+                    | "line_number"
+                    | "doc_type"
+                    | "content"
+            ) {
+                continue;
+            }
+            let json_value = match value {
+                MetadataValue::String(text) => serde_json::Value::String(text.clone()),
+                MetadataValue::Integer(int) => serde_json::json!(*int),
+                MetadataValue::Float(float) => serde_json::json!(*float),
+                MetadataValue::Boolean(flag) => serde_json::json!(*flag),
+                MetadataValue::List(items) => serde_json::json!(items),
+            };
+            extra.insert(key.clone(), json_value);
+        }
 
         VectorMetadata {
             path: get_string("path"),
@@ -261,7 +313,7 @@ impl LanceStore {
             branch: get_string("branch"),
             line_number: get_int("line_number"),
             doc_type: get_string("doc_type"),
-            extra: HashMap::new(),
+            extra,
         }
     }
 
@@ -313,10 +365,14 @@ impl LanceStore {
                     if arr.is_null(row_idx) {
                         None
                     } else {
-                        Some(arr.value(row_idx) as usize)
+                        usize::try_from(arr.value(row_idx)).ok()
                     }
                 })
         };
+
+        let extra = get_string("extra_metadata")
+            .and_then(|raw| serde_json::from_str::<HashMap<String, serde_json::Value>>(&raw).ok())
+            .unwrap_or_default();
 
         let metadata = VectorMetadata {
             path: get_string("path"),
@@ -327,7 +383,7 @@ impl LanceStore {
             branch: get_string("branch"),
             line_number: get_int("line_number"),
             doc_type: get_string("doc_type"),
-            extra: HashMap::new(),
+            extra,
         };
 
         Some(VectorDocument::with_metadata(
@@ -335,7 +391,21 @@ impl LanceStore {
         ))
     }
 
-    /// Build filter SQL from HashMap
+    /// Allowed column names for filter (whitelist to avoid SQL injection)
+    const FILTER_ALLOWED_COLUMNS: &[&str] = &[
+        "id",
+        "content",
+        "path",
+        "name",
+        "kind",
+        "language",
+        "repository",
+        "branch",
+        "line_number",
+        "doc_type",
+    ];
+
+    /// Build filter SQL from HashMap. Only allows whitelisted column names.
     fn build_filter_sql(filter: &HashMap<String, MetadataValue>) -> Option<String> {
         if filter.is_empty() {
             return None;
@@ -343,6 +413,7 @@ impl LanceStore {
 
         let conditions: Vec<String> = filter
             .iter()
+            .filter(|(key, _)| Self::FILTER_ALLOWED_COLUMNS.contains(&key.as_str()))
             .map(|(key, value)| match value {
                 MetadataValue::String(s) => format!("{} = '{}'", key, s.replace("'", "''")),
                 MetadataValue::Integer(i) => format!("{} = {}", key, i),
@@ -358,6 +429,9 @@ impl LanceStore {
             })
             .collect();
 
+        if conditions.is_empty() {
+            return None;
+        }
         Some(conditions.join(" AND "))
     }
 
@@ -411,6 +485,19 @@ impl VectorStore for LanceStore {
             return Ok(0);
         }
 
+        for doc in &documents {
+            doc.validate().map_err(|message| {
+                if message.starts_with("Invalid embedding dimension:") {
+                    VectorError::InvalidDimension {
+                        expected: EMBEDDING_DIMENSION,
+                        actual: doc.embedding.len(),
+                    }
+                } else {
+                    VectorError::DatabaseError(message)
+                }
+            })?;
+        }
+
         let table = self
             .conn
             .open_table(TABLE_NAME)
@@ -445,6 +532,12 @@ impl VectorStore for LanceStore {
     }
 
     async fn search(&self, query: Vec<f32>, k: usize) -> Result<Vec<SearchResult>, VectorError> {
+        if query.len() != EMBEDDING_DIMENSION {
+            return Err(VectorError::InvalidDimension {
+                expected: EMBEDDING_DIMENSION,
+                actual: query.len(),
+            });
+        }
         let table = self
             .conn
             .open_table(TABLE_NAME)
@@ -509,6 +602,12 @@ impl VectorStore for LanceStore {
         k: usize,
         filter: HashMap<String, MetadataValue>,
     ) -> Result<Vec<SearchResult>, VectorError> {
+        if query.len() != EMBEDDING_DIMENSION {
+            return Err(VectorError::InvalidDimension {
+                expected: EMBEDDING_DIMENSION,
+                actual: query.len(),
+            });
+        }
         let table = self
             .conn
             .open_table(TABLE_NAME)
@@ -626,6 +725,10 @@ impl VectorStore for LanceStore {
         &self,
         filter: HashMap<String, MetadataValue>,
     ) -> Result<usize, VectorError> {
+        if filter.is_empty() {
+            return Ok(0);
+        }
+
         let table = self
             .conn
             .open_table(TABLE_NAME)
@@ -896,5 +999,80 @@ mod tests {
             eprintln!("Index creation error: {:?}", e);
         }
         assert!(result.is_ok(), "Index creation should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_store_preserves_extra_metadata() {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let store = LanceStore::open(dir.path())
+            .await
+            .expect("Failed to open store");
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "team".to_string(),
+            MetadataValue::String("search".to_string()),
+        );
+        metadata.insert("priority".to_string(), MetadataValue::Integer(2));
+
+        store
+            .upsert("doc-extra", vec![0.4; EMBEDDING_DIMENSION], metadata)
+            .await
+            .expect("Upsert failed");
+
+        let doc = store
+            .get("doc-extra")
+            .await
+            .expect("Get failed")
+            .expect("Document should exist");
+        let map = doc.metadata_to_map();
+
+        assert_eq!(
+            map.get("team"),
+            Some(&MetadataValue::String("search".to_string()))
+        );
+        assert_eq!(map.get("priority"), Some(&MetadataValue::Integer(2)));
+    }
+
+    #[tokio::test]
+    async fn test_delete_by_empty_filter_is_noop() {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let store = LanceStore::open(dir.path())
+            .await
+            .expect("Failed to open store");
+
+        store
+            .upsert("doc-1", vec![0.2; EMBEDDING_DIMENSION], HashMap::new())
+            .await
+            .expect("Upsert failed");
+
+        let deleted = store
+            .delete_by_filter(HashMap::new())
+            .await
+            .expect("Delete by empty filter failed");
+
+        assert_eq!(deleted, 0);
+        assert_eq!(store.count().await.expect("Count failed"), 1);
+    }
+
+    #[tokio::test]
+    async fn test_search_rejects_wrong_dimension() {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let store = LanceStore::open(dir.path())
+            .await
+            .expect("Failed to open store");
+
+        let err = store
+            .search(vec![0.1; 16], 5)
+            .await
+            .expect_err("wrong dimension should fail");
+
+        assert!(matches!(
+            err,
+            VectorError::InvalidDimension {
+                expected: EMBEDDING_DIMENSION,
+                actual: 16
+            }
+        ));
     }
 }

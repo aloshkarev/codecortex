@@ -245,6 +245,7 @@ impl ProjectRegistry {
         };
 
         *self.current_project.write() = Some(pr.clone());
+        self.save_state()?;
 
         Ok(pr)
     }
@@ -416,6 +417,8 @@ impl ProjectRegistry {
         let json = std::fs::read_to_string(&self.state_path)?;
         let state: RegistryState = serde_json::from_str(&json)?;
 
+        self.projects.clear();
+
         for (path, project_state) in state.projects {
             self.projects.insert(path, project_state);
         }
@@ -517,7 +520,9 @@ mod tests {
 
     #[test]
     fn registry_get_current_project_empty() {
-        let registry = ProjectRegistry::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state_path = temp_dir.path().join("registry.json");
+        let registry = ProjectRegistry::with_state_path(&state_path);
         let result = registry.get_current_project();
         assert!(result.is_none());
     }
@@ -599,6 +604,52 @@ mod tests {
 
         let result = registry.cleanup_old_branches("/nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn registry_set_current_project_persists_state() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state_path = temp_dir.path().join("registry.json");
+        let registry = ProjectRegistry::with_state_path(&state_path);
+        let project_a = temp_dir.path().join("a");
+        let project_b = temp_dir.path().join("b");
+        std::fs::create_dir_all(&project_a).unwrap();
+        std::fs::create_dir_all(&project_b).unwrap();
+
+        registry.add_project(&project_a, None).unwrap();
+        registry.add_project(&project_b, None).unwrap();
+        registry
+            .set_current_project(&project_b, Some("feature".to_string()))
+            .unwrap();
+
+        let reloaded = ProjectRegistry::with_state_path(&state_path);
+        let current = reloaded.get_current_project().unwrap();
+        assert_eq!(current.path, project_b.canonicalize().unwrap());
+        assert_eq!(current.branch, "feature");
+    }
+
+    #[test]
+    fn registry_load_state_replaces_existing_projects() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let state_path = temp_dir.path().join("registry.json");
+        let project_a = temp_dir.path().join("a");
+        let project_b = temp_dir.path().join("b");
+        std::fs::create_dir_all(&project_a).unwrap();
+        std::fs::create_dir_all(&project_b).unwrap();
+
+        let writer = ProjectRegistry::with_state_path(&state_path);
+        writer.add_project(&project_a, None).unwrap();
+
+        let reader = ProjectRegistry::with_state_path(&state_path);
+        reader
+            .projects
+            .insert(project_b.clone(), ProjectState::new(project_b.clone()));
+        assert_eq!(reader.len(), 2);
+
+        reader.load_state().unwrap();
+        assert_eq!(reader.len(), 1);
+        assert!(reader.get_project(&project_a).is_some());
+        assert!(reader.get_project(&project_b).is_none());
     }
 
     #[test]

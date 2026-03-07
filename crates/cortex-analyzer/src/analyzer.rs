@@ -12,6 +12,22 @@ pub struct Analyzer {
 }
 
 impl Analyzer {
+    fn callers_query_with_depth(depth: usize) -> String {
+        format!(
+            "MATCH p=(caller)-[:CALLS*1..{}]->(callee:Function {{name: $name}})
+             RETURN p",
+            depth.max(1)
+        )
+    }
+
+    fn callees_query_with_depth(depth: usize) -> String {
+        format!(
+            "MATCH p=(caller:Function {{name: $name}})-[:CALLS*1..{}]->(callee:Function)
+             RETURN p",
+            depth.max(1)
+        )
+    }
+
     pub fn new(graph: GraphClient) -> Self {
         Self { graph }
     }
@@ -69,25 +85,23 @@ impl Analyzer {
             .await
     }
 
+    fn all_callers_query() -> &'static str {
+        "MATCH p=(caller)-[:CALLS*1..20]->(callee:Function {name: $name}) RETURN p"
+    }
+
     pub async fn all_callers(&self, function_name: &str) -> Result<Vec<Value>> {
         self.graph
-            .query_with_param(
-                "MATCH p=(caller)-[:CALLS*1..]->(callee:Function {name: $name})
-                 RETURN p",
-                "name",
-                function_name,
-            )
+            .query_with_param(Self::all_callers_query(), "name", function_name)
             .await
+    }
+
+    fn all_callees_query() -> &'static str {
+        "MATCH p=(caller:Function {name: $name})-[:CALLS*1..20]->(callee:Function) RETURN p"
     }
 
     pub async fn all_callees(&self, function_name: &str) -> Result<Vec<Value>> {
         self.graph
-            .query_with_param(
-                "MATCH p=(caller:Function {name: $name})-[:CALLS*1..]->(callee:Function)
-                 RETURN p",
-                "name",
-                function_name,
-            )
+            .query_with_param(Self::all_callees_query(), "name", function_name)
             .await
     }
 
@@ -306,18 +320,19 @@ impl Analyzer {
             .await
     }
 
+    fn find_tests_for_query() -> &'static str {
+        "MATCH (test:Function)
+                 WHERE (test.name STARTS WITH 'test_'
+                       OR test.name STARTS WITH 'it_'
+                       OR test.name STARTS WITH 'should_')
+                   AND test.name CONTAINS $name
+                 RETURN test.name AS test_name, test.path AS path, test.line_number AS line"
+    }
+
     /// Find functions that test a specific function
     pub async fn find_tests_for(&self, function_name: &str) -> Result<Vec<Value>> {
         self.graph
-            .query_with_param(
-                "MATCH (test:Function)
-                 WHERE (test.name STARTS WITH 'test_'
-                       OR test.name CONTAINS $name)
-                   AND test.name CONTAINS $name
-                 RETURN test.name AS test_name, test.path AS path, test.line_number AS line",
-                "name",
-                function_name,
-            )
+            .query_with_param(Self::find_tests_for_query(), "name", function_name)
             .await
     }
 
@@ -327,7 +342,10 @@ impl Analyzer {
         if depth == 1 {
             self.callers(function_name).await
         } else {
-            self.all_callers(function_name).await
+            let cypher = Self::callers_query_with_depth(depth);
+            self.graph
+                .query_with_param(&cypher, "name", function_name)
+                .await
         }
     }
 
@@ -341,7 +359,10 @@ impl Analyzer {
         if depth == 1 {
             self.callees(function_name).await
         } else {
-            self.all_callees(function_name).await
+            let cypher = Self::callees_query_with_depth(depth);
+            self.graph
+                .query_with_param(&cypher, "name", function_name)
+                .await
         }
     }
 
@@ -485,9 +506,31 @@ mod tests {
     }
 
     #[test]
-    fn find_tests_for_query_structure() {
-        let cypher = "MATCH (test:Function) WHERE test.name CONTAINS $name RETURN test";
-        assert!(cypher.contains("$name"));
+    fn find_tests_for_query_requires_test_prefix() {
+        let cypher = Analyzer::find_tests_for_query();
+        assert!(cypher.contains("STARTS WITH 'test_'"));
+        assert!(cypher.contains("STARTS WITH 'it_'"));
+        assert!(cypher.contains("STARTS WITH 'should_'"));
+        assert!(cypher.contains("CONTAINS $name"));
+        // No redundant OR test.name CONTAINS $name in the OR branch
+        assert!(
+            !cypher.contains("OR test.name CONTAINS $name"),
+            "OR branch must not contain CONTAINS $name; use AND test.name CONTAINS $name"
+        );
+    }
+
+    #[test]
+    fn all_callers_bounded_depth() {
+        let cypher = Analyzer::all_callers_query();
+        assert!(cypher.contains("*1..20"));
+        assert!(!cypher.contains("*1..]"));
+    }
+
+    #[test]
+    fn all_callees_bounded_depth() {
+        let cypher = Analyzer::all_callees_query();
+        assert!(cypher.contains("*1..20"));
+        assert!(!cypher.contains("*1..]"));
     }
 
     #[test]
@@ -499,6 +542,19 @@ mod tests {
             depth
         );
         assert!(cypher.contains("*..5"));
+    }
+
+    #[test]
+    fn who_calls_query_uses_requested_depth() {
+        let cypher = Analyzer::callers_query_with_depth(3);
+        assert!(cypher.contains("*1..3"));
+        assert!(!cypher.contains("*1..]"));
+    }
+
+    #[test]
+    fn what_calls_query_uses_requested_depth() {
+        let cypher = Analyzer::callees_query_with_depth(4);
+        assert!(cypher.contains("*1..4"));
     }
 
     #[test]

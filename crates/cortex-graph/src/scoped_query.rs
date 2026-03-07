@@ -183,6 +183,8 @@ impl ScopedQueryBuilder {
             MATCH (caller:Function)-[:CALLS]->(target {id: $target_id})
             WHERE caller.repository_path = $repository_path
               AND caller.branch = $branch
+              AND target.repository_path = $repository_path
+              AND target.branch = $branch
             RETURN caller
             ORDER BY caller.name
             "#
@@ -193,7 +195,9 @@ impl ScopedQueryBuilder {
     pub fn find_callees(&self, _source_id: &str) -> String {
         r#"
             MATCH (source {id: $source_id})-[:CALLS]->(callee:Function)
-            WHERE callee.repository_path = $repository_path
+            WHERE source.repository_path = $repository_path
+              AND source.branch = $branch
+              AND callee.repository_path = $repository_path
               AND callee.branch = $branch
             RETURN callee
             ORDER BY callee.name
@@ -204,9 +208,10 @@ impl ScopedQueryBuilder {
     /// Build a query to get the class hierarchy, scoped to the current branch
     pub fn find_class_hierarchy(&self, _class_id: &str) -> String {
         r#"
-            MATCH path = (superclass)-[:EXTENDS*]->(subclass {id: $class_id})
+            MATCH path = (superclass)-[:INHERITS*]->(subclass {id: $class_id})
             WHERE subclass.repository_path = $repository_path
               AND subclass.branch = $branch
+              AND superclass.repository_path = $repository_path
               AND superclass.branch = $branch
             RETURN nodes(path) as hierarchy
             "#
@@ -235,9 +240,10 @@ impl ScopedQueryBuilder {
     pub fn find_impact_graph(&self, _symbol_id: &str, depth: usize) -> String {
         format!(
             r#"
-            MATCH path = (start {{id: $symbol_id}})-[:CALLS|EXTENDS|IMPLEMENTS|IMPORTS*1..{}]->(impacted)
+            MATCH path = (start {{id: $symbol_id}})-[:CALLS|INHERITS|IMPLEMENTS|IMPORTS*1..{}]->(impacted)
             WHERE start.repository_path = $repository_path
               AND start.branch = $branch
+              AND impacted.repository_path = $repository_path
               AND impacted.branch = $branch
             RETURN DISTINCT impacted, path
             ORDER BY size(path)
@@ -411,6 +417,8 @@ mod tests {
         let query = builder.find_callers("func:main");
         assert!(query.contains("-[:CALLS]->"));
         assert!(query.contains("$target_id"));
+        assert!(query.contains("target.repository_path = $repository_path"));
+        assert!(query.contains("target.branch = $branch"));
     }
 
     #[test]
@@ -420,6 +428,8 @@ mod tests {
         let query = builder.find_callees("func:main");
         assert!(query.contains("-[:CALLS]->"));
         assert!(query.contains("$source_id"));
+        assert!(query.contains("source.repository_path = $repository_path"));
+        assert!(query.contains("source.branch = $branch"));
     }
 
     #[test]
@@ -427,7 +437,8 @@ mod tests {
         let scope = QueryScope::new("/repo", "main");
         let builder = ScopedQueryBuilder::new(scope);
         let query = builder.find_class_hierarchy("class:BaseHandler");
-        assert!(query.contains("-[:EXTENDS*]->"));
+        assert!(query.contains("-[:INHERITS*]->"));
+        assert!(query.contains("superclass.repository_path = $repository_path"));
     }
 
     #[test]
@@ -444,7 +455,8 @@ mod tests {
         let scope = QueryScope::new("/repo", "main");
         let builder = ScopedQueryBuilder::new(scope);
         let query = builder.find_impact_graph("func:main", 3);
-        assert!(query.contains("[:CALLS|EXTENDS|IMPLEMENTS|IMPORTS*1..3]"));
+        assert!(query.contains("[:CALLS|INHERITS|IMPLEMENTS|IMPORTS*1..3]"));
+        assert!(query.contains("impacted.repository_path = $repository_path"));
     }
 
     #[test]

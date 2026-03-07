@@ -114,6 +114,14 @@ impl GraphClient {
         }
     }
 
+    /// Get the inner Memgraph client if using Memgraph backend
+    pub fn inner_memgraph(&self) -> Option<MemgraphClient> {
+        match self.driver.as_ref() {
+            GraphDriver::Memgraph(client) => Some(client.clone()),
+            GraphDriver::Neo4j(_) => None,
+        }
+    }
+
     /// Execute a Cypher query without returning results
     #[instrument(skip(self), fields(cypher_len = cypher.len()))]
     pub async fn run(&self, cypher: &str) -> Result<()> {
@@ -139,10 +147,14 @@ impl GraphClient {
                     CortexError::Database(e.to_string())
                 })?;
                 let mut rows = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
-                    match row.to::<Value>() {
-                        Ok(v) => rows.push(v),
-                        Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                loop {
+                    match result.next().await {
+                        Ok(Some(row)) => match row.to::<Value>() {
+                            Ok(v) => rows.push(v),
+                            Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                        },
+                        Ok(None) => break,
+                        Err(e) => return Err(CortexError::Database(e.to_string())),
                     }
                 }
                 debug!(row_count = rows.len(), "Raw query completed");
@@ -170,10 +182,14 @@ impl GraphClient {
                     .await
                     .map_err(|e| CortexError::Database(e.to_string()))?;
                 let mut rows = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
-                    match row.to::<Value>() {
-                        Ok(v) => rows.push(v),
-                        Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                loop {
+                    match result.next().await {
+                        Ok(Some(row)) => match row.to::<Value>() {
+                            Ok(v) => rows.push(v),
+                            Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                        },
+                        Ok(None) => break,
+                        Err(e) => return Err(CortexError::Database(e.to_string())),
                     }
                 }
                 Ok(rows)
@@ -199,10 +215,14 @@ impl GraphClient {
                     .await
                     .map_err(|e| CortexError::Database(e.to_string()))?;
                 let mut rows = Vec::new();
-                while let Ok(Some(row)) = result.next().await {
-                    match row.to::<Value>() {
-                        Ok(v) => rows.push(v),
-                        Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                loop {
+                    match result.next().await {
+                        Ok(Some(row)) => match row.to::<Value>() {
+                            Ok(v) => rows.push(v),
+                            Err(_) => rows.push(serde_json::json!({ "row": format!("{row:?}") })),
+                        },
+                        Ok(None) => break,
+                        Err(e) => return Err(CortexError::Database(e.to_string())),
                     }
                 }
                 Ok(rows)
@@ -294,6 +314,10 @@ impl GraphClient {
     }
 
     /// Upsert a code node
+    ///
+    /// Branch and repository_path are promoted from `node.properties` to
+    /// top-level graph properties so that scoped queries, indexes, and branch
+    /// cleanup can match them directly.
     pub async fn upsert_node(&self, node: &CodeNode) -> Result<()> {
         let label = node.kind.cypher_label();
         let cyclomatic = node
@@ -302,6 +326,13 @@ impl GraphClient {
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(0);
 
+        let branch = node.properties.get("branch").cloned().unwrap_or_default();
+        let repository_path = node
+            .properties
+            .get("repository_path")
+            .cloned()
+            .unwrap_or_default();
+
         let cypher = format!(
             "MERGE (n:{label} {{id: $id}})
              SET n:CodeNode,
@@ -309,7 +340,9 @@ impl GraphClient {
                  n.line_number = toInteger($line_number), n.lang = $lang,
                  n.source = $source, n.docstring = $docstring,
                  n.cyclomatic_complexity = toInteger($cyclomatic_complexity),
-                 n.properties = $properties"
+                 n.properties = $properties,
+                 n.branch = $branch,
+                 n.repository_path = $repository_path"
         );
 
         let params = vec![
@@ -334,6 +367,8 @@ impl GraphClient {
                 "properties",
                 serde_json::to_string(&node.properties).unwrap_or_default(),
             ),
+            ("branch", branch),
+            ("repository_path", repository_path),
         ];
 
         self.query_with_params(&cypher, params).await?;
@@ -363,23 +398,39 @@ impl GraphClient {
         Ok(())
     }
 
-    /// Resolve call targets to concrete functions
-    pub async fn resolve_call_targets(&self, repository_path: &str) -> Result<usize> {
+    /// Resolve call targets to concrete functions.
+    ///
+    /// When `branch` is provided, resolution is scoped to nodes on that branch,
+    /// preventing cross-branch mis-linking.
+    pub async fn resolve_call_targets(
+        &self,
+        repository_path: &str,
+        branch: Option<&str>,
+    ) -> Result<usize> {
+        let branch_filter = if branch.is_some() {
+            " AND caller.branch = $branch AND callee.branch = $branch"
+        } else {
+            ""
+        };
+
         let cypher = format!(
             "MATCH (caller)-[old:CALLS]->(ct:CallTarget)
-             WHERE caller.path STARTS WITH $repo
+             WHERE caller.repository_path = $repo
              WITH caller, old, ct, coalesce(old.callee_name, ct.name) AS callee_name
              MATCH (callee:Function {{name: callee_name}})
-             WHERE callee.path STARTS WITH $repo
+             WHERE callee.repository_path = $repo{branch_filter}
              MERGE (caller)-[r:CALLS]->(callee)
              SET r.kind = 'Calls', r.properties = old.properties
              DELETE old
              RETURN count(r) AS resolved"
         );
 
-        let rows = self
-            .query_with_param(&cypher, "repo", repository_path)
-            .await?;
+        let mut params = vec![("repo", repository_path.to_string())];
+        if let Some(br) = branch {
+            params.push(("branch", br.to_string()));
+        }
+
+        let rows = self.query_with_params(&cypher, params).await?;
 
         let mut resolved = 0usize;
         for row in rows {

@@ -314,7 +314,11 @@ impl<T> BoundedEventQueue<T> {
 
     /// Pop an event
     pub fn pop(&mut self) -> Option<T> {
-        self.events.pop()
+        if self.events.is_empty() {
+            None
+        } else {
+            Some(self.events.remove(0))
+        }
     }
 
     /// Get the front event
@@ -563,8 +567,8 @@ mod tests {
         queue.push(1).unwrap();
         queue.push(2).unwrap();
 
-        assert_eq!(queue.pop(), Some(2));
         assert_eq!(queue.pop(), Some(1));
+        assert_eq!(queue.pop(), Some(2));
         assert_eq!(queue.pop(), None);
     }
 

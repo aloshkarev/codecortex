@@ -56,33 +56,44 @@ impl McpServer {
         Ok(())
     }
 
-    pub async fn dispatch(&self, method: &str, params: Value) -> Result<Value> {
-        let client = GraphClient::connect(&self.config).await?;
-        let analyzer = Analyzer::new(client.clone());
-        let indexer = Indexer::new(client.clone(), self.config.max_batch_size)?;
-        let watcher = WatchSession::new(&self.config);
+    fn current_watch_config(&self) -> CortexConfig {
+        CortexConfig::load().unwrap_or_else(|_| self.config.clone())
+    }
 
+    pub async fn dispatch(&self, method: &str, params: Value) -> Result<Value> {
         match method {
             "tools/list" => Ok(json!({ "tools": tool_names() })),
             "add_code_to_graph" => {
+                let client = GraphClient::connect(&self.config).await?;
+                let indexer = Indexer::new(client, self.config.max_batch_size)?;
                 let path = params.get("path").and_then(Value::as_str).unwrap_or(".");
                 let report = indexer.index_path(path).await?;
                 Ok(json!(report))
             }
             "watch_directory" => {
                 let path = params.get("path").and_then(Value::as_str).unwrap_or(".");
+                let mut cfg = self.current_watch_config();
+                let watcher = WatchSession::new(&cfg);
                 watcher.watch(PathBuf::from(path).as_path())?;
-                let mut cfg = self.config.clone();
                 watcher.persist_to_config(&mut cfg)?;
                 Ok(json!({"status":"watching","path":path}))
             }
-            "list_watched_paths" => Ok(json!({ "paths": watcher.list() })),
+            "list_watched_paths" => {
+                let cfg = self.current_watch_config();
+                let watcher = WatchSession::new(&cfg);
+                Ok(json!({ "paths": watcher.list() }))
+            }
             "unwatch_directory" => {
                 let path = params.get("path").and_then(Value::as_str).unwrap_or(".");
+                let mut cfg = self.current_watch_config();
+                let watcher = WatchSession::new(&cfg);
                 let removed = watcher.unwatch(PathBuf::from(path).as_path())?;
+                watcher.persist_to_config(&mut cfg)?;
                 Ok(json!({ "removed": removed }))
             }
             "find_code" => {
+                let client = GraphClient::connect(&self.config).await?;
+                let analyzer = Analyzer::new(client);
                 let query = params.get("query").and_then(Value::as_str).unwrap_or_default();
                 let kind = match params.get("kind").and_then(Value::as_str).unwrap_or("pattern") {
                     "name" => SearchKind::Name,
@@ -94,6 +105,8 @@ impl McpServer {
                 Ok(json!(analyzer.find_code(query, kind, path_filter).await?))
             }
             "analyze_code_relationships" => {
+                let client = GraphClient::connect(&self.config).await?;
+                let analyzer = Analyzer::new(client);
                 let query_type = params
                     .get("query_type")
                     .and_then(Value::as_str)
@@ -117,19 +130,30 @@ impl McpServer {
                 Ok(json!(output))
             }
             "execute_cypher_query" => {
+                let client = GraphClient::connect(&self.config).await?;
                 let cypher = params
                     .get("query")
                     .and_then(Value::as_str)
                     .unwrap_or("RETURN 1 AS ok");
                 Ok(json!(client.raw_query(cypher).await?))
             }
-            "find_dead_code" => Ok(json!(analyzer.dead_code().await?)),
+            "find_dead_code" => {
+                let client = GraphClient::connect(&self.config).await?;
+                let analyzer = Analyzer::new(client);
+                Ok(json!(analyzer.dead_code().await?))
+            }
             "calculate_cyclomatic_complexity" | "find_most_complex_functions" => {
+                let client = GraphClient::connect(&self.config).await?;
+                let analyzer = Analyzer::new(client);
                 let top_n = params.get("top_n").and_then(Value::as_u64).unwrap_or(20) as usize;
                 Ok(json!(analyzer.complexity(top_n).await?))
             }
-            "list_indexed_repositories" => Ok(json!(client.list_repositories().await?)),
+            "list_indexed_repositories" => {
+                let client = GraphClient::connect(&self.config).await?;
+                Ok(json!(client.list_repositories().await?))
+            }
             "delete_repository" => {
+                let client = GraphClient::connect(&self.config).await?;
                 let path = params.get("path").and_then(Value::as_str).unwrap_or_default();
                 client.delete_repository(path).await?;
                 Ok(json!({"deleted": path}))
@@ -144,7 +168,11 @@ impl McpServer {
                 Ok(json!(BundleStore::import(PathBuf::from(path).as_path())?))
             }
             "search_registry_bundles" => Ok(json!({"bundles":[] })),
-            "get_repository_stats" => Ok(json!(analyzer.repository_stats().await?)),
+            "get_repository_stats" => {
+                let client = GraphClient::connect(&self.config).await?;
+                let analyzer = Analyzer::new(client);
+                Ok(json!(analyzer.repository_stats().await?))
+            }
             "check_health" => Ok(json!({"status":"ok"})),
             "add_package_to_graph" | "visualize_graph_query" => Ok(json!({"status":"not_implemented"})),
             _ => Ok(json!({"error":"unknown_method"})),
@@ -157,5 +185,67 @@ impl McpServer {
             state: JobState::Running,
             message: message.to_string(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn tools_list_dispatch_does_not_require_graph_connection() {
+        let server = McpServer::new(CortexConfig::default());
+        let rt = Runtime::new().expect("runtime");
+        let result = rt
+            .block_on(server.dispatch("tools/list", json!({})))
+            .expect("tools/list response");
+
+        assert!(result.get("tools").is_some());
+    }
+
+    #[test]
+    fn watch_dispatch_persists_and_lists_current_paths() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let temp = tempdir().expect("tempdir");
+        let watched = temp.path().join("repo");
+        std::fs::create_dir_all(&watched).expect("watched dir");
+
+        let old_home = std::env::var("HOME").ok();
+        unsafe {
+            std::env::set_var("HOME", temp.path());
+        }
+
+        let server = McpServer::new(CortexConfig::default());
+        let rt = Runtime::new().expect("runtime");
+
+        rt.block_on(server.dispatch(
+            "watch_directory",
+            json!({ "path": watched.display().to_string() }),
+        ))
+        .expect("watch response");
+
+        let listed = rt
+            .block_on(server.dispatch("list_watched_paths", json!({})))
+            .expect("list response");
+        let listed_text = listed["paths"].to_string();
+        assert!(listed_text.contains(&watched.display().to_string()));
+
+        let removed = rt
+            .block_on(server.dispatch(
+                "unwatch_directory",
+                json!({ "path": watched.display().to_string() }),
+            ))
+            .expect("unwatch response");
+        assert_eq!(removed["removed"], json!(true));
+
+        match old_home {
+            Some(home) => unsafe { std::env::set_var("HOME", home) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
     }
 }

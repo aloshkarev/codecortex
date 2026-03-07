@@ -60,6 +60,15 @@ impl Pipeline {
         let span = span!(Level::INFO, "pipeline_run");
         let _enter = span.enter();
 
+        {
+            let mut state = self.state.write().await;
+            state.current_stage = None;
+            state.completed_stages.clear();
+            state.entities_processed = 0;
+            state.is_complete = false;
+            state.errors.clear();
+        }
+
         info!(stages = self.stages.len(), "Starting pipeline execution");
 
         for stage in &self.stages {
@@ -98,6 +107,7 @@ impl Pipeline {
 
                     let mut state = self.state.write().await;
                     state.errors.push(format!("{}: {}", stage_name, e));
+                    state.current_stage = None;
                     return Err(e);
                 }
             }
@@ -172,5 +182,36 @@ mod tests {
         let state = pipeline.state().await;
         assert!(state.is_complete);
         assert_eq!(state.completed_stages.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn pipeline_state_resets_between_runs() {
+        let pipeline = Pipeline::with_default_stages();
+        let context1 = crate::context::PipelineContext::from_content(
+            "test.rs".to_string(),
+            "fn main() {}".to_string(),
+            Some("rs".to_string()),
+        );
+        let context2 = crate::context::PipelineContext::from_content(
+            "other.rs".to_string(),
+            "fn helper() {}".to_string(),
+            Some("rs".to_string()),
+        );
+
+        pipeline
+            .run(context1)
+            .await
+            .expect("first run should succeed");
+        let state_after_first = pipeline.state().await;
+        assert_eq!(state_after_first.completed_stages.len(), 4);
+
+        pipeline
+            .run(context2)
+            .await
+            .expect("second run should succeed");
+        let state_after_second = pipeline.state().await;
+        assert_eq!(state_after_second.completed_stages.len(), 4);
+        assert_eq!(state_after_second.entities_processed, 4);
+        assert!(state_after_second.errors.is_empty());
     }
 }

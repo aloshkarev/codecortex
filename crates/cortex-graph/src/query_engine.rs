@@ -25,7 +25,7 @@ impl QueryEngine {
     pub async fn callers(&self, function_name: &str) -> Result<Vec<serde_json::Value>> {
         self.client
             .query_with_param(
-                "MATCH (caller:CodeNode)-[r:EDGE {kind: 'Calls'}]->(callee:CodeNode {name: $name})
+                "MATCH (caller:Function)-[r:CALLS]->(callee:Function {name: $name})
                  RETURN caller.name AS caller, callee.name AS callee, r.properties AS relationship",
                 "name",
                 function_name,
@@ -37,7 +37,7 @@ impl QueryEngine {
     pub async fn callees(&self, function_name: &str) -> Result<Vec<serde_json::Value>> {
         self.client
             .query_with_param(
-                "MATCH (caller:CodeNode {name: $name})-[r:EDGE {kind: 'Calls'}]->(callee:CodeNode)
+                "MATCH (caller:Function {name: $name})-[r:CALLS]->(callee:Function)
                  RETURN caller.name AS caller, callee.name AS callee, r.properties AS relationship",
                 "name",
                 function_name,
@@ -119,18 +119,22 @@ mod tests {
     #[test]
     fn callers_query_uses_parameter() {
         // Verify the callers query uses parameterized input (safe from injection)
-        let query = "MATCH (caller:CodeNode)-[r:EDGE {kind: 'Calls'}]->(callee:CodeNode {name: $name})
+        let query = "MATCH (caller:Function)-[r:CALLS]->(callee:Function {name: $name})
                      RETURN caller.name AS caller, callee.name AS callee, r.properties AS relationship";
         assert!(query.contains("$name"));
+        assert!(query.contains(":CALLS"));
+        assert!(!query.contains(":EDGE"));
         assert!(!query.contains("'{function_name}'"));
     }
 
     #[test]
     fn callees_query_uses_parameter() {
         // Verify the callees query uses parameterized input (safe from injection)
-        let query = "MATCH (caller:CodeNode {name: $name})-[r:EDGE {kind: 'Calls'}]->(callee:CodeNode)
+        let query = "MATCH (caller:Function {name: $name})-[r:CALLS]->(callee:Function)
                      RETURN caller.name AS caller, callee.name AS callee, r.properties AS relationship";
         assert!(query.contains("$name"));
+        assert!(query.contains(":CALLS"));
+        assert!(!query.contains(":EDGE"));
         assert!(!query.contains("'{function_name}'"));
     }
 
@@ -159,8 +163,8 @@ mod tests {
     fn all_queries_use_safe_parameters() {
         // Ensure all query engine methods use parameterized queries
         let queries = [
-            "MATCH (caller:CodeNode)-[r:EDGE {kind: 'Calls'}]->(callee:CodeNode {name: $name})",
-            "MATCH (caller:CodeNode {name: $name})-[r:EDGE {kind: 'Calls'}]->(callee:CodeNode)",
+            "MATCH (caller:Function)-[r:CALLS]->(callee:Function {name: $name})",
+            "MATCH (caller:Function {name: $name})-[r:CALLS]->(callee:Function)",
             "MATCH (f:Function) WHERE f.name CONTAINS $pattern",
             "MATCH (f:Function {name: $name})",
         ];

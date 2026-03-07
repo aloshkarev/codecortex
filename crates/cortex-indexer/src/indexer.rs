@@ -491,7 +491,7 @@ impl Indexer {
         self.writer.write_edges(&pass_two_edges).await?;
         let resolved_calls = self
             .client
-            .resolve_call_targets(&repository_path)
+            .resolve_call_targets(&repository_path, branch.as_deref())
             .await
             .unwrap_or(0);
 
@@ -504,17 +504,28 @@ impl Indexer {
 
         let timed_out = timed_out.load(Ordering::Relaxed);
 
-        // Create branch index record if branch-aware indexing
-        if let (Some(br), Some(ch)) = (&branch, &commit_hash) {
-            let record = BranchIndexRecord::new(
-                &repository_path,
-                br,
-                ch,
-                indexed.len(),
-                symbol_count,
-                start.elapsed().as_millis() as u64,
+        // Only promote to "current" if the run completed without timeout.
+        // A timed-out run is partial; recording it as current would cause
+        // future runs to skip re-indexing, leaving the graph stale.
+        if !timed_out {
+            if let (Some(br), Some(ch)) = (&branch, &commit_hash) {
+                let record = BranchIndexRecord::new(
+                    &repository_path,
+                    br,
+                    ch,
+                    indexed.len(),
+                    symbol_count,
+                    start.elapsed().as_millis() as u64,
+                );
+                create_branch_index(&self.client, &record).await?;
+            }
+
+            self.update_cache_entries(&indexed, &repository_path, &branch)?;
+        } else {
+            warn!(
+                "Indexing timed out — skipping branch index and cache promotion for {}",
+                repository_path
             );
-            create_branch_index(&self.client, &record).await?;
         }
 
         Ok(IndexReport {
@@ -532,6 +543,15 @@ impl Indexer {
             symbol_count,
             skipped_reason: None,
         })
+    }
+
+    fn update_cache_entries(
+        &self,
+        files: &[IndexedFile],
+        repository_path: &str,
+        branch: &Option<String>,
+    ) -> Result<()> {
+        write_cache_entries(&self.cache, files, repository_path, branch)
     }
 
     /// Get current indexing progress
@@ -583,9 +603,6 @@ impl Indexer {
         // Note: In a full implementation, we would pass defines to the parser
         // For now, we just parse normally - the defines are captured for future use
         let parsed = parser.parse(&source, path)?;
-        self.cache
-            .insert(cache_key.as_bytes(), hash.as_bytes())
-            .map_err(|e| CortexError::Io(e.to_string()))?;
 
         let language = cortex_core::Language::from_path(path)
             .ok_or_else(|| CortexError::UnsupportedLanguage(path.display().to_string()))?;
@@ -606,6 +623,22 @@ fn cache_key_for_path(path: &Path, repository_path: &str, branch: &Option<String
     } else {
         format!("{repository_path}::{path_key}")
     }
+}
+
+fn write_cache_entries(
+    cache: &sled::Db,
+    files: &[IndexedFile],
+    repository_path: &str,
+    branch: &Option<String>,
+) -> Result<()> {
+    for file in files {
+        let cache_key = cache_key_for_path(Path::new(&file.path), repository_path, branch);
+        cache
+            .insert(cache_key.as_bytes(), file.content_hash.as_bytes())
+            .map_err(|e| CortexError::Io(e.to_string()))?;
+    }
+    cache.flush().map_err(|e| CortexError::Io(e.to_string()))?;
+    Ok(())
 }
 
 /// Build branch properties map for node properties
@@ -694,10 +727,21 @@ fn collect_source_files_with_config(path: &Path, config: &ProjectConfig) -> Vec<
         let should_exclude = effective_excludes.iter().any(|pattern| {
             if pattern.ends_with("/**") {
                 let dir = &pattern[..pattern.len() - 3];
-                // Check if any component matches
-                entry_path
-                    .components()
-                    .any(|c| c.as_os_str() == std::ffi::OsStr::new(dir))
+                if dir.contains('/') || dir.contains('\\') {
+                    // Multi-segment pattern like "src/generated/**":
+                    // check if the path contains the directory as a substring
+                    // bounded by path separators.
+                    let dir_with_sep = format!("{}/", dir.replace('\\', "/"));
+                    let normalized = path_str.replace('\\', "/");
+                    normalized.contains(&dir_with_sep)
+                        || normalized.ends_with(&dir_with_sep[..dir_with_sep.len() - 1])
+                } else {
+                    // Single-segment pattern like "target/**":
+                    // match any path component.
+                    entry_path
+                        .components()
+                        .any(|c| c.as_os_str() == std::ffi::OsStr::new(dir))
+                }
             } else if pattern.starts_with("*.") {
                 let ext = &pattern[1..]; // ".pyc" from "*.pyc"
                 entry_path
@@ -881,5 +925,54 @@ mod tests {
 
         assert_eq!(files.len(), 1);
         assert_eq!(files[0], a);
+    }
+
+    #[test]
+    fn test_multi_segment_exclude_pattern() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let gen_dir = temp.path().join("src").join("generated");
+        std::fs::create_dir_all(&gen_dir).unwrap();
+        let keep = temp.path().join("src").join("main.rs");
+        let exclude = gen_dir.join("auto.rs");
+        std::fs::write(&keep, "fn keep() {}").unwrap();
+        std::fs::write(&exclude, "fn gen() {}").unwrap();
+        unsafe {
+            std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
+            std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
+        }
+        let cfg = ProjectConfig {
+            exclude_patterns: vec!["src/generated/**".to_string()],
+            ..Default::default()
+        };
+        let files = collect_source_files_with_config(temp.path(), &cfg);
+        assert!(
+            files.iter().any(|f| f.ends_with("main.rs")),
+            "main.rs should be included"
+        );
+        assert!(
+            !files.iter().any(|f| f.ends_with("auto.rs")),
+            "src/generated/auto.rs should be excluded by multi-segment pattern"
+        );
+    }
+
+    #[test]
+    fn test_update_cache_entries_writes_branch_scoped_hashes() {
+        let cache = sled::Config::new().temporary(true).open().unwrap();
+        let files = vec![IndexedFile {
+            path: "/repo/src/main.rs".to_string(),
+            language: cortex_core::Language::Rust,
+            content_hash: "abc123".to_string(),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+        }];
+
+        write_cache_entries(&cache, &files, "/repo", &Some("main".to_string())).unwrap();
+
+        let value = cache
+            .get("/repo::main::/repo/src/main.rs")
+            .unwrap()
+            .unwrap();
+        assert_eq!(value.as_ref(), b"abc123");
     }
 }

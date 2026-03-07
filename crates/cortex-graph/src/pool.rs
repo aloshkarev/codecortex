@@ -7,6 +7,7 @@ use cortex_core::{CortexConfig, CortexError, Result};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
+use tokio::time;
 
 /// Configuration for the connection pool
 #[derive(Debug, Clone)]
@@ -138,10 +139,14 @@ impl ConnectionPool {
         let start = Instant::now();
 
         // Wait for a permit
-        let permit = self
-            .semaphore
-            .acquire()
+        let permit = time::timeout(self.config.connection_timeout, self.semaphore.acquire())
             .await
+            .map_err(|_| {
+                CortexError::Database(format!(
+                    "Timed out waiting {:?} for a pooled graph connection",
+                    self.config.connection_timeout
+                ))
+            })?
             .map_err(|e| CortexError::Database(format!("Failed to acquire permit: {}", e)))?;
 
         // Update wait statistics
@@ -160,6 +165,11 @@ impl ConnectionPool {
                     && !conn.is_idle_expired(self.config.idle_timeout)
                 {
                     conn.mark_used();
+                    let idle_connections = idle.len();
+                    drop(idle);
+                    let mut stats = self.stats.lock().await;
+                    stats.active_connections += 1;
+                    stats.idle_connections = idle_connections;
                     return Ok(PoolConnectionGuard {
                         conn: Some(conn),
                         permit,
@@ -312,14 +322,13 @@ mod tests {
 
     #[test]
     fn pooled_connection_tracking() {
-        // Test that use_count tracking works correctly
-        // We test this by verifying the mark_used method logic
-        let mut count = 0u64;
-        assert_eq!(count, 0);
-        count += 1;
-        assert_eq!(count, 1);
-        count += 1;
-        assert_eq!(count, 2);
+        let mut stats = PoolStats::default();
+        assert_eq!(stats.wait_count, 0);
+        assert_eq!(stats.total_wait_time_ms, 0);
+        stats.wait_count += 1;
+        stats.total_wait_time_ms += 5;
+        assert_eq!(stats.wait_count, 1);
+        assert_eq!(stats.total_wait_time_ms, 5);
     }
 
     #[test]
@@ -354,5 +363,22 @@ mod tests {
         let idle_expired = last_used.elapsed() > Duration::ZERO;
         // Just testing that the comparison returns a boolean
         let _: bool = idle_expired;
+    }
+
+    #[tokio::test]
+    async fn get_times_out_when_no_permit_is_available() {
+        let config = CortexConfig::default();
+        let pool_config = PoolConfig {
+            max_connections: 1,
+            connection_timeout: Duration::from_millis(25),
+            ..Default::default()
+        };
+        let pool = ConnectionPool::new(config, pool_config);
+        let _permit = pool.semaphore.acquire().await.expect("acquire test permit");
+
+        match pool.get().await {
+            Ok(_) => panic!("pool acquisition should time out"),
+            Err(err) => assert!(err.to_string().contains("Timed out waiting")),
+        }
     }
 }

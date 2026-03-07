@@ -427,6 +427,7 @@ impl SmellDetector {
         let mut function_start = 0;
         let mut brace_count = 0;
         let mut function_name = String::new();
+        let mut function_is_python_style = false;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
@@ -442,6 +443,7 @@ impl SmellDetector {
                 in_function = true;
                 function_start = i;
                 brace_count = 0;
+                function_is_python_style = trimmed.starts_with("def ");
 
                 // Extract function name
                 function_name = self.extract_function_name(trimmed);
@@ -451,7 +453,10 @@ impl SmellDetector {
                 brace_count += trimmed.matches('{').count() as i32;
                 brace_count -= trimmed.matches('}').count() as i32;
 
-                if brace_count == 0 && i > function_start {
+                if (brace_count == 0 && i > function_start && !function_is_python_style)
+                    || (function_is_python_style
+                        && self.is_python_function_end(&lines, i, function_start))
+                {
                     let function_lines = i - function_start + 1;
 
                     if function_lines > self.config.max_function_lines {
@@ -483,6 +488,7 @@ impl SmellDetector {
                     }
 
                     in_function = false;
+                    function_is_python_style = false;
                 }
             }
         }
@@ -564,6 +570,18 @@ impl SmellDetector {
                 continue;
             }
 
+            // Skip constant definitions and array index lines
+            if trimmed.starts_with("const ")
+                || trimmed.starts_with("static ")
+                || trimmed.starts_with("pub const ")
+                || trimmed.starts_with("pub static ")
+            {
+                continue;
+            }
+            if trimmed.contains('[') && trimmed.contains(']') {
+                continue;
+            }
+
             // Simple magic number detection (numbers that aren't 0, 1, or part of common patterns)
             let words: Vec<&str> = trimmed.split_whitespace().collect();
             for word in words {
@@ -573,12 +591,6 @@ impl SmellDetector {
                 if let Ok(num) = clean.parse::<f64>() {
                     // Skip common acceptable numbers
                     if num == 0.0 || num == 1.0 || num == -1.0 {
-                        continue;
-                    }
-
-                    // Skip if it looks like an index or common constant
-                    if trimmed.contains('[') || trimmed.contains("const") || trimmed.contains("let")
-                    {
                         continue;
                     }
 
@@ -778,6 +790,7 @@ impl SmellDetector {
         let mut brace_count = 0;
         let mut function_name = String::new();
         let mut return_count = 0;
+        let mut function_is_python_style = false;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
@@ -800,6 +813,7 @@ impl SmellDetector {
                 brace_count = 0;
                 function_name = self.extract_function_name(trimmed);
                 return_count = 0;
+                function_is_python_style = trimmed.starts_with("def ");
             }
 
             if in_function {
@@ -811,7 +825,10 @@ impl SmellDetector {
                     return_count += 1;
                 }
 
-                if brace_count == 0 && i > function_start {
+                if (brace_count == 0 && i > function_start && !function_is_python_style)
+                    || (function_is_python_style
+                        && self.is_python_function_end(&lines, i, function_start))
+                {
                     if return_count > self.config.max_returns {
                         let severity = if return_count > self.config.max_returns * 2 {
                             Severity::Error
@@ -839,6 +856,7 @@ impl SmellDetector {
                     }
 
                     in_function = false;
+                    function_is_python_style = false;
                 }
             }
         }
@@ -960,6 +978,34 @@ impl SmellDetector {
 
         max_depth
     }
+
+    fn is_python_function_end(
+        &self,
+        lines: &[&str],
+        current_idx: usize,
+        function_start: usize,
+    ) -> bool {
+        if current_idx + 1 >= lines.len() {
+            return true;
+        }
+
+        let function_indent = lines[function_start]
+            .chars()
+            .take_while(|c| c.is_whitespace())
+            .count();
+
+        for next_line in lines.iter().skip(current_idx + 1) {
+            let trimmed = next_line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            let next_indent = next_line.chars().take_while(|c| c.is_whitespace()).count();
+            return next_indent <= function_indent;
+        }
+
+        true
+    }
 }
 
 impl Default for SmellDetector {
@@ -1027,6 +1073,26 @@ fn hello() {
             "fn long_function() {\n".to_string() + &"    println!(\"line\");\n".repeat(10) + "}\n";
 
         let smells = detector.detect_long_functions(&source, "test.rs");
+        assert!(!smells.is_empty());
+        assert_eq!(smells[0].smell_type, SmellType::LongFunction);
+    }
+
+    #[test]
+    fn detect_long_python_function_smell() {
+        let detector = SmellDetector::with_config(SmellConfig {
+            max_function_lines: 4,
+            ..Default::default()
+        });
+
+        let source = r#"
+def long_function():
+    step_one()
+    if ready:
+        step_two()
+        step_three()
+    finalize()
+"#;
+        let smells = detector.detect_long_functions(source, "test.py");
         assert!(!smells.is_empty());
         assert_eq!(smells[0].smell_type, SmellType::LongFunction);
     }
@@ -1116,6 +1182,36 @@ fn calculate() {
         // Note: Magic number detection is simplified and may not catch all cases
         // The test passes if the function runs without error
         // In a full implementation, this would detect 42, 100, and 3.14159
+    }
+
+    #[test]
+    fn test_detect_magic_numbers_in_let_binding() {
+        let detector = SmellDetector::new();
+        let source = r#"
+fn compute() {
+    process(42);
+    apply(100);
+}
+"#;
+        let smells = detector.detect_magic_numbers(source, "test.rs");
+        let magic_values: Vec<_> = smells
+            .iter()
+            .filter_map(|s| {
+                s.symbol_name
+                    .strip_prefix("magic_number_")
+                    .map(String::from)
+            })
+            .collect();
+        assert!(
+            magic_values.contains(&"42".to_string()),
+            "Magic number 42 should be detected in process(42); got: {:?}",
+            magic_values
+        );
+        assert!(
+            magic_values.contains(&"100".to_string()),
+            "Magic number 100 should be detected in apply(100); got: {:?}",
+            magic_values
+        );
     }
 
     #[test]
@@ -1264,6 +1360,26 @@ fn many_returns(x: i32) -> i32 {
 }
 "#;
         let smells = detector.detect_too_many_returns(source, "test.rs");
+        assert!(!smells.is_empty());
+        assert_eq!(smells[0].smell_type, SmellType::TooManyReturns);
+    }
+
+    #[test]
+    fn detect_too_many_returns_in_python_function() {
+        let detector = SmellDetector::with_config(SmellConfig {
+            max_returns: 2,
+            ..Default::default()
+        });
+
+        let source = r#"
+def many_returns(x):
+    if x < 0:
+        return 0
+    if x > 100:
+        return 100
+    return x
+"#;
+        let smells = detector.detect_too_many_returns(source, "test.py");
         assert!(!smells.is_empty());
         assert_eq!(smells[0].smell_type, SmellType::TooManyReturns);
     }

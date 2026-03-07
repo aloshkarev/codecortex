@@ -108,6 +108,41 @@ impl VectorDocument {
             );
         }
 
+        for (key, value) in &self.metadata.extra {
+            let metadata_value = match value {
+                serde_json::Value::String(text) => MetadataValue::String(text.clone()),
+                serde_json::Value::Bool(flag) => MetadataValue::Boolean(*flag),
+                serde_json::Value::Number(number) => {
+                    if let Some(int) = number.as_i64() {
+                        MetadataValue::Integer(int)
+                    } else if let Some(float) = number.as_f64() {
+                        MetadataValue::Float(float)
+                    } else {
+                        continue;
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    let mut strings = Vec::with_capacity(items.len());
+                    let mut supported = true;
+                    for item in items {
+                        if let Some(text) = item.as_str() {
+                            strings.push(text.to_string());
+                        } else {
+                            supported = false;
+                            break;
+                        }
+                    }
+                    if supported {
+                        MetadataValue::List(strings)
+                    } else {
+                        continue;
+                    }
+                }
+                _ => continue,
+            };
+            map.insert(key.clone(), metadata_value);
+        }
+
         map
     }
 }

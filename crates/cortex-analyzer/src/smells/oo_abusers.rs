@@ -180,6 +180,7 @@ pub fn detect_temporary_fields(
 }
 
 /// Detect divergent change - one class changed for many different reasons
+#[allow(dead_code)]
 pub fn detect_divergent_change(
     source: &str,
     file_path: &str,
@@ -239,6 +240,25 @@ struct InheritanceRelation {
     line_number: u32,
 }
 
+fn group_methods_by_prefix(methods: &HashSet<String>) -> Vec<HashSet<String>> {
+    let prefixes = [
+        "get", "set", "add", "remove", "delete", "update", "create", "find", "search", "load",
+        "save", "validate", "process", "handle", "execute", "run", "init", "check", "is", "has",
+        "can", "should", "on", "before", "after",
+    ];
+    let mut groups_map: HashMap<String, HashSet<String>> = HashMap::new();
+    for method in methods {
+        let lower = method.to_lowercase();
+        let key = prefixes
+            .iter()
+            .find(|&&p| lower.starts_with(p))
+            .map(|&p| p.to_string())
+            .unwrap_or_else(|| "other".to_string());
+        groups_map.entry(key).or_default().insert(method.clone());
+    }
+    groups_map.into_values().filter(|g| g.len() > 1).collect()
+}
+
 fn extract_class_signatures(lines: &[&str]) -> HashMap<String, ClassInfo> {
     let mut classes: HashMap<String, ClassInfo> = HashMap::new();
     let mut current_class: Option<String> = None;
@@ -291,6 +311,9 @@ fn extract_class_signatures(lines: &[&str]) -> HashMap<String, ClassInfo> {
 
             // Check for class end
             if brace_count == 0 && i > class_start {
+                // Compute method groups from collected methods
+                let groups = group_methods_by_prefix(&info.methods);
+                info.method_groups = groups;
                 current_class = None;
             }
         }
@@ -337,7 +360,7 @@ fn extract_class_name_from_line(line: &str) -> String {
 fn extract_class_methods(lines: &[&str], class_name: &str) -> HashSet<String> {
     let mut methods = HashSet::new();
     let mut in_class = false;
-    let mut target_class = String::new();
+    let mut _target_class = String::new();
     let mut brace_count = 0;
 
     for line in lines {
@@ -346,7 +369,7 @@ fn extract_class_methods(lines: &[&str], class_name: &str) -> HashSet<String> {
         if trimmed.contains("class ") || trimmed.contains("struct ") || trimmed.contains("impl ") {
             if trimmed.contains(class_name) {
                 in_class = true;
-                target_class = class_name.to_string();
+                _target_class = class_name.to_string();
                 brace_count = 0;
             }
         }
@@ -600,6 +623,7 @@ fn count_field_usages(lines: &[&str], field: &str, _class_name: &str) -> usize {
     count
 }
 
+#[allow(dead_code)]
 fn calculate_method_cohesion(method_groups: &[HashSet<String>]) -> f64 {
     if method_groups.is_empty() {
         return 1.0;
@@ -695,5 +719,33 @@ struct AdminService {
 
         let similarity = calculate_signature_similarity(&m1, &m2);
         assert!(similarity > 0.5 && similarity < 1.0);
+    }
+
+    #[test]
+    fn test_detect_divergent_change_with_mixed_responsibilities() {
+        let config = SmellConfig::default();
+        // Class with 6+ methods across different prefixes (get, set, save, load) - each prefix
+        // has 2+ methods so they form groups; multiple groups = low cohesion
+        let source = r#"
+struct BadClass {
+    fn get_user() {}
+    fn get_config() {}
+    fn set_user() {}
+    fn set_config() {}
+    fn save_config() {}
+    fn load_config() {}
+}
+"#;
+
+        let smells = detect_divergent_change(source, "test.rs", &config);
+        assert!(
+            !smells.is_empty(),
+            "DivergentChange should be detected for class with mixed responsibilities"
+        );
+        assert!(
+            smells
+                .iter()
+                .any(|s| matches!(s.smell_type, SmellType::DivergentChange))
+        );
     }
 }

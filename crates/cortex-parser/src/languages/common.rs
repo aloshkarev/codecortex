@@ -53,6 +53,20 @@ pub fn make_file_node(source: &str, path: &Path, lang: Language) -> CodeNode {
     }
 }
 
+fn truncate_source_snippet(source: &str, max_bytes: usize) -> String {
+    if source.len() <= max_bytes {
+        return source.to_string();
+    }
+
+    let cutoff = source
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|&index| index <= max_bytes)
+        .last()
+        .unwrap_or(0);
+    source[..cutoff].to_string()
+}
+
 fn make_entity_node(
     kind: EntityKind,
     name: &str,
@@ -73,15 +87,7 @@ fn make_entity_node(
         path: Some(path.display().to_string()),
         line_number: Some(line),
         lang: Some(lang),
-        source: source_snippet.map(|s| {
-            // Store at most 4 kB of source per node to avoid bloating the graph.
-            let max = 4096;
-            if s.len() > max {
-                s[..max].to_string()
-            } else {
-                s.to_string()
-            }
-        }),
+        source: source_snippet.map(|s| truncate_source_snippet(s, 4096)),
         docstring: None,
         properties: props,
     }
@@ -94,6 +100,28 @@ fn contains_edge(from: &str, to: &str) -> CodeEdge {
         kind: EdgeKind::Contains,
         properties: HashMap::new(),
     }
+}
+
+/// Strip language-specific import keywords and delimiters so that Java's
+/// `import java.util.List;`, PHP's `use App\Models\User;`, etc. are
+/// normalized to just the module path.
+fn normalize_import_text(raw: &str) -> String {
+    let s = raw
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_matches('<')
+        .trim_matches('>');
+    // Strip leading keywords and trailing semicolons that leak through
+    // when the tree-sitter query captures the whole declaration node.
+    let s = s
+        .trim_start_matches("import ")
+        .trim_start_matches("package ")
+        .trim_start_matches("use ")
+        .trim_end_matches(';')
+        .trim();
+    // Java static imports: "static java.util.Collections.sort"
+    let s = s.trim_start_matches("static ").trim();
+    s.to_string()
 }
 
 fn imports_edge(from: &str, module: &str, line: u32) -> CodeEdge {
@@ -128,6 +156,10 @@ pub struct CallCaptures {
 
 pub struct ImportCaptures {
     pub module: u32,
+    /// Optional (capture_index, allowed_names) pair.
+    /// When set, only matches whose captured text is in the allow-list are emitted.
+    /// Used by Ruby to restrict imports to `require`/`require_relative`/`load`.
+    pub method_filter: Option<(u32, &'static [&'static str])>,
 }
 
 pub struct InheritCaptures {
@@ -182,6 +214,8 @@ pub fn extract_all(
     let mut seen_node_ids = HashSet::<String>::new();
     let mut seen_edge_ids = HashSet::<String>::new();
     let mut named_entities = HashMap::<String, String>::new();
+    let mut imports = Vec::<String>::new();
+    let mut calls = Vec::<String>::new();
 
     // ── pass 1: definitions ───────────────────────────────────────────────────
     // Collect (node_id, byte_range) for function nodes so we can scope call
@@ -263,6 +297,7 @@ pub fn extract_all(
             if callee.is_empty() {
                 continue;
             }
+            calls.push(callee.clone());
             let line = call_node.start_position().row as u32 + 1;
             // Resolve same-file calls to the actual function node ID; cross-file
             // calls use the symbolic `call_target:<name>` placeholder (resolved
@@ -297,16 +332,28 @@ pub fn extract_all(
             let Some(mod_node) = caps.get(&import_capture.module).copied() else {
                 continue;
             };
+
+            // If a method filter is configured (e.g. Ruby), only accept
+            // matches whose method capture text is in the allow-list.
+            if let Some((method_idx, allowed)) = import_capture.method_filter {
+                let ok = caps
+                    .get(&method_idx)
+                    .map(|n| {
+                        let name = node_text(*n, src).trim();
+                        allowed.contains(&name)
+                    })
+                    .unwrap_or(false);
+                if !ok {
+                    continue;
+                }
+            }
+
             let raw = node_text(mod_node, src).trim();
-            let module = raw
-                .trim_matches('"')
-                .trim_matches('\'')
-                .trim_matches('<')
-                .trim_matches('>')
-                .to_string();
+            let module = normalize_import_text(raw);
             if module.is_empty() {
                 continue;
             }
+            imports.push(module.clone());
             let line = mod_node.start_position().row as u32 + 1;
             let e = imports_edge(&fid, &module, line);
             let edge_key = format!("{}|IMPORTS|{}|{}", e.from, e.to, line);
@@ -447,7 +494,63 @@ pub fn extract_all(
     ParseResult {
         nodes: all_nodes,
         edges,
-        imports: vec![],
-        calls: vec![],
+        imports,
+        calls,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_import_text, truncate_source_snippet};
+
+    #[test]
+    fn truncate_source_snippet_preserves_utf8_boundaries() {
+        let source = "€".repeat(2000);
+
+        let truncated = truncate_source_snippet(&source, 4096);
+
+        assert!(truncated.len() <= 4096);
+        assert!(truncated.chars().all(|c| c == '€'));
+        assert_eq!(truncated.len() % '€'.len_utf8(), 0);
+    }
+
+    #[test]
+    fn normalize_import_strips_java_import() {
+        assert_eq!(
+            normalize_import_text("import java.util.List;"),
+            "java.util.List"
+        );
+    }
+
+    #[test]
+    fn normalize_import_strips_java_package() {
+        assert_eq!(normalize_import_text("package com.example;"), "com.example");
+    }
+
+    #[test]
+    fn normalize_import_strips_java_static_import() {
+        assert_eq!(
+            normalize_import_text("import static java.util.Collections.sort;"),
+            "java.util.Collections.sort"
+        );
+    }
+
+    #[test]
+    fn normalize_import_strips_php_use() {
+        assert_eq!(
+            normalize_import_text("use App\\Models\\User;"),
+            "App\\Models\\User"
+        );
+    }
+
+    #[test]
+    fn normalize_import_strips_quotes() {
+        assert_eq!(normalize_import_text("\"lodash\""), "lodash");
+        assert_eq!(normalize_import_text("'express'"), "express");
+    }
+
+    #[test]
+    fn normalize_import_noop_for_clean_module() {
+        assert_eq!(normalize_import_text("os.path"), "os.path");
     }
 }

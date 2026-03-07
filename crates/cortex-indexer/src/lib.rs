@@ -41,6 +41,7 @@
 //!     batch_size: 500,
 //!     max_files: 10000,
 //!     progress_callback: None,
+//!     ..Default::default()
 //! };
 //! let indexer = Indexer::with_config(client, config)?;
 //!
@@ -62,7 +63,7 @@
 //!     println!("Hello");
 //! }
 //! "#;
-//! let skeleton = build_skeleton(code);
+//! let skeleton = build_skeleton(code, "minimal");
 //! // skeleton is a compressed version with signatures only
 //! ```
 //!
@@ -88,6 +89,8 @@
 //!
 //! let mut indexer = IncrementalIndexer::new();
 //! indexer.set_revision("abc123");
+//! let content = "fn main() {}";
+//! let new_content = "fn main() { println!(\"hi\"); }";
 //!
 //! // Only re-index changed files
 //! if indexer.has_file_changed(Path::new("src/main.rs"), content) {

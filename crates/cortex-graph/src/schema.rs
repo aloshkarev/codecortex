@@ -112,33 +112,65 @@ impl BranchIndexRecord {
     }
 }
 
-/// Ensure all schema constraints and indexes exist
-/// Errors are logged but not propagated since indexes/constraints may already exist
+/// Ensure all schema constraints and indexes exist.
+///
+/// Uses Memgraph syntax by default.  When the backend is Neo4j the
+/// `CREATE INDEX ON :Label(prop)` statements are rewritten to the
+/// `CREATE INDEX IF NOT EXISTS FOR (n:Label) ON (n.prop)` form that
+/// Neo4j 4.x+ requires.  Label-only indexes (Memgraph-specific) are
+/// skipped on Neo4j.
 pub async fn ensure_constraints(client: &GraphClient) -> Result<()> {
-    // Apply basic schema (ignore errors - indexes may already exist)
-    for statement in SCHEMA_STATEMENTS {
-        if let Err(e) = client.run(statement).await {
-            // Log but continue - index/constraint may already exist
+    let is_neo4j = matches!(
+        client.backend(),
+        crate::backend::BackendKind::Neo4j | crate::backend::BackendKind::Neptune
+    );
+
+    let all_statements = SCHEMA_STATEMENTS
+        .iter()
+        .chain(BRANCH_SCHEMA_STATEMENTS.iter());
+
+    for statement in all_statements {
+        let cypher = if is_neo4j {
+            match rewrite_index_for_neo4j(statement) {
+                Some(c) => c,
+                None => continue, // skip unsupported statement
+            }
+        } else {
+            (*statement).to_string()
+        };
+
+        if let Err(e) = client.run(&cypher).await {
             tracing::debug!(
                 "Schema statement returned (may already exist): {} - {}",
-                statement,
-                e
-            );
-        }
-    }
-
-    // Apply branch-aware schema (ignore errors - indexes may already exist)
-    for statement in BRANCH_SCHEMA_STATEMENTS {
-        if let Err(e) = client.run(statement).await {
-            tracing::debug!(
-                "Branch schema statement returned (may already exist): {} - {}",
-                statement,
+                cypher,
                 e
             );
         }
     }
 
     Ok(())
+}
+
+/// Rewrite a Memgraph-style index statement to Neo4j syntax.
+/// Returns `None` for statements that have no Neo4j equivalent
+/// (e.g. label-only indexes).
+fn rewrite_index_for_neo4j(statement: &str) -> Option<String> {
+    let s = statement.trim().trim_end_matches(';');
+
+    // Label-property index: "CREATE INDEX ON :Label(prop)"
+    if let Some(rest) = s.strip_prefix("CREATE INDEX ON :") {
+        if let Some((label, prop_part)) = rest.split_once('(') {
+            let prop = prop_part.trim_end_matches(')');
+            return Some(format!(
+                "CREATE INDEX IF NOT EXISTS FOR (n:{label}) ON (n.{prop});"
+            ));
+        }
+        // Label-only index: "CREATE INDEX ON :Label" — skip for Neo4j
+        return None;
+    }
+
+    // Pass through anything else unchanged
+    Some(format!("{s};"))
 }
 
 /// Create a BranchIndex node in the graph
@@ -178,9 +210,15 @@ pub async fn get_branch_indexes(
 ) -> Result<Vec<BranchIndexRecord>> {
     let cypher = r#"
         MATCH (bi:BranchIndex {repository_path: $repository_path})
-        RETURN bi.id, bi.repository_path, bi.branch, bi.commit_hash,
-               bi.indexed_at, bi.file_count, bi.symbol_count,
-               bi.is_stale, bi.index_duration_ms
+        RETURN bi.id AS id,
+               bi.repository_path AS repository_path,
+               bi.branch AS branch,
+               bi.commit_hash AS commit_hash,
+               bi.indexed_at AS indexed_at,
+               bi.file_count AS file_count,
+               bi.symbol_count AS symbol_count,
+               bi.is_stale AS is_stale,
+               bi.index_duration_ms AS index_duration_ms
         ORDER BY bi.indexed_at DESC
         "#;
 
@@ -190,65 +228,55 @@ pub async fn get_branch_indexes(
 
     let mut indexes = Vec::new();
     for row in rows {
-        let id = row
-            .get("bi.id")
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .unwrap_or_default();
-        let repo_path = row
-            .get("bi.repository_path")
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .unwrap_or_default();
-        let branch = row
-            .get("bi.branch")
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .unwrap_or_default();
-        let commit_hash = row
-            .get("bi.commit_hash")
-            .and_then(|v| v.as_str())
-            .map(String::from)
-            .unwrap_or_default();
-        let file_count = row
-            .get("bi.file_count")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as usize;
-        let symbol_count = row
-            .get("bi.symbol_count")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as usize;
-        let is_stale = row
-            .get("bi.is_stale")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let index_duration_ms = row
-            .get("bi.index_duration_ms")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as u64;
-
-        // Parse indexed_at or use current time as fallback
-        let indexed_at = row
-            .get("bi.indexed_at")
-            .and_then(|v| v.as_str())
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&Utc))
-            .unwrap_or_else(Utc::now);
-
-        indexes.push(BranchIndexRecord {
-            id,
-            repository_path: repo_path,
-            branch,
-            commit_hash,
-            indexed_at,
-            file_count,
-            symbol_count,
-            is_stale,
-            index_duration_ms,
-        });
+        indexes.push(decode_branch_index_row(&row));
     }
 
     Ok(indexes)
+}
+
+fn decode_branch_index_row(row: &serde_json::Value) -> BranchIndexRecord {
+    fn str_field(row: &serde_json::Value, bare: &str, qualified: &str) -> String {
+        row.get(bare)
+            .or_else(|| row.get(qualified))
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .unwrap_or_default()
+    }
+
+    fn i64_field(row: &serde_json::Value, bare: &str, qualified: &str) -> i64 {
+        row.get(bare)
+            .or_else(|| row.get(qualified))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+    }
+
+    fn bool_field(row: &serde_json::Value, bare: &str, qualified: &str) -> bool {
+        row.get(bare)
+            .or_else(|| row.get(qualified))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    }
+
+    let indexed_at = row
+        .get("indexed_at")
+        .or_else(|| row.get("bi.indexed_at"))
+        .and_then(|v| v.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(Utc::now);
+
+    BranchIndexRecord {
+        id: str_field(row, "id", "bi.id"),
+        repository_path: str_field(row, "repository_path", "bi.repository_path"),
+        branch: str_field(row, "branch", "bi.branch"),
+        commit_hash: str_field(row, "commit_hash", "bi.commit_hash"),
+        indexed_at,
+        file_count: i64_field(row, "file_count", "bi.file_count").max(0) as usize,
+        symbol_count: i64_field(row, "symbol_count", "bi.symbol_count").max(0) as usize,
+        is_stale: bool_field(row, "is_stale", "bi.is_stale"),
+        index_duration_ms: i64_field(row, "index_duration_ms", "bi.index_duration_ms").max(0)
+            as u64,
+    }
 }
 
 /// Delete a branch index and its associated nodes
@@ -496,5 +524,101 @@ mod tests {
         let deserialized: BranchIndexRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.id, record.id);
         assert_eq!(deserialized.branch, record.branch);
+    }
+
+    #[test]
+    fn get_branch_indexes_query_uses_stable_aliases() {
+        let query = r#"
+        MATCH (bi:BranchIndex {repository_path: $repository_path})
+        RETURN bi.id AS id,
+               bi.repository_path AS repository_path,
+               bi.branch AS branch,
+               bi.commit_hash AS commit_hash,
+               bi.indexed_at AS indexed_at,
+               bi.file_count AS file_count,
+               bi.symbol_count AS symbol_count,
+               bi.is_stale AS is_stale,
+               bi.index_duration_ms AS index_duration_ms
+        ORDER BY bi.indexed_at DESC
+        "#;
+
+        assert!(query.contains("bi.id AS id"));
+        assert!(query.contains("bi.repository_path AS repository_path"));
+        assert!(query.contains("bi.index_duration_ms AS index_duration_ms"));
+    }
+
+    #[test]
+    fn decode_branch_index_row_supports_aliased_fields() {
+        let row = serde_json::json!({
+            "id": "branch:/repo@main",
+            "repository_path": "/repo",
+            "branch": "main",
+            "commit_hash": "abc123",
+            "indexed_at": "2024-01-02T03:04:05Z",
+            "file_count": 12,
+            "symbol_count": 34,
+            "is_stale": true,
+            "index_duration_ms": 56
+        });
+
+        let record = decode_branch_index_row(&row);
+        assert_eq!(record.id, "branch:/repo@main");
+        assert_eq!(record.repository_path, "/repo");
+        assert_eq!(record.branch, "main");
+        assert_eq!(record.commit_hash, "abc123");
+        assert_eq!(record.file_count, 12);
+        assert_eq!(record.symbol_count, 34);
+        assert!(record.is_stale);
+        assert_eq!(record.index_duration_ms, 56);
+    }
+
+    #[test]
+    fn rewrite_label_property_index_for_neo4j() {
+        let result = rewrite_index_for_neo4j("CREATE INDEX ON :CodeNode(id);");
+        assert_eq!(
+            result.as_deref(),
+            Some("CREATE INDEX IF NOT EXISTS FOR (n:CodeNode) ON (n.id);")
+        );
+    }
+
+    #[test]
+    fn rewrite_label_only_index_skipped_for_neo4j() {
+        let result = rewrite_index_for_neo4j("CREATE INDEX ON :Repository;");
+        assert!(
+            result.is_none(),
+            "Label-only indexes should be skipped for Neo4j"
+        );
+    }
+
+    #[test]
+    fn rewrite_branch_index_for_neo4j() {
+        let result = rewrite_index_for_neo4j("CREATE INDEX ON :CodeNode(branch);");
+        assert_eq!(
+            result.as_deref(),
+            Some("CREATE INDEX IF NOT EXISTS FOR (n:CodeNode) ON (n.branch);")
+        );
+    }
+
+    #[test]
+    fn decode_branch_index_row_supports_qualified_fields() {
+        let row = serde_json::json!({
+            "bi.id": "branch:/repo@feature",
+            "bi.repository_path": "/repo",
+            "bi.branch": "feature",
+            "bi.commit_hash": "def456",
+            "bi.indexed_at": "2024-01-02T03:04:05Z",
+            "bi.file_count": 7,
+            "bi.symbol_count": 8,
+            "bi.is_stale": false,
+            "bi.index_duration_ms": 9
+        });
+
+        let record = decode_branch_index_row(&row);
+        assert_eq!(record.branch, "feature");
+        assert_eq!(record.commit_hash, "def456");
+        assert_eq!(record.file_count, 7);
+        assert_eq!(record.symbol_count, 8);
+        assert!(!record.is_stale);
+        assert_eq!(record.index_duration_ms, 9);
     }
 }

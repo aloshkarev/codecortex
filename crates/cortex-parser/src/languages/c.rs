@@ -78,6 +78,7 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         &import_q,
         &ImportCaptures {
             module: import_q.capture_index_for_name("module").unwrap_or(0),
+            method_filter: None,
         },
         None,
         None,

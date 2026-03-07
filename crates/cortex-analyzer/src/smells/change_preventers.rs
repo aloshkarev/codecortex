@@ -8,7 +8,7 @@
 //! - Shotgun Surgery
 
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Detect divergent change - one class changed for many reasons
 /// Note: This is also in oo_abusers.rs but duplicated here as it's
@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 pub fn detect_divergent_change(
     source: &str,
     file_path: &str,
-    config: &SmellConfig,
+    _config: &SmellConfig,
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
@@ -131,7 +131,7 @@ pub fn detect_shotgun_surgery(
     // Track which functions are called from how many different files/contexts
     let mut call_counts: HashMap<String, usize> = HashMap::new();
 
-    for (func_name, func_info) in &functions {
+    for (_func_name, func_info) in &functions {
         for called in &func_info.calls {
             *call_counts.entry(called.clone()).or_default() += 1;
         }

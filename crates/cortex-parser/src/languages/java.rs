@@ -110,6 +110,7 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         &import_q,
         &ImportCaptures {
             module: import_q.capture_index_for_name("module").unwrap_or(0),
+            method_filter: None,
         },
         inherit_q.as_ref(),
         inherit_q
@@ -177,6 +178,30 @@ mod tests {
                 .nodes
                 .iter()
                 .any(|n| n.name == "Runnable" && n.kind == EntityKind::Interface)
+        );
+    }
+
+    #[test]
+    fn test_import_normalized() {
+        let source = r#"
+            import java.util.List;
+            import java.util.Map;
+            package com.example;
+
+            public class Foo {}
+        "#;
+        let tree = parse_java(source);
+        let path = Path::new("Foo.java");
+        let result = extract(source, path, &tree);
+        assert!(
+            result.imports.iter().any(|i| i == "java.util.List"),
+            "imports should be normalized (no 'import' prefix or ';'); got: {:?}",
+            result.imports
+        );
+        assert!(
+            result.imports.iter().any(|i| i == "com.example"),
+            "package should be normalized; got: {:?}",
+            result.imports
         );
     }
 

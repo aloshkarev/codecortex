@@ -244,9 +244,23 @@ impl HybridSearch {
         &self,
         documents: Vec<crate::schema::VectorDocument>,
     ) -> Result<usize, crate::VectorError> {
+        if documents.is_empty() {
+            return self.vector_store.upsert_batch(Vec::new()).await;
+        }
+
         // Generate embeddings for all documents
         let texts: Vec<&str> = documents.iter().map(|d| d.content.as_str()).collect();
         let embeddings = self.embedder.embed_documents(&texts).await?;
+
+        if embeddings.len() != documents.len() {
+            return Err(crate::VectorError::EmbeddingError(
+                crate::EmbeddingError::InvalidResponse(format!(
+                    "embedder returned {} embeddings for {} documents",
+                    embeddings.len(),
+                    documents.len()
+                )),
+            ));
+        }
 
         // Attach embeddings to documents
         let mut documents_with_embeddings = Vec::new();
@@ -274,7 +288,103 @@ impl HybridSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use std::str::FromStr;
+    use std::sync::{Arc, Mutex};
+
+    struct MockEmbedder {
+        embeddings: Vec<Vec<f32>>,
+    }
+
+    #[async_trait]
+    impl Embedder for MockEmbedder {
+        async fn embed(&self, _text: &str) -> Result<Vec<f32>, crate::EmbeddingError> {
+            Ok(vec![0.0; crate::EMBEDDING_DIMENSION])
+        }
+
+        async fn embed_batch(
+            &self,
+            _texts: &[&str],
+        ) -> Result<Vec<Vec<f32>>, crate::EmbeddingError> {
+            Ok(self.embeddings.clone())
+        }
+
+        fn provider(&self) -> crate::EmbeddingProvider {
+            crate::EmbeddingProvider::Ollama
+        }
+
+        fn model(&self) -> &str {
+            "mock"
+        }
+    }
+
+    #[derive(Default)]
+    struct MockVectorStore {
+        upsert_batch_calls: Arc<Mutex<usize>>,
+    }
+
+    #[async_trait]
+    impl VectorStore for MockVectorStore {
+        async fn upsert(
+            &self,
+            _id: &str,
+            _embedding: Vec<f32>,
+            _metadata: HashMap<String, MetadataValue>,
+        ) -> Result<(), crate::VectorError> {
+            Ok(())
+        }
+
+        async fn upsert_batch(
+            &self,
+            documents: Vec<crate::schema::VectorDocument>,
+        ) -> Result<usize, crate::VectorError> {
+            *self.upsert_batch_calls.lock().expect("lock poisoned") += 1;
+            Ok(documents.len())
+        }
+
+        async fn search(
+            &self,
+            _query: Vec<f32>,
+            _k: usize,
+        ) -> Result<Vec<crate::SearchResult>, crate::VectorError> {
+            Ok(Vec::new())
+        }
+
+        async fn search_with_filter(
+            &self,
+            _query: Vec<f32>,
+            _k: usize,
+            _filter: HashMap<String, MetadataValue>,
+        ) -> Result<Vec<crate::SearchResult>, crate::VectorError> {
+            Ok(Vec::new())
+        }
+
+        async fn get(
+            &self,
+            _id: &str,
+        ) -> Result<Option<crate::schema::VectorDocument>, crate::VectorError> {
+            Ok(None)
+        }
+
+        async fn delete(&self, _id: &str) -> Result<bool, crate::VectorError> {
+            Ok(false)
+        }
+
+        async fn delete_by_filter(
+            &self,
+            _filter: HashMap<String, MetadataValue>,
+        ) -> Result<usize, crate::VectorError> {
+            Ok(0)
+        }
+
+        async fn count(&self) -> Result<usize, crate::VectorError> {
+            Ok(0)
+        }
+
+        async fn health_check(&self) -> Result<bool, crate::VectorError> {
+            Ok(true)
+        }
+    }
 
     #[test]
     fn test_search_type_from_str() {
@@ -300,5 +410,35 @@ mod tests {
             SearchType::Hybrid
         );
         assert!(SearchType::from_str("unknown").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_index_documents_rejects_embedding_count_mismatch() {
+        let vector_store = Arc::new(MockVectorStore::default());
+        let embedder = Arc::new(MockEmbedder {
+            embeddings: vec![vec![0.0; crate::EMBEDDING_DIMENSION]],
+        });
+        let search = HybridSearch::new(vector_store.clone(), embedder);
+        let docs = vec![
+            crate::schema::VectorDocument::new("a".to_string(), vec![], "alpha".to_string()),
+            crate::schema::VectorDocument::new("b".to_string(), vec![], "beta".to_string()),
+        ];
+
+        let err = search
+            .index_documents(docs)
+            .await
+            .expect_err("mismatched embeddings should fail");
+
+        assert!(matches!(
+            err,
+            crate::VectorError::EmbeddingError(crate::EmbeddingError::InvalidResponse(_))
+        ));
+        assert_eq!(
+            *vector_store
+                .upsert_batch_calls
+                .lock()
+                .expect("lock poisoned"),
+            0
+        );
     }
 }

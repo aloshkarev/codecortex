@@ -400,7 +400,7 @@ async fn live_resolve_call_targets() {
         .expect("index");
 
     let resolved = client
-        .resolve_call_targets(&fixture.display().to_string())
+        .resolve_call_targets(&fixture.display().to_string(), None)
         .await
         .expect("resolve_call_targets");
     println!("resolved call targets: {resolved}");

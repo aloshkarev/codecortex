@@ -947,6 +947,8 @@ fn process_next_pending_job(conn: &mut Connection, executable: &Path) -> Result<
             UPDATE index_jobs
             SET status = ?2,
                 updated_at = ?3,
+                started_at = NULL,
+                attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,
                 worker_id = NULL,
                 next_attempt_at = ?4
             WHERE id = ?1
@@ -1447,5 +1449,70 @@ mod tests {
         assert!(!second.deduplicated);
         assert_eq!(first.job.id, second.job.id);
         assert_eq!(second.job.status, JOB_PENDING);
+    }
+
+    #[test]
+    fn throttled_job_does_not_consume_attempt_or_started_at() {
+        let dir = tempdir().unwrap();
+        let paths = DaemonPaths::from_root(dir.path());
+        let mut conn = open_db(&paths).unwrap();
+        let now = Utc::now().to_rfc3339();
+
+        conn.execute(
+            "
+            INSERT INTO index_jobs(
+                id, dedupe_key, repository_path, branch, commit_hash, mode, status,
+                created_at, updated_at, attempts, started_at, worker_id
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 1, ?8, ?9)
+            ",
+            params![
+                "running-job",
+                "/repo::main::running::full",
+                "/repo",
+                "main",
+                "running",
+                JobMode::Full.to_string(),
+                JOB_RUNNING,
+                now,
+                "pid:existing"
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "
+            INSERT INTO index_jobs(
+                id, dedupe_key, repository_path, branch, commit_hash, mode, status,
+                created_at, updated_at, attempts, next_attempt_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 0, NULL)
+            ",
+            params![
+                "pending-job",
+                "/repo::main::pending::full",
+                "/repo",
+                "main",
+                "pending",
+                JobMode::Full.to_string(),
+                JOB_PENDING,
+                now
+            ],
+        )
+        .unwrap();
+
+        let fake_executable = dir.path().join("missing-executable");
+        let claimed = process_next_pending_job(&mut conn, &fake_executable).unwrap();
+        assert!(claimed.is_some());
+
+        let (attempts, started_at, status): (i64, Option<String>, String) = conn
+            .query_row(
+                "SELECT attempts, started_at, status FROM index_jobs WHERE id = ?1",
+                params!["pending-job"],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(attempts, 0);
+        assert_eq!(started_at, None);
+        assert_eq!(status, JOB_PENDING);
     }
 }

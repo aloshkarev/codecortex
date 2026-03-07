@@ -95,13 +95,24 @@ fn start_memgraph_docker(port: u16) -> Result<()> {
     Ok(())
 }
 
-/// Check if Ollama is running by checking the port
-fn ollama_is_running() -> bool {
-    TcpStream::connect_timeout(
-        &"127.0.0.1:11434".parse().unwrap(),
-        std::time::Duration::from_secs(2),
-    )
-    .is_ok()
+fn ollama_socket_addrs(base_url: &str) -> Option<Vec<std::net::SocketAddr>> {
+    let target = base_url
+        .trim()
+        .strip_prefix("http://")
+        .or_else(|| base_url.trim().strip_prefix("https://"))
+        .unwrap_or(base_url.trim())
+        .trim_end_matches('/');
+
+    target.to_socket_addrs().ok().map(|addrs| addrs.collect())
+}
+
+/// Check if Ollama is running by checking the configured base URL
+fn ollama_is_running(base_url: &str) -> bool {
+    ollama_socket_addrs(base_url).is_some_and(|addrs| {
+        addrs.into_iter().any(|addr| {
+            TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok()
+        })
+    })
 }
 
 /// Pull Ollama embedding model
@@ -181,7 +192,7 @@ pub fn run_setup_wizard(config: &mut CortexConfig) -> Result<()> {
     let has_docker = command_exists("docker");
     let docker_running = has_docker && docker_is_running();
     let has_ollama = command_exists("ollama");
-    let ollama_running = has_ollama && ollama_is_running();
+    let ollama_running = has_ollama && ollama_is_running(&config.llm.ollama_base_url);
 
     println!(
         "  Docker: {}",
@@ -400,7 +411,7 @@ pub fn run_setup_wizard(config: &mut CortexConfig) -> Result<()> {
             config.llm.ollama_base_url = base_url.clone();
 
             // Check if Ollama is running
-            if ollama_is_running() {
+            if ollama_is_running(&base_url) {
                 println!("{} Ollama is running", "✓".green());
 
                 let model: String = Input::new()
@@ -600,4 +611,28 @@ CORTEX_MEMGRAPH_PASSWORD={}
     println!();
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ollama_socket_addrs_parses_http_url() {
+        let addrs = ollama_socket_addrs("http://127.0.0.1:11434").unwrap();
+        assert!(!addrs.is_empty());
+        assert!(addrs.iter().any(|addr| addr.port() == 11434));
+    }
+
+    #[test]
+    fn ollama_socket_addrs_parses_bare_host_port() {
+        let addrs = ollama_socket_addrs("localhost:11434").unwrap();
+        assert!(!addrs.is_empty());
+        assert!(addrs.iter().any(|addr| addr.port() == 11434));
+    }
+
+    #[test]
+    fn ollama_socket_addrs_rejects_invalid_url() {
+        assert!(ollama_socket_addrs("http:///missing-host").is_none());
+    }
 }

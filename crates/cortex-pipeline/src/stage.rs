@@ -126,18 +126,19 @@ impl Stage for ExtractStage {
     async fn process(&self, context: &mut PipelineContext) -> Result<StageResult> {
         let mut result = StageResult::success(0, 0);
         info!("Starting extract stage");
+        context.extracted.clear();
 
         // Process based on input type
         match &context.input {
             crate::context::PipelineInput::File(path) => {
                 let entities = self.extract_file(path)?;
+                result.processed_count = entities.len();
                 context.extracted.extend(entities);
-                result.processed_count = context.extracted.len();
             }
             crate::context::PipelineInput::Directory(path) => {
                 let entities = self.extract_directory(path)?;
+                result.processed_count = entities.len();
                 context.extracted.extend(entities);
-                result.processed_count = context.extracted.len();
             }
             crate::context::PipelineInput::Content {
                 path,
@@ -197,7 +198,13 @@ impl ExtractStage {
     ) -> Result<ExtractedEntity> {
         let id = format!("entity:{}", path);
         let entity_type = "module".to_string();
-        let name = path.split('/').next_back().unwrap_or("unknown").to_string();
+        let normalized_path = path.replace('\\', "/");
+        let name = std::path::Path::new(&normalized_path)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("unknown")
+            .to_string();
 
         let mut metadata = HashMap::new();
         if let Some(l) = language {
@@ -260,6 +267,7 @@ impl Stage for CognifyStage {
     async fn process(&self, context: &mut PipelineContext) -> Result<StageResult> {
         let mut result = StageResult::success(0, 0);
         info!(count = context.extracted.len(), "Starting cognify stage");
+        context.cognified.clear();
 
         for entity in &context.extracted {
             let cognified = self.cognify_entity(entity)?;
@@ -387,6 +395,7 @@ impl Stage for EmbedStage {
     async fn process(&self, context: &mut PipelineContext) -> Result<StageResult> {
         let mut result = StageResult::success(0, 0);
         info!(count = context.cognified.len(), "Starting embed stage");
+        context.embedded.clear();
 
         for entity in &context.cognified {
             let embedding = self.generate_embedding(entity)?;
@@ -405,6 +414,9 @@ impl Stage for EmbedStage {
 
 impl EmbedStage {
     fn generate_embedding(&self, entity: &CognifiedEntity) -> Result<Vec<f32>> {
+        if self.dimension == 0 {
+            anyhow::bail!("embedding dimension must be greater than zero");
+        }
         // Placeholder: In production, would call embedding provider
         // For now, generate a simple hash-based embedding
         let text = format!(
@@ -463,11 +475,23 @@ impl Stage for LoadStage {
     async fn process(&self, context: &mut PipelineContext) -> Result<StageResult> {
         let mut result = StageResult::success(0, 0);
         info!(count = context.embedded.len(), "Starting load stage");
+        context.complete = false;
+        context.loaded = crate::context::LoadResult::default();
+
+        if self.batch_size == 0 {
+            anyhow::bail!("load batch size must be greater than zero");
+        }
 
         // Process in batches
         for chunk in context.embedded.chunks(self.batch_size) {
             let loaded = self.load_batch(chunk)?;
             result.processed_count += loaded;
+            context.loaded.graph_entities += loaded;
+            context.loaded.vector_entities += loaded;
+            context.loaded.relationships += chunk
+                .iter()
+                .map(|entity| entity.cognified.relationships.len())
+                .sum::<usize>();
         }
 
         // Mark pipeline as complete
@@ -479,12 +503,15 @@ impl Stage for LoadStage {
 }
 
 impl LoadStage {
-    fn load_batch(&self, _batch: &[crate::context::EmbeddedEntity]) -> Result<usize> {
+    fn load_batch(&self, batch: &[crate::context::EmbeddedEntity]) -> Result<usize> {
+        if self.batch_size == 0 {
+            anyhow::bail!("load batch size must be greater than zero");
+        }
         // Placeholder: In production, would:
         // 1. Store entities in graph DB
         // 2. Store embeddings in vector DB
         // 3. Create relationships
-        Ok(_batch.len())
+        Ok(batch.len())
     }
 }
 
@@ -587,6 +614,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn extract_stage_replaces_previous_entities() {
+        let stage = ExtractStage::new();
+        let mut context = PipelineContext::from_content(
+            "test.rs".to_string(),
+            "fn main() {}".to_string(),
+            Some("rs".to_string()),
+        );
+        context.extracted.push(ExtractedEntity {
+            id: "stale".to_string(),
+            entity_type: "module".to_string(),
+            name: "stale.rs".to_string(),
+            path: "stale.rs".to_string(),
+            line: Some(1),
+            source: None,
+            docstring: None,
+            metadata: HashMap::new(),
+        });
+
+        let result = stage.process(&mut context).await.unwrap();
+        assert_eq!(result.processed_count, 1);
+        assert_eq!(context.extracted.len(), 1);
+        assert_eq!(context.extracted[0].name, "test.rs");
+    }
+
+    #[tokio::test]
     async fn extract_stage_language_detection() {
         let stage = ExtractStage::new();
 
@@ -632,6 +684,47 @@ mod tests {
         let result = stage.process(&mut context).await.unwrap();
         assert_eq!(result.processed_count, 1);
         assert!(!context.cognified.is_empty());
+    }
+
+    #[tokio::test]
+    async fn cognify_stage_replaces_previous_entities() {
+        let stage = CognifyStage::new();
+        let mut context = PipelineContext::default();
+        context.extracted.push(ExtractedEntity {
+            id: "test".to_string(),
+            entity_type: "function".to_string(),
+            name: "main".to_string(),
+            path: "test.rs".to_string(),
+            line: Some(1),
+            source: Some("fn main() {}".to_string()),
+            docstring: None,
+            metadata: HashMap::new(),
+        });
+        context.cognified.push(CognifiedEntity {
+            extracted: ExtractedEntity {
+                id: "stale".to_string(),
+                entity_type: "function".to_string(),
+                name: "stale".to_string(),
+                path: "old.rs".to_string(),
+                line: Some(1),
+                source: None,
+                docstring: None,
+                metadata: HashMap::new(),
+            },
+            relationships: vec![],
+            metrics: crate::context::EntityMetrics {
+                cyclomatic_complexity: 1,
+                lines_of_code: 1,
+                parameter_count: 0,
+                nesting_depth: 0,
+            },
+            importance: 0.1,
+            summary: None,
+        });
+
+        stage.process(&mut context).await.unwrap();
+        assert_eq!(context.cognified.len(), 1);
+        assert_eq!(context.cognified[0].extracted.id, "test");
     }
 
     #[tokio::test]
@@ -789,6 +882,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn embed_stage_replaces_previous_embeddings() {
+        let stage = EmbedStage::new().with_dimension(16);
+        let mut context = PipelineContext::default();
+        context.cognified.push(CognifiedEntity {
+            extracted: ExtractedEntity {
+                id: "test".to_string(),
+                entity_type: "function".to_string(),
+                name: "main".to_string(),
+                path: "test.rs".to_string(),
+                line: Some(1),
+                source: None,
+                docstring: None,
+                metadata: HashMap::new(),
+            },
+            relationships: vec![],
+            metrics: crate::context::EntityMetrics {
+                cyclomatic_complexity: 1,
+                lines_of_code: 5,
+                parameter_count: 0,
+                nesting_depth: 1,
+            },
+            importance: 0.5,
+            summary: None,
+        });
+        context.embedded.push(crate::context::EmbeddedEntity {
+            cognified: context.cognified[0].clone(),
+            embedding: vec![99.0; 4],
+            embedding_model: "stale".to_string(),
+        });
+
+        stage.process(&mut context).await.unwrap();
+        assert_eq!(context.embedded.len(), 1);
+        assert_eq!(context.embedded[0].embedding.len(), 16);
+        assert_eq!(context.embedded[0].embedding_model, "hash-v1");
+    }
+
+    #[tokio::test]
     async fn embed_stage_embedding_values() {
         let stage = EmbedStage::new().with_dimension(64);
         let mut context = PipelineContext::default();
@@ -824,6 +954,42 @@ mod tests {
                 val
             );
         }
+    }
+
+    #[tokio::test]
+    async fn embed_stage_zero_dimension_returns_error() {
+        let stage = EmbedStage::new().with_dimension(0);
+        let mut context = PipelineContext::default();
+        context.cognified.push(CognifiedEntity {
+            extracted: ExtractedEntity {
+                id: "test".to_string(),
+                entity_type: "function".to_string(),
+                name: "main".to_string(),
+                path: "test.rs".to_string(),
+                line: Some(1),
+                source: None,
+                docstring: None,
+                metadata: HashMap::new(),
+            },
+            relationships: vec![],
+            metrics: crate::context::EntityMetrics {
+                cyclomatic_complexity: 1,
+                lines_of_code: 5,
+                parameter_count: 0,
+                nesting_depth: 1,
+            },
+            importance: 0.5,
+            summary: None,
+        });
+
+        let err = stage
+            .process(&mut context)
+            .await
+            .expect_err("zero dimension should fail");
+        assert!(
+            err.to_string()
+                .contains("embedding dimension must be greater than zero")
+        );
     }
 
     #[tokio::test]
@@ -863,6 +1029,8 @@ mod tests {
         let result = stage.process(&mut context).await.unwrap();
         assert_eq!(result.processed_count, 5);
         assert!(context.complete);
+        assert_eq!(context.loaded.graph_entities, 5);
+        assert_eq!(context.loaded.vector_entities, 5);
     }
 
     #[tokio::test]
@@ -901,6 +1069,8 @@ mod tests {
 
         let result = stage.process(&mut context).await.unwrap();
         assert_eq!(result.processed_count, 10);
+        assert_eq!(context.loaded.graph_entities, 10);
+        assert_eq!(context.loaded.vector_entities, 10);
     }
 
     #[tokio::test]
@@ -912,5 +1082,79 @@ mod tests {
         let result = stage.process(&mut context).await.unwrap();
         assert_eq!(result.processed_count, 0);
         assert!(context.complete);
+        assert_eq!(context.loaded.graph_entities, 0);
+        assert_eq!(context.loaded.vector_entities, 0);
+    }
+
+    #[tokio::test]
+    async fn load_stage_resets_previous_load_result() {
+        let stage = LoadStage::new();
+        let mut context = PipelineContext::default();
+        context.loaded.graph_entities = 10;
+        context.loaded.vector_entities = 10;
+        context.loaded.relationships = 10;
+        context.complete = true;
+
+        let result = stage.process(&mut context).await.unwrap();
+        assert_eq!(result.processed_count, 0);
+        assert_eq!(context.loaded.graph_entities, 0);
+        assert_eq!(context.loaded.vector_entities, 0);
+        assert_eq!(context.loaded.relationships, 0);
+        assert!(context.complete);
+    }
+
+    #[tokio::test]
+    async fn load_stage_zero_batch_size_returns_error() {
+        let stage = LoadStage::new().with_batch_size(0);
+        let mut context = PipelineContext::default();
+        context.embedded.push(crate::context::EmbeddedEntity {
+            cognified: CognifiedEntity {
+                extracted: ExtractedEntity {
+                    id: "test-0".to_string(),
+                    entity_type: "function".to_string(),
+                    name: "func_0".to_string(),
+                    path: "test.rs".to_string(),
+                    line: Some(0),
+                    source: None,
+                    docstring: None,
+                    metadata: HashMap::new(),
+                },
+                relationships: vec![],
+                metrics: crate::context::EntityMetrics {
+                    cyclomatic_complexity: 1,
+                    lines_of_code: 5,
+                    parameter_count: 0,
+                    nesting_depth: 1,
+                },
+                importance: 0.5,
+                summary: None,
+            },
+            embedding: vec![0.0; 64],
+            embedding_model: "test".to_string(),
+        });
+
+        let err = stage
+            .process(&mut context)
+            .await
+            .expect_err("zero batch size should fail");
+        assert!(
+            err.to_string()
+                .contains("load batch size must be greater than zero")
+        );
+    }
+
+    #[test]
+    fn extract_content_uses_cross_platform_file_name() {
+        let stage = ExtractStage::new();
+
+        let windows = stage
+            .extract_content(r"C:\repo\src\main.rs", "fn main() {}", Some("rs"))
+            .expect("windows path should parse");
+        let unix = stage
+            .extract_content("/repo/src/lib.rs", "fn main() {}", Some("rs"))
+            .expect("unix path should parse");
+
+        assert_eq!(windows.name, "main.rs");
+        assert_eq!(unix.name, "lib.rs");
     }
 }

@@ -115,6 +115,64 @@ impl JsonStore {
             .iter()
             .all(|(key, value)| metadata.get(key).map(|v| v == value).unwrap_or(false))
     }
+
+    fn map_to_metadata(metadata: &HashMap<String, MetadataValue>) -> VectorMetadata {
+        let mut doc_metadata = VectorMetadata::default();
+
+        if let Some(MetadataValue::String(path)) = metadata.get("path") {
+            doc_metadata.path = Some(path.clone());
+        }
+        if let Some(MetadataValue::String(name)) = metadata.get("name") {
+            doc_metadata.name = Some(name.clone());
+        }
+        if let Some(MetadataValue::String(kind)) = metadata.get("kind") {
+            doc_metadata.kind = Some(kind.clone());
+        }
+        if let Some(MetadataValue::String(lang)) = metadata.get("language") {
+            doc_metadata.language = Some(lang.clone());
+        }
+        if let Some(MetadataValue::String(repo)) = metadata.get("repository") {
+            doc_metadata.repository = Some(repo.clone());
+        }
+        if let Some(MetadataValue::String(branch)) = metadata.get("branch") {
+            doc_metadata.branch = Some(branch.clone());
+        }
+        if let Some(MetadataValue::Integer(line)) = metadata.get("line_number")
+            && *line >= 0
+        {
+            doc_metadata.line_number = Some(*line as usize);
+        }
+        if let Some(MetadataValue::String(doc_type)) = metadata.get("doc_type") {
+            doc_metadata.doc_type = Some(doc_type.clone());
+        }
+
+        for (key, value) in metadata {
+            if matches!(
+                key.as_str(),
+                "path"
+                    | "name"
+                    | "kind"
+                    | "language"
+                    | "repository"
+                    | "branch"
+                    | "line_number"
+                    | "doc_type"
+                    | "content"
+            ) {
+                continue;
+            }
+            let json_value = match value {
+                MetadataValue::String(text) => serde_json::Value::String(text.clone()),
+                MetadataValue::Integer(int) => serde_json::json!(*int),
+                MetadataValue::Float(float) => serde_json::json!(*float),
+                MetadataValue::Boolean(flag) => serde_json::json!(*flag),
+                MetadataValue::List(items) => serde_json::json!(items),
+            };
+            doc_metadata.extra.insert(key.clone(), json_value);
+        }
+
+        doc_metadata
+    }
 }
 
 #[async_trait]
@@ -136,33 +194,7 @@ impl VectorStore for JsonStore {
             })
             .unwrap_or_default();
 
-        let mut doc_metadata = VectorMetadata::default();
-
-        if let Some(MetadataValue::String(path)) = metadata.get("path") {
-            doc_metadata.path = Some(path.clone());
-        }
-        if let Some(MetadataValue::String(name)) = metadata.get("name") {
-            doc_metadata.name = Some(name.clone());
-        }
-        if let Some(MetadataValue::String(kind)) = metadata.get("kind") {
-            doc_metadata.kind = Some(kind.clone());
-        }
-        if let Some(MetadataValue::String(lang)) = metadata.get("language") {
-            doc_metadata.language = Some(lang.clone());
-        }
-        if let Some(MetadataValue::String(repo)) = metadata.get("repository") {
-            doc_metadata.repository = Some(repo.clone());
-        }
-        if let Some(MetadataValue::String(branch)) = metadata.get("branch") {
-            doc_metadata.branch = Some(branch.clone());
-        }
-        if let Some(MetadataValue::Integer(line)) = metadata.get("line_number") {
-            doc_metadata.line_number = Some(*line as usize);
-        }
-        if let Some(MetadataValue::String(doc_type)) = metadata.get("doc_type") {
-            doc_metadata.doc_type = Some(doc_type.clone());
-        }
-
+        let doc_metadata = Self::map_to_metadata(&metadata);
         let doc = VectorDocument::with_metadata(id.to_string(), embedding, content, doc_metadata);
 
         self.upsert_batch(vec![doc]).await?;
@@ -173,6 +205,19 @@ impl VectorStore for JsonStore {
     async fn upsert_batch(&self, documents: Vec<VectorDocument>) -> Result<usize, VectorError> {
         if documents.is_empty() {
             return Ok(0);
+        }
+
+        for doc in &documents {
+            doc.validate().map_err(|message| {
+                if message.starts_with("Invalid embedding dimension:") {
+                    VectorError::InvalidDimension {
+                        expected: crate::EMBEDDING_DIMENSION,
+                        actual: doc.embedding.len(),
+                    }
+                } else {
+                    VectorError::DatabaseError(message)
+                }
+            })?;
         }
 
         let mut data = self.data.write().await;
@@ -198,6 +243,12 @@ impl VectorStore for JsonStore {
     }
 
     async fn search(&self, query: Vec<f32>, k: usize) -> Result<Vec<SearchResult>, VectorError> {
+        if query.len() != crate::EMBEDDING_DIMENSION {
+            return Err(VectorError::InvalidDimension {
+                expected: crate::EMBEDDING_DIMENSION,
+                actual: query.len(),
+            });
+        }
         let data = self.data.read().await;
 
         // Compute similarities
@@ -231,6 +282,12 @@ impl VectorStore for JsonStore {
         k: usize,
         filter: HashMap<String, MetadataValue>,
     ) -> Result<Vec<SearchResult>, VectorError> {
+        if query.len() != crate::EMBEDDING_DIMENSION {
+            return Err(VectorError::InvalidDimension {
+                expected: crate::EMBEDDING_DIMENSION,
+                actual: query.len(),
+            });
+        }
         let data = self.data.read().await;
 
         // Filter and compute similarities
@@ -284,6 +341,10 @@ impl VectorStore for JsonStore {
         &self,
         filter: HashMap<String, MetadataValue>,
     ) -> Result<usize, VectorError> {
+        if filter.is_empty() {
+            return Ok(0);
+        }
+
         let deleted = {
             let mut data = self.data.write().await;
             let initial_len = data.len();
@@ -495,5 +556,80 @@ mod tests {
             .expect("Search failed");
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "rust-1");
+    }
+
+    #[tokio::test]
+    async fn test_store_delete_by_empty_filter_is_noop() {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let store = JsonStore::open(dir.path())
+            .await
+            .expect("Failed to open store");
+
+        store
+            .upsert("doc-1", vec![0.2; EMBEDDING_DIMENSION], HashMap::new())
+            .await
+            .expect("Upsert failed");
+
+        let deleted = store
+            .delete_by_filter(HashMap::new())
+            .await
+            .expect("Delete by empty filter failed");
+
+        assert_eq!(deleted, 0);
+        assert_eq!(store.count().await.expect("Count failed"), 1);
+    }
+
+    #[tokio::test]
+    async fn test_store_preserves_extra_metadata() {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let store = JsonStore::open(dir.path())
+            .await
+            .expect("Failed to open store");
+
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "team".to_string(),
+            MetadataValue::String("search".to_string()),
+        );
+        metadata.insert("priority".to_string(), MetadataValue::Integer(3));
+
+        store
+            .upsert("doc-extra", vec![0.3; EMBEDDING_DIMENSION], metadata)
+            .await
+            .expect("Upsert failed");
+
+        let doc = store
+            .get("doc-extra")
+            .await
+            .expect("Get failed")
+            .expect("Document should exist");
+        let map = doc.metadata_to_map();
+
+        assert_eq!(
+            map.get("team"),
+            Some(&MetadataValue::String("search".to_string()))
+        );
+        assert_eq!(map.get("priority"), Some(&MetadataValue::Integer(3)));
+    }
+
+    #[tokio::test]
+    async fn test_search_rejects_wrong_dimension() {
+        let dir = TempDir::new().expect("Failed to create temp dir");
+        let store = JsonStore::open(dir.path())
+            .await
+            .expect("Failed to open store");
+
+        let err = store
+            .search(vec![0.1; 8], 5)
+            .await
+            .expect_err("wrong dimension should fail");
+
+        assert!(matches!(
+            err,
+            VectorError::InvalidDimension {
+                expected: crate::EMBEDDING_DIMENSION,
+                actual: 8
+            }
+        ));
     }
 }
