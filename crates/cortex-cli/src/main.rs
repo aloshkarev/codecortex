@@ -65,7 +65,7 @@ use comfy_table::{Cell, Color, ContentArrangement, Table, presets::UTF8_FULL};
 use cortex_analyzer::{
     Analyzer, CodeSmell, RefactoringEngine, RefactoringRecommendation, Severity, SmellDetector,
 };
-use cortex_core::{CortexConfig, SearchKind};
+use cortex_core::{CortexConfig, FileChangeType, GitOperations, SearchKind};
 use cortex_graph::{BundleStore, GraphClient};
 use cortex_indexer::Indexer;
 use cortex_mcp::tool_names;
@@ -95,6 +95,12 @@ enum OutputFormat {
     Table,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum IndexModeArg {
+    Full,
+    IncrementalDiff,
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "cortex", version, about = "CodeCortex CLI toolkit")]
 struct Cli {
@@ -111,6 +117,10 @@ struct Cli {
 enum Commands {
     Setup,
     Doctor,
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
     Mcp {
         #[command(subcommand)]
         command: McpCommand,
@@ -119,6 +129,12 @@ enum Commands {
         path: String,
         #[arg(long)]
         force: bool,
+        /// Indexing mode
+        #[arg(long, value_enum, default_value_t = IndexModeArg::Full)]
+        mode: IndexModeArg,
+        /// Base branch to use for incremental-diff mode
+        #[arg(long)]
+        base_branch: Option<String>,
     },
     Watch {
         path: String,
@@ -276,6 +292,19 @@ enum McpCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum DaemonCommand {
+    /// Start daemon in background
+    Start,
+    /// Stop daemon process
+    Stop,
+    /// Show daemon runtime status
+    Status,
+    /// Run daemon foreground loop (internal)
+    #[command(hide = true)]
+    Run,
+}
+
+#[derive(Debug, Subcommand)]
 enum FindCommand {
     Name { name: String },
     Pattern { pattern: String },
@@ -338,6 +367,19 @@ enum AnalyzeCommand {
         /// Maximum number of recommendations to return
         #[arg(long, default_value_t = 500)]
         limit: usize,
+    },
+    /// Compare two git branches for a project/repository
+    BranchDiff {
+        /// Source branch (for example, feature/my-change)
+        source: String,
+        /// Target branch (for example, main)
+        target: String,
+        /// Repository path (optional, uses current project or cwd)
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Maximum number of ahead/behind commits returned per side
+        #[arg(long, default_value_t = 50)]
+        commit_limit: usize,
     },
 }
 
@@ -455,8 +497,11 @@ enum ProjectCommand {
         /// Path to the project
         path: PathBuf,
         /// Whether to track branch changes
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         track_branch: bool,
+        /// Automatically index checked-out branch after adding
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        auto_index: bool,
     },
     /// Remove a project from the registry
     Remove {
@@ -470,6 +515,9 @@ enum ProjectCommand {
         /// Branch to use (optional, defaults to current)
         #[arg(long)]
         branch: Option<String>,
+        /// Automatically index checked-out branch after switching context
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        auto_index: bool,
     },
     /// Get the current active project
     Current,
@@ -484,6 +532,66 @@ enum ProjectCommand {
         /// Path to the project (optional, uses current)
         #[arg(long)]
         path: Option<PathBuf>,
+        /// Automatically index when a branch switch is detected
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        auto_index: bool,
+    },
+    /// Show project indexing freshness/health status
+    Status {
+        /// Path to the project (optional, uses current)
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Include daemon queue details for this project
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        include_queue: bool,
+    },
+    /// Sync project state: refresh -> detect switch -> index/queue -> cleanup
+    Sync {
+        /// Path to the project (optional, uses current)
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Force full indexing when syncing
+        #[arg(long, default_value_t = false)]
+        force: bool,
+        /// Cleanup old branch indexes after sync
+        #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+        cleanup_old_branches: bool,
+    },
+    /// Project branch/indexing policy controls
+    Policy {
+        #[command(subcommand)]
+        command: ProjectPolicyCommand,
+    },
+    /// Show daemon/project metrics snapshot
+    Metrics {
+        /// Path to the project (optional, uses current)
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectPolicyCommand {
+    /// Show current project policy
+    Show {
+        /// Path to the project (optional, uses current)
+        #[arg(long)]
+        path: Option<PathBuf>,
+    },
+    /// Update project policy fields
+    Set {
+        /// Path to the project (optional, uses current)
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Branch allowlist for indexing (repeatable). Empty keeps current value.
+        #[arg(long = "index-only")]
+        index_only: Vec<String>,
+        /// Exclude patterns for indexing (repeatable)
+        #[arg(long = "exclude-pattern")]
+        exclude_patterns: Vec<String>,
+        /// Maximum parallel daemon index jobs for this project
+        #[arg(long)]
+        max_parallel_index_jobs: Option<usize>,
     },
 }
 
@@ -497,8 +605,14 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Commands::Setup => run_setup(&mut config)?,
         Commands::Doctor => run_doctor(&config).await?,
+        Commands::Daemon { command } => run_daemon_command(command, format).await?,
         Commands::Mcp { command } => run_mcp(&config, command).await?,
-        Commands::Index { path, force } => run_index(&config, &path, force, format).await?,
+        Commands::Index {
+            path,
+            force,
+            mode,
+            base_branch,
+        } => run_index(&config, &path, force, mode, base_branch.as_deref(), format).await?,
         Commands::Watch { path } => run_watch(&config, &path).await?,
         Commands::Unwatch { path } => run_unwatch(&config, &path)?,
         Commands::Find { command } => run_find(&config, command, format).await?,
@@ -527,7 +641,7 @@ async fn main() -> anyhow::Result<()> {
             run_diagnose(&config, component.as_deref(), format).await?
         }
         Commands::Memory { command } => run_memory(&config, command, format).await?,
-        Commands::Project { command } => run_project(command, format)?,
+        Commands::Project { command } => run_project(&config, command, format).await?,
         Commands::Skeleton { path, mode } => run_skeleton(&path, &mode, format)?,
         Commands::Signature {
             symbol,
@@ -558,6 +672,41 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::VectorIndex { path, repo, force } => {
             run_vector_index(&config, &path, repo.as_deref(), force, format).await?
+        }
+    }
+    Ok(())
+}
+
+async fn run_daemon_command(command: DaemonCommand, format: OutputFormat) -> anyhow::Result<()> {
+    let paths = cortex_watcher::DaemonPaths::default_paths();
+    match command {
+        DaemonCommand::Start => {
+            let executable = std::env::current_exe()?;
+            let status = cortex_watcher::start_background(&paths, &executable)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            print_formatted(format, &serde_json::to_value(status)?)?;
+        }
+        DaemonCommand::Stop => {
+            let status =
+                cortex_watcher::stop_daemon(&paths).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            print_formatted(format, &serde_json::to_value(status)?)?;
+        }
+        DaemonCommand::Status => {
+            let status = cortex_watcher::daemon_status(&paths)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            print_formatted(format, &serde_json::to_value(status)?)?;
+        }
+        DaemonCommand::Run => {
+            cortex_watcher::run_daemon(&paths)
+                .await
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            print_formatted(
+                format,
+                &serde_json::json!({
+                    "status": "stopped",
+                    "paths": paths,
+                }),
+            )?;
         }
     }
     Ok(())
@@ -1018,50 +1167,519 @@ async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn daemon_queue_bypass_enabled() -> bool {
+    std::env::var("CORTEX_DAEMON_BYPASS_QUEUE")
+        .map(|v| {
+            let s = v.trim().to_ascii_lowercase();
+            s == "1" || s == "true" || s == "yes"
+        })
+        .unwrap_or(false)
+}
+
+fn to_job_mode(mode: IndexModeArg) -> cortex_watcher::JobMode {
+    match mode {
+        IndexModeArg::Full => cortex_watcher::JobMode::Full,
+        IndexModeArg::IncrementalDiff => cortex_watcher::JobMode::IncrementalDiff,
+    }
+}
+
+#[derive(Debug, Clone)]
+struct IncrementalDiffPlan {
+    mode: String,
+    base_branch: String,
+    changed_files_total: usize,
+    changed_files_indexable: usize,
+    selected_files: Vec<String>,
+    fallback_reason: Option<String>,
+}
+
+fn incremental_diff_plan_to_value(plan: &IncrementalDiffPlan) -> serde_json::Value {
+    serde_json::json!({
+        "mode": plan.mode,
+        "base_branch": plan.base_branch,
+        "changed_files_total": plan.changed_files_total,
+        "changed_files_indexable": plan.changed_files_indexable,
+        "selected_files": plan.selected_files,
+        "fallback_reason": plan.fallback_reason,
+    })
+}
+
+fn infer_base_branch(
+    git_ops: &GitOperations,
+    current_branch: &str,
+    requested: Option<&str>,
+) -> Option<String> {
+    if let Some(explicit) = requested {
+        return Some(explicit.to_string());
+    }
+    let branches = git_ops.list_branches().ok().unwrap_or_default();
+    let branch_names: std::collections::HashSet<String> =
+        branches.into_iter().map(|b| b.name).collect();
+    for candidate in ["main", "master", "origin/main", "origin/master"] {
+        if candidate != current_branch && branch_names.contains(candidate) {
+            return Some(candidate.to_string());
+        }
+    }
+    None
+}
+
+fn project_config_for_path(path: &Path) -> Option<cortex_core::ProjectConfig> {
+    let registry = cortex_watcher::ProjectRegistry::new();
+    let repo_root = find_git_repository_root(path).unwrap_or_else(|| path.to_path_buf());
+    registry.get_project(&repo_root).map(|p| p.config)
+}
+
+fn matches_exclude_pattern(path: &Path, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return false;
+    }
+    if pattern.ends_with("/**") {
+        let prefix = pattern.trim_end_matches("/**");
+        return path
+            .components()
+            .any(|component| component.as_os_str() == std::ffi::OsStr::new(prefix));
+    }
+    if pattern.starts_with("*.") {
+        let ext = &pattern[1..];
+        return path
+            .extension()
+            .map(|value| format!(".{}", value.to_string_lossy()) == ext)
+            .unwrap_or(false);
+    }
+    path.to_string_lossy().contains(pattern)
+}
+
+fn build_incremental_diff_plan(
+    repo_root: &Path,
+    branch: &str,
+    requested_base_branch: Option<&str>,
+    project_config: Option<&cortex_core::ProjectConfig>,
+) -> IncrementalDiffPlan {
+    let git_ops = GitOperations::new(repo_root);
+    let Some(base_branch) = infer_base_branch(&git_ops, branch, requested_base_branch) else {
+        return IncrementalDiffPlan {
+            mode: "full".to_string(),
+            base_branch: String::new(),
+            changed_files_total: 0,
+            changed_files_indexable: 0,
+            selected_files: Vec::new(),
+            fallback_reason: Some(
+                "could not determine base branch for incremental diff; falling back to full"
+                    .to_string(),
+            ),
+        };
+    };
+
+    let diff = match git_ops.compare_branches(branch, &base_branch) {
+        Ok(diff) => diff,
+        Err(err) => {
+            return IncrementalDiffPlan {
+                mode: "full".to_string(),
+                base_branch,
+                changed_files_total: 0,
+                changed_files_indexable: 0,
+                selected_files: Vec::new(),
+                fallback_reason: Some(format!(
+                    "failed to compute branch diff ({err}); falling back to full"
+                )),
+            };
+        }
+    };
+
+    let exclude_patterns = project_config
+        .map(|c| c.exclude_patterns.clone())
+        .unwrap_or_default();
+    let mut selected_files = Vec::new();
+    for file in &diff.changed_files {
+        if file.change_type == FileChangeType::Deleted {
+            continue;
+        }
+        let absolute = repo_root.join(&file.path);
+        if cortex_core::Language::from_path(&absolute).is_none() {
+            continue;
+        }
+        if exclude_patterns
+            .iter()
+            .any(|pattern| matches_exclude_pattern(&absolute, pattern))
+        {
+            continue;
+        }
+        let path_text = absolute.display().to_string();
+        selected_files.push(path_text);
+    }
+
+    IncrementalDiffPlan {
+        mode: "incremental_diff".to_string(),
+        base_branch,
+        changed_files_total: diff.changed_files.len(),
+        changed_files_indexable: selected_files.len(),
+        selected_files,
+        fallback_reason: None,
+    }
+}
+
 async fn run_index(
     config: &CortexConfig,
     path: &str,
     force: bool,
+    mode: IndexModeArg,
+    base_branch: Option<&str>,
     format: OutputFormat,
 ) -> anyhow::Result<()> {
     let job_id = format!("cli-index-{}", now_millis());
     upsert_job(&job_id, "running", format!("Indexing {}", path))?;
-    let client = GraphClient::connect(config).await?;
-    let indexer = Indexer::new(client, config.max_batch_size)?;
+    let target_path = PathBuf::from(path);
+    let git_context = resolve_git_context(&target_path);
+
+    let project_config = project_config_for_path(&target_path);
+    let mut effective_mode = if force { IndexModeArg::Full } else { mode };
+    let planner = if effective_mode == IndexModeArg::IncrementalDiff {
+        if let Some((repo_root, branch, _)) = &git_context {
+            let plan = build_incremental_diff_plan(
+                repo_root,
+                branch,
+                base_branch,
+                project_config.as_ref(),
+            );
+            if plan.fallback_reason.is_some() {
+                effective_mode = IndexModeArg::Full;
+            }
+            Some(plan)
+        } else {
+            effective_mode = IndexModeArg::Full;
+            Some(IncrementalDiffPlan {
+                mode: "full".to_string(),
+                base_branch: String::new(),
+                changed_files_total: 0,
+                changed_files_indexable: 0,
+                selected_files: Vec::new(),
+                fallback_reason: Some(
+                    "path is not a git repository; falling back to full index".to_string(),
+                ),
+            })
+        }
+    } else {
+        None
+    };
+
+    if !daemon_queue_bypass_enabled() {
+        let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+        let daemon_status = cortex_watcher::daemon_status(&daemon_paths)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+        if daemon_status.running
+            && let Some((repo_root, branch, commit_hash)) = &git_context
+        {
+            if let Some(cfg) = project_config.as_ref()
+                && !cfg.index_only.is_empty()
+                && !cfg.index_only.iter().any(|b| b == branch)
+            {
+                print_formatted(
+                    format,
+                    &serde_json::json!({
+                        "status": "skipped",
+                        "reason": "branch_excluded_by_policy",
+                        "branch": branch,
+                        "index_only": cfg.index_only,
+                    }),
+                )?;
+                return Ok(());
+            }
+            let enqueue = cortex_watcher::enqueue_index_job(
+                &daemon_paths,
+                &cortex_watcher::IndexJobRequest {
+                    repository_path: repo_root.display().to_string(),
+                    branch: branch.clone(),
+                    commit_hash: commit_hash.clone(),
+                    mode: to_job_mode(effective_mode),
+                },
+            )
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+            upsert_job(
+                &job_id,
+                "queued",
+                format!(
+                    "Queued index job {} (deduplicated={})",
+                    enqueue.job.id, enqueue.deduplicated
+                ),
+            )?;
+            print_formatted(
+                format,
+                &serde_json::json!({
+                    "status": "queued",
+                    "daemon": true,
+                    "deduplicated": enqueue.deduplicated,
+                    "job": enqueue.job,
+                    "planner": planner.as_ref().map(incremental_diff_plan_to_value),
+                }),
+            )?;
+            return Ok(());
+        }
+    }
+
     let pb = ProgressBar::new_spinner();
     pb.set_style(ProgressStyle::with_template("{spinner:.green} {msg}")?);
     pb.set_message("Indexing...");
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
-    let report = match indexer.index_path_with_options(path, force).await {
+    let include_files_env = planner
+        .as_ref()
+        .filter(|p| p.mode == "incremental_diff" && p.fallback_reason.is_none())
+        .map(|p| p.selected_files.join("\n"));
+    let prev_include_files = std::env::var("CORTEX_INDEX_INCLUDE_FILES").ok();
+    let prev_excludes = std::env::var("CORTEX_INDEX_EXCLUDE_PATTERNS").ok();
+    if let Some(ref include_files) = include_files_env {
+        unsafe {
+            std::env::set_var("CORTEX_INDEX_INCLUDE_FILES", include_files);
+        }
+    }
+    if let Some(cfg) = project_config.as_ref()
+        && !cfg.exclude_patterns.is_empty()
+    {
+        unsafe {
+            std::env::set_var(
+                "CORTEX_INDEX_EXCLUDE_PATTERNS",
+                cfg.exclude_patterns.join("\n"),
+            );
+        }
+    }
+
+    let (report, repo_root) = match index_with_git_context(
+        config,
+        &target_path,
+        force && effective_mode == IndexModeArg::Full,
+        !(force && effective_mode == IndexModeArg::Full),
+    )
+    .await
+    {
         Ok(report) => {
-            upsert_job(&job_id, "completed", serde_json::to_string(&report)?)?;
+            if let Some(prev) = prev_include_files.as_ref() {
+                unsafe {
+                    std::env::set_var("CORTEX_INDEX_INCLUDE_FILES", prev);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
+                }
+            }
+            if let Some(prev) = prev_excludes.as_ref() {
+                unsafe {
+                    std::env::set_var("CORTEX_INDEX_EXCLUDE_PATTERNS", prev);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
+                }
+            }
+            upsert_job(&job_id, "completed", serde_json::to_string(&report.0)?)?;
             report
         }
         Err(err) => {
+            if let Some(prev) = prev_include_files.as_ref() {
+                unsafe {
+                    std::env::set_var("CORTEX_INDEX_INCLUDE_FILES", prev);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
+                }
+            }
+            if let Some(prev) = prev_excludes.as_ref() {
+                unsafe {
+                    std::env::set_var("CORTEX_INDEX_EXCLUDE_PATTERNS", prev);
+                }
+            } else {
+                unsafe {
+                    std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
+                }
+            }
             upsert_job(&job_id, "failed", err.to_string())?;
             return Err(err.into());
         }
     };
     pb.finish_and_clear();
-    print_formatted(format, &serde_json::json!(report))?;
+    if let Some(root) = repo_root {
+        record_project_branch_index(&root, &report);
+    }
+    if planner.is_some() {
+        let planner_value = planner.as_ref().map(incremental_diff_plan_to_value);
+        print_formatted(
+            format,
+            &serde_json::json!({
+                "report": report,
+                "planner": planner_value,
+                "mode": match effective_mode {
+                    IndexModeArg::Full => "full",
+                    IndexModeArg::IncrementalDiff => "incremental_diff",
+                },
+            }),
+        )?;
+    } else {
+        print_formatted(format, &serde_json::json!(report))?;
+    }
     Ok(())
 }
 
 async fn run_watch(config: &CortexConfig, path: &str) -> anyhow::Result<()> {
-    let client = GraphClient::connect(config).await?;
-    let indexer = Indexer::new(client, config.max_batch_size)?;
-    let session = WatchSession::new(config);
-    session.watch(path.as_ref())?;
-    println!("Watching {}", path.cyan());
-    session.run(indexer).await?;
+    let watch_path = PathBuf::from(path)
+        .canonicalize()
+        .unwrap_or_else(|_| PathBuf::from(path));
+
+    if std::env::var("CORTEX_WATCH_FOREGROUND")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
+        let (initial_report, repo_root) =
+            index_with_git_context(config, &watch_path, false, true).await?;
+        if let Some(root) = repo_root {
+            record_project_branch_index(&root, &initial_report);
+        }
+
+        let client = GraphClient::connect(config).await?;
+        let indexer = Indexer::new(client, config.max_batch_size)?;
+        let session = WatchSession::new(config);
+        session.watch(watch_path.as_path())?;
+        println!(
+            "Watching {} (indexed {} files)",
+            watch_path.display().to_string().cyan(),
+            initial_report.indexed_files
+        );
+        session.run(indexer).await?;
+        return Ok(());
+    }
+
+    let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+    let mut daemon_status =
+        cortex_watcher::daemon_status(&daemon_paths).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    let daemon_started = if daemon_status.running {
+        false
+    } else {
+        let executable = std::env::current_exe()?;
+        daemon_status = cortex_watcher::start_background(&daemon_paths, &executable)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        daemon_status.running
+    };
+
+    let registration = cortex_watcher::register_watch(&daemon_paths, &watch_path)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+    let mut queued_job = None;
+    if let Some((repo_root, branch, commit_hash)) = resolve_git_context(&watch_path) {
+        queued_job = Some(
+            cortex_watcher::enqueue_index_job(
+                &daemon_paths,
+                &cortex_watcher::IndexJobRequest {
+                    repository_path: repo_root.display().to_string(),
+                    branch,
+                    commit_hash,
+                    mode: cortex_watcher::JobMode::Full,
+                },
+            )
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?,
+        );
+    }
+
+    println!(
+        "Watching {} via daemon (running={}, started_now={}, queued_job={})",
+        registration.project_path.cyan(),
+        daemon_status.running,
+        daemon_started,
+        queued_job
+            .as_ref()
+            .map(|j| j.job.id.as_str())
+            .unwrap_or("none")
+    );
     Ok(())
 }
 
 fn run_unwatch(config: &CortexConfig, path: &str) -> anyhow::Result<()> {
+    let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+    let daemon_removed = cortex_watcher::unregister_watch(&daemon_paths, PathBuf::from(path))
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
     let session = WatchSession::new(config);
     let removed = session.unwatch(path.as_ref())?;
-    println!("{}", if removed { "Removed" } else { "Not found" });
+    println!(
+        "{}",
+        if removed || daemon_removed {
+            "Removed"
+        } else {
+            "Not found"
+        }
+    );
     Ok(())
+}
+
+fn find_git_repository_root(path: &Path) -> Option<PathBuf> {
+    let start = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mut current = Some(start.as_path());
+    while let Some(dir) = current {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+fn resolve_git_context(path: &Path) -> Option<(PathBuf, String, String)> {
+    let repo_root = find_git_repository_root(path)?;
+    let git_ops = GitOperations::new(&repo_root);
+    if !git_ops.is_git_repo() {
+        return None;
+    }
+    let branch = git_ops.get_current_branch().ok()?;
+    let commit = git_ops.get_current_commit().ok()?;
+    Some((repo_root, branch, commit))
+}
+
+async fn index_with_git_context(
+    config: &CortexConfig,
+    path: &Path,
+    force: bool,
+    skip_if_current: bool,
+) -> anyhow::Result<(cortex_indexer::IndexReport, Option<PathBuf>)> {
+    let client = GraphClient::connect(config).await?;
+    let indexer = Indexer::new(client, config.max_batch_size)?;
+
+    if let Some((repo_root, branch, commit)) = resolve_git_context(path) {
+        let report = indexer
+            .index_path_with_branch_context(
+                path,
+                &branch,
+                &commit,
+                &repo_root,
+                force,
+                skip_if_current,
+            )
+            .await?;
+        Ok((report, Some(repo_root)))
+    } else {
+        let report = indexer.index_path_with_options(path, force).await?;
+        Ok((report, None))
+    }
+}
+
+fn record_project_branch_index(repo_root: &Path, report: &cortex_indexer::IndexReport) {
+    let (Some(branch), Some(commit_hash)) = (&report.branch, &report.commit_hash) else {
+        return;
+    };
+
+    let registry = cortex_watcher::ProjectRegistry::new();
+    if registry.get_project(repo_root).is_none() {
+        return;
+    }
+
+    let duration_ms = (report.duration_secs * 1000.0).round() as u64;
+    let _ = registry.record_branch_index(
+        repo_root,
+        branch.clone(),
+        commit_hash.clone(),
+        report.indexed_files,
+        report.symbol_count,
+        duration_ms,
+    );
+    let _ = registry.cleanup_old_branches(repo_root);
 }
 
 async fn run_find(
@@ -1115,6 +1733,16 @@ async fn run_analyze(
         return run_analyze_refactoring(path, min_severity, *max_files, *limit, format);
     }
 
+    if let AnalyzeCommand::BranchDiff {
+        source,
+        target,
+        path,
+        commit_limit,
+    } = &command
+    {
+        return run_analyze_branch_diff(source, target, path.as_deref(), *commit_limit, format);
+    }
+
     let analyzer = Analyzer::new(GraphClient::connect(config).await?);
     let out = match command {
         AnalyzeCommand::Callers(TargetArg { target }) => analyzer.callers(&target).await?,
@@ -1125,7 +1753,9 @@ async fn run_analyze(
         AnalyzeCommand::DeadCode => analyzer.dead_code().await?,
         AnalyzeCommand::Complexity { top } => analyzer.complexity(top).await?,
         AnalyzeCommand::Overrides { method } => analyzer.overrides(&method).await?,
-        AnalyzeCommand::Smells { .. } | AnalyzeCommand::Refactoring { .. } => unreachable!(),
+        AnalyzeCommand::Smells { .. }
+        | AnalyzeCommand::Refactoring { .. }
+        | AnalyzeCommand::BranchDiff { .. } => unreachable!(),
     };
     print_formatted(format, &serde_json::to_value(out)?)?;
     Ok(())
@@ -1253,6 +1883,105 @@ fn run_analyze_refactoring(
 
     print_formatted(format, &output)?;
     Ok(())
+}
+
+fn run_analyze_branch_diff(
+    source: &str,
+    target: &str,
+    path: Option<&Path>,
+    commit_limit: usize,
+    format: OutputFormat,
+) -> anyhow::Result<()> {
+    let input_path = resolve_analysis_repo_path(path)?;
+    let repo_path = find_git_repository_root(&input_path).unwrap_or(input_path.clone());
+    let git = GitOperations::new(&repo_path);
+    if !git.is_git_repo() {
+        anyhow::bail!("not a git repository: {}", input_path.display());
+    }
+
+    let mut diff = git
+        .compare_branches(source, target)
+        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+    if commit_limit > 0 {
+        diff.ahead_commits.truncate(commit_limit);
+        diff.behind_commits.truncate(commit_limit);
+    }
+
+    diff.changed_files
+        .sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+
+    let mut by_change_type: BTreeMap<String, usize> = BTreeMap::new();
+    let mut total_additions = 0usize;
+    let mut total_deletions = 0usize;
+    for file in &diff.changed_files {
+        *by_change_type
+            .entry(file_change_type_name(file.change_type).to_string())
+            .or_default() += 1;
+        total_additions += file.additions;
+        total_deletions += file.deletions;
+    }
+
+    let output = serde_json::json!({
+        "path": repo_path.display().to_string(),
+        "source_branch": diff.source_branch,
+        "target_branch": diff.target_branch,
+        "ahead_count": diff.ahead_count,
+        "behind_count": diff.behind_count,
+        "changed_files_count": diff.changed_files.len(),
+        "total_additions": total_additions,
+        "total_deletions": total_deletions,
+        "summary": {
+            "by_change_type": by_change_type,
+        },
+        "ahead_commits": diff.ahead_commits.iter().map(|c| serde_json::json!({
+            "hash": c.hash,
+            "short_hash": c.short_hash,
+            "author": c.author,
+            "author_email": c.author_email,
+            "date": c.date,
+            "message": c.message,
+        })).collect::<Vec<_>>(),
+        "behind_commits": diff.behind_commits.iter().map(|c| serde_json::json!({
+            "hash": c.hash,
+            "short_hash": c.short_hash,
+            "author": c.author,
+            "author_email": c.author_email,
+            "date": c.date,
+            "message": c.message,
+        })).collect::<Vec<_>>(),
+        "changed_files": diff.changed_files.iter().map(|f| serde_json::json!({
+            "path": f.path,
+            "change_type": file_change_type_name(f.change_type),
+            "additions": f.additions,
+            "deletions": f.deletions
+        })).collect::<Vec<_>>(),
+    });
+
+    print_formatted(format, &output)?;
+    Ok(())
+}
+
+fn resolve_analysis_repo_path(path: Option<&Path>) -> anyhow::Result<PathBuf> {
+    if let Some(path) = path {
+        return Ok(path.to_path_buf());
+    }
+
+    let registry = cortex_watcher::ProjectRegistry::new();
+    if let Some(project) = registry.get_current_project() {
+        return Ok(project.path);
+    }
+
+    Ok(std::env::current_dir()?)
+}
+
+fn file_change_type_name(change_type: FileChangeType) -> &'static str {
+    match change_type {
+        FileChangeType::Added => "added",
+        FileChangeType::Modified => "modified",
+        FileChangeType::Deleted => "deleted",
+        FileChangeType::Renamed => "renamed",
+    }
 }
 
 fn build_refactoring_recommendation_items(
@@ -2902,11 +3631,33 @@ fn now_millis() -> u128 {
 }
 
 fn jobs_path() -> PathBuf {
-    CortexConfig::config_path()
+    let primary = CortexConfig::config_path()
         .parent()
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("jobs.json")
+        .join("jobs.json");
+    if let Some(parent) = primary.parent()
+        && std::fs::create_dir_all(parent).is_ok()
+    {
+        let probe = parent.join(".jobs-write-probe");
+        let writable = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&probe)
+            .map(|_| {
+                let _ = std::fs::remove_file(&probe);
+                true
+            })
+            .unwrap_or(false);
+        if writable {
+            return primary;
+        }
+    }
+    let fallback = std::env::temp_dir().join("cortex").join("jobs.json");
+    if let Some(parent) = fallback.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    fallback
 }
 
 fn load_jobs() -> anyhow::Result<Vec<serde_json::Value>> {
@@ -3392,7 +4143,23 @@ async fn run_memory(
     Ok(())
 }
 
-fn run_project(command: ProjectCommand, format: OutputFormat) -> anyhow::Result<()> {
+fn resolve_project_path_or_current(
+    registry: &cortex_watcher::ProjectRegistry,
+    path: Option<PathBuf>,
+) -> PathBuf {
+    path.unwrap_or_else(|| {
+        registry
+            .get_current_project()
+            .map(|p| p.path)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+    })
+}
+
+async fn run_project(
+    config: &CortexConfig,
+    command: ProjectCommand,
+    format: OutputFormat,
+) -> anyhow::Result<()> {
     use cortex_watcher::ProjectRegistry;
 
     let registry = ProjectRegistry::new();
@@ -3418,20 +4185,32 @@ fn run_project(command: ProjectCommand, format: OutputFormat) -> anyhow::Result<
                 }),
             )?;
         }
-        ProjectCommand::Add { path, track_branch } => {
-            let config = cortex_core::ProjectConfig {
+        ProjectCommand::Add {
+            path,
+            track_branch,
+            auto_index,
+        } => {
+            let project_config = cortex_core::ProjectConfig {
                 track_branch,
                 ..Default::default()
             };
 
-            match registry.add_project(&path, Some(config)) {
+            match registry.add_project(&path, Some(project_config)) {
                 Ok(state) => {
+                    let (auto_indexed, auto_index_error) = if auto_index {
+                        auto_index_project_current_branch_best_effort(config, &state.path, false)
+                            .await
+                    } else {
+                        (None, None)
+                    };
                     print_formatted(
                         format,
                         &serde_json::json!({
                             "status": "added",
                             "path": state.path.display().to_string(),
                             "branch": state.git_info.as_ref().map(|g| g.current_branch.clone()),
+                            "auto_indexed": auto_indexed,
+                            "auto_index_error": auto_index_error,
                         }),
                     )?;
                 }
@@ -3466,29 +4245,59 @@ fn run_project(command: ProjectCommand, format: OutputFormat) -> anyhow::Result<
                 )?;
             }
         },
-        ProjectCommand::Set { path, branch } => {
-            match registry.set_current_project(&path, branch.clone()) {
-                Ok(pr) => {
-                    print_formatted(
-                        format,
-                        &serde_json::json!({
-                            "status": "set",
-                            "path": pr.path.display().to_string(),
-                            "branch": pr.branch,
-                        }),
-                    )?;
-                }
-                Err(e) => {
-                    print_formatted(
-                        format,
-                        &serde_json::json!({
-                            "status": "error",
-                            "error": e.to_string(),
-                        }),
-                    )?;
-                }
+        ProjectCommand::Set {
+            path,
+            branch,
+            auto_index,
+        } => match registry.set_current_project(&path, branch.clone()) {
+            Ok(pr) => {
+                let requested_branch = branch.clone();
+                let project_config = registry
+                    .get_project(&pr.path)
+                    .map(|state| state.config)
+                    .unwrap_or_default();
+                let (auto_indexed, auto_index_error) =
+                    if auto_index && project_config.index_on_switch {
+                        auto_index_project_current_branch_best_effort(config, &pr.path, false).await
+                    } else {
+                        (None, None)
+                    };
+                let branch_mismatch = requested_branch.and_then(|requested| {
+                        resolve_git_context(&pr.path)
+                            .map(|(_, actual_branch, _)| (requested, actual_branch))
+                    }).and_then(|(requested, actual)| {
+                        if requested != actual {
+                            Some(format!(
+                                "Requested branch '{}' but working tree is on '{}'; indexed checked-out branch",
+                                requested, actual
+                            ))
+                        } else {
+                            None
+                        }
+                    });
+
+                print_formatted(
+                    format,
+                    &serde_json::json!({
+                        "status": "set",
+                        "path": pr.path.display().to_string(),
+                        "branch": pr.branch,
+                        "auto_indexed": auto_indexed,
+                        "auto_index_error": auto_index_error,
+                        "note": branch_mismatch,
+                    }),
+                )?;
             }
-        }
+            Err(e) => {
+                print_formatted(
+                    format,
+                    &serde_json::json!({
+                        "status": "error",
+                        "error": e.to_string(),
+                    }),
+                )?;
+            }
+        },
         ProjectCommand::Current => match registry.get_current_project() {
             Some(pr) => {
                 print_formatted(
@@ -3511,12 +4320,7 @@ fn run_project(command: ProjectCommand, format: OutputFormat) -> anyhow::Result<
             }
         },
         ProjectCommand::Branches { path } => {
-            let project_path = path.unwrap_or_else(|| {
-                registry
-                    .get_current_project()
-                    .map(|p| p.path)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
-            });
+            let project_path = resolve_project_path_or_current(&registry, path);
 
             match registry.get_project(&project_path) {
                 Some(state) => {
@@ -3544,16 +4348,27 @@ fn run_project(command: ProjectCommand, format: OutputFormat) -> anyhow::Result<
                 }
             }
         }
-        ProjectCommand::Refresh { path } => {
-            let project_path = path.unwrap_or_else(|| {
-                registry
-                    .get_current_project()
-                    .map(|p| p.path)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
-            });
+        ProjectCommand::Refresh { path, auto_index } => {
+            let project_path = resolve_project_path_or_current(&registry, path);
 
+            let branch_change = registry.check_branch_change(&project_path).ok().flatten();
             match registry.refresh_git_info(&project_path) {
                 Ok(git_info) => {
+                    let project_config = registry
+                        .get_project(&project_path)
+                        .map(|state| state.config)
+                        .unwrap_or_default();
+                    let (auto_indexed, auto_index_error) = if auto_index
+                        && project_config.track_branch
+                        && project_config.index_on_switch
+                        && branch_change.is_some()
+                    {
+                        auto_index_project_current_branch_best_effort(config, &project_path, false)
+                            .await
+                    } else {
+                        (None, None)
+                    };
+
                     print_formatted(
                         format,
                         &serde_json::json!({
@@ -3562,6 +4377,12 @@ fn run_project(command: ProjectCommand, format: OutputFormat) -> anyhow::Result<
                             "branch": git_info.current_branch,
                             "commit": git_info.current_commit,
                             "branches_count": git_info.branches.len(),
+                            "branch_changed": branch_change.map(|(from, to)| serde_json::json!({
+                                "from": from,
+                                "to": to
+                            })),
+                            "auto_indexed": auto_indexed,
+                            "auto_index_error": auto_index_error,
                         }),
                     )?;
                 }
@@ -3576,9 +4397,350 @@ fn run_project(command: ProjectCommand, format: OutputFormat) -> anyhow::Result<
                 }
             }
         }
+        ProjectCommand::Status {
+            path,
+            include_queue,
+        } => {
+            let project_path = resolve_project_path_or_current(&registry, path);
+            let project_state = registry.get_project(&project_path);
+
+            let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+            let daemon_status = cortex_watcher::daemon_status(&daemon_paths)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let branch_health = cortex_watcher::project_branch_health(&daemon_paths, &project_path)
+                .unwrap_or_default();
+
+            let queue_jobs = if include_queue {
+                let project_path_text = project_path.display().to_string();
+                cortex_watcher::list_index_jobs(&daemon_paths, 200)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|j| j.repository_path == project_path_text)
+                    .map(|j| {
+                        serde_json::json!({
+                            "id": j.id,
+                            "branch": j.branch,
+                            "commit": j.commit_hash,
+                            "mode": j.mode,
+                            "status": j.status,
+                            "created_at": j.created_at,
+                            "dedupe_key": j.dedupe_key,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+
+            let stale_count = branch_health.iter().filter(|b| b.is_stale).count();
+            let overall_health = if stale_count > 0 {
+                "stale"
+            } else if queue_jobs.iter().any(|j| {
+                j.get("status")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s == "pending" || s == "running")
+                    .unwrap_or(false)
+            }) {
+                "indexing"
+            } else {
+                "current"
+            };
+
+            print_formatted(
+                format,
+                &serde_json::json!({
+                    "status": "ok",
+                    "project": project_state.as_ref().map(|s| serde_json::json!({
+                        "path": s.path.display().to_string(),
+                        "name": s.name,
+                        "current_branch": s.current_branch(),
+                        "current_commit": s.git_info.as_ref().map(|g| g.current_commit.clone()),
+                        "is_stale": s.is_current_index_stale(),
+                        "last_indexed_at": s.last_indexed_at,
+                    })),
+                    "health": overall_health,
+                    "stale_branches": stale_count,
+                    "branch_health": branch_health,
+                    "daemon": {
+                        "running": daemon_status.running,
+                        "pid": daemon_status.pid,
+                        "last_heartbeat": daemon_status.last_heartbeat,
+                        "queue_counts": daemon_status.queue,
+                        "watched_projects": daemon_status.watched_projects,
+                    },
+                    "queue": queue_jobs,
+                }),
+            )?;
+        }
+        ProjectCommand::Sync {
+            path,
+            force,
+            cleanup_old_branches,
+        } => {
+            let project_path = resolve_project_path_or_current(&registry, path);
+            let branch_change = registry.check_branch_change(&project_path).ok().flatten();
+
+            let refreshed = registry.refresh_git_info(&project_path);
+            let refresh_result = match refreshed {
+                Ok(git_info) => serde_json::json!({
+                    "status": "ok",
+                    "branch": git_info.current_branch,
+                    "commit": git_info.current_commit,
+                    "branches_count": git_info.branches.len(),
+                    "branch_changed": branch_change.as_ref().map(|(from, to)| serde_json::json!({
+                        "from": from,
+                        "to": to,
+                    })),
+                }),
+                Err(err) => serde_json::json!({
+                    "status": "error",
+                    "error": err.to_string(),
+                }),
+            };
+
+            let mut index_result = serde_json::json!({
+                "status": "skipped",
+                "reason": "no_git_context",
+            });
+            if let Some((repo_root, branch, commit_hash)) = resolve_git_context(&project_path) {
+                let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+                let daemon_status = cortex_watcher::daemon_status(&daemon_paths)
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+
+                if daemon_status.running && !daemon_queue_bypass_enabled() {
+                    let enqueue = cortex_watcher::enqueue_index_job(
+                        &daemon_paths,
+                        &cortex_watcher::IndexJobRequest {
+                            repository_path: repo_root.display().to_string(),
+                            branch: branch.clone(),
+                            commit_hash: commit_hash.clone(),
+                            mode: if force {
+                                cortex_watcher::JobMode::Full
+                            } else {
+                                cortex_watcher::JobMode::IncrementalDiff
+                            },
+                        },
+                    )
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                    index_result = serde_json::json!({
+                        "status": "queued",
+                        "daemon": true,
+                        "branch": branch,
+                        "commit": commit_hash,
+                        "job": enqueue.job,
+                        "deduplicated": enqueue.deduplicated,
+                    });
+                } else {
+                    let (auto_indexed, auto_index_error) =
+                        auto_index_project_current_branch_best_effort(config, &repo_root, force)
+                            .await;
+                    index_result = serde_json::json!({
+                        "status": if auto_indexed.is_some() {
+                            "indexed"
+                        } else if auto_index_error.is_some() {
+                            "index_error"
+                        } else {
+                            "skipped"
+                        },
+                        "daemon": false,
+                        "branch": branch,
+                        "commit": commit_hash,
+                        "result": auto_indexed,
+                        "error": auto_index_error,
+                    });
+                }
+            }
+
+            let cleanup_result = if cleanup_old_branches {
+                match registry.cleanup_old_branches(&project_path) {
+                    Ok(removed) => serde_json::json!({
+                        "status": "ok",
+                        "removed": removed,
+                    }),
+                    Err(err) => serde_json::json!({
+                        "status": "error",
+                        "error": err.to_string(),
+                    }),
+                }
+            } else {
+                serde_json::json!({
+                    "status": "skipped",
+                })
+            };
+
+            let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+            let branch_health = cortex_watcher::project_branch_health(&daemon_paths, &project_path)
+                .unwrap_or_default();
+            print_formatted(
+                format,
+                &serde_json::json!({
+                    "status": "synced",
+                    "path": project_path.display().to_string(),
+                    "stages": {
+                        "refresh": refresh_result,
+                        "index": index_result,
+                        "cleanup": cleanup_result,
+                    },
+                    "branch_health": branch_health,
+                }),
+            )?;
+        }
+        ProjectCommand::Policy { command } => match command {
+            ProjectPolicyCommand::Show { path } => {
+                let project_path = resolve_project_path_or_current(&registry, path);
+                let project = registry.get_project(&project_path);
+                let policy = project.as_ref().map(|p| p.config.clone());
+                print_formatted(
+                    format,
+                    &serde_json::json!({
+                        "status": if project.is_some() { "ok" } else { "error" },
+                        "path": project_path.display().to_string(),
+                        "policy": policy,
+                        "error": if project.is_none() {
+                            Some("Project not found")
+                        } else {
+                            None
+                        }
+                    }),
+                )?;
+            }
+            ProjectPolicyCommand::Set {
+                path,
+                index_only,
+                exclude_patterns,
+                max_parallel_index_jobs,
+            } => {
+                let project_path = resolve_project_path_or_current(&registry, path);
+                let update = registry.update_project(&project_path, |state| {
+                    if !index_only.is_empty() {
+                        state.config.index_only = index_only.clone();
+                    }
+                    if !exclude_patterns.is_empty() {
+                        state.config.exclude_patterns = exclude_patterns.clone();
+                    }
+                    if let Some(max_jobs) = max_parallel_index_jobs {
+                        state.config.max_parallel_index_jobs = max_jobs.max(1);
+                    }
+                });
+                match update {
+                    Ok(()) => {
+                        let project = registry.get_project(&project_path);
+                        let policy = project.as_ref().map(|p| p.config.clone());
+                        print_formatted(
+                            format,
+                            &serde_json::json!({
+                                "status": "updated",
+                                "path": project_path.display().to_string(),
+                                "policy": policy,
+                            }),
+                        )?;
+                    }
+                    Err(err) => {
+                        print_formatted(
+                            format,
+                            &serde_json::json!({
+                                "status": "error",
+                                "path": project_path.display().to_string(),
+                                "error": err.to_string(),
+                            }),
+                        )?;
+                    }
+                }
+            }
+        },
+        ProjectCommand::Metrics { path } => {
+            let project_path = resolve_project_path_or_current(&registry, path);
+            let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+            let metrics = cortex_watcher::daemon_metrics(&daemon_paths)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            let queue_jobs =
+                cortex_watcher::list_index_jobs(&daemon_paths, 500).unwrap_or_default();
+            let queue_for_project: Vec<_> = queue_jobs
+                .into_iter()
+                .filter(|j| j.repository_path == project_path.display().to_string())
+                .collect();
+            let branch_health = cortex_watcher::project_branch_health(&daemon_paths, &project_path)
+                .unwrap_or_default();
+
+            let counters = metrics.counters.clone();
+            let avg_queue_wait_ms = {
+                let total = counters.get("queue_wait_ms_total").copied().unwrap_or(0);
+                let samples = counters.get("queue_wait_samples").copied().unwrap_or(0);
+                if samples > 0 {
+                    Some(total as f64 / samples as f64)
+                } else {
+                    None
+                }
+            };
+            let avg_index_duration_ms = {
+                let total = counters
+                    .get("index_duration_ms_total")
+                    .copied()
+                    .unwrap_or(0);
+                let completed = counters.get("completed_jobs").copied().unwrap_or(0);
+                if completed > 0 {
+                    Some(total as f64 / completed as f64)
+                } else {
+                    None
+                }
+            };
+            print_formatted(
+                format,
+                &serde_json::json!({
+                    "status": "ok",
+                    "path": project_path.display().to_string(),
+                    "queue": {
+                        "jobs_count": queue_for_project.len(),
+                        "pending_or_running": queue_for_project.iter().filter(|j| j.status == "pending" || j.status == "running").count(),
+                    },
+                    "branch_health": branch_health,
+                    "metrics": {
+                        "counters": counters,
+                        "derived": {
+                            "avg_queue_wait_ms": avg_queue_wait_ms,
+                            "avg_index_duration_ms": avg_index_duration_ms,
+                        }
+                    }
+                }),
+            )?;
+        }
     }
 
     Ok(())
+}
+
+async fn auto_index_project_current_branch(
+    config: &CortexConfig,
+    project_path: &Path,
+    force: bool,
+) -> anyhow::Result<Option<serde_json::Value>> {
+    let Some((repo_root, branch, commit_hash)) = resolve_git_context(project_path) else {
+        return Ok(None);
+    };
+
+    let (report, repo_root_for_record) =
+        index_with_git_context(config, &repo_root, force, !force).await?;
+    if let Some(root) = repo_root_for_record {
+        record_project_branch_index(&root, &report);
+    }
+
+    Ok(Some(serde_json::json!({
+        "repository_path": repo_root.display().to_string(),
+        "branch": branch,
+        "commit": commit_hash,
+        "report": report
+    })))
+}
+
+async fn auto_index_project_current_branch_best_effort(
+    config: &CortexConfig,
+    project_path: &Path,
+    force: bool,
+) -> (Option<serde_json::Value>, Option<String>) {
+    match auto_index_project_current_branch(config, project_path, force).await {
+        Ok(indexed) => (indexed, None),
+        Err(err) => (None, Some(err.to_string())),
+    }
 }
 
 fn run_skeleton(path: &PathBuf, mode: &str, format: OutputFormat) -> anyhow::Result<()> {
@@ -4402,6 +5564,7 @@ mod tests {
         assert!(subcommands.contains(&"index"));
         assert!(subcommands.contains(&"find"));
         assert!(subcommands.contains(&"analyze"));
+        assert!(subcommands.contains(&"daemon"));
         assert!(subcommands.contains(&"stats"));
         assert!(subcommands.contains(&"list"));
         assert!(subcommands.contains(&"completion"));
@@ -4435,6 +5598,214 @@ mod tests {
     }
 
     #[test]
+    fn test_daemon_command_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from(["cortex", "daemon", "status"]);
+        match cli.command {
+            Commands::Daemon {
+                command: DaemonCommand::Status,
+            } => {}
+            _ => panic!("expected daemon status command"),
+        }
+    }
+
+    #[test]
+    fn test_project_status_command_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from(["cortex", "project", "status", "--path", "/tmp/repo"]);
+        match cli.command {
+            Commands::Project {
+                command:
+                    ProjectCommand::Status {
+                        path,
+                        include_queue,
+                    },
+            } => {
+                assert_eq!(path, Some(PathBuf::from("/tmp/repo")));
+                assert!(include_queue);
+            }
+            _ => panic!("expected project status command"),
+        }
+    }
+
+    #[test]
+    fn test_project_sync_command_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "project",
+            "sync",
+            "--path",
+            "/tmp/repo",
+            "--force",
+        ]);
+        match cli.command {
+            Commands::Project {
+                command:
+                    ProjectCommand::Sync {
+                        path,
+                        force,
+                        cleanup_old_branches,
+                    },
+            } => {
+                assert_eq!(path, Some(PathBuf::from("/tmp/repo")));
+                assert!(force);
+                assert!(cleanup_old_branches);
+            }
+            _ => panic!("expected project sync command"),
+        }
+    }
+
+    #[test]
+    fn test_project_add_boolean_options_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "project",
+            "add",
+            "/tmp/repo",
+            "--track-branch",
+            "false",
+            "--auto-index",
+            "false",
+        ]);
+        match cli.command {
+            Commands::Project {
+                command:
+                    ProjectCommand::Add {
+                        path,
+                        track_branch,
+                        auto_index,
+                    },
+            } => {
+                assert_eq!(path, PathBuf::from("/tmp/repo"));
+                assert!(!track_branch);
+                assert!(!auto_index);
+            }
+            _ => panic!("expected project add command"),
+        }
+    }
+
+    #[test]
+    fn test_project_status_include_queue_false_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "project",
+            "status",
+            "--path",
+            "/tmp/repo",
+            "--include-queue",
+            "false",
+        ]);
+        match cli.command {
+            Commands::Project {
+                command:
+                    ProjectCommand::Status {
+                        path,
+                        include_queue,
+                    },
+            } => {
+                assert_eq!(path, Some(PathBuf::from("/tmp/repo")));
+                assert!(!include_queue);
+            }
+            _ => panic!("expected project status command"),
+        }
+    }
+
+    #[test]
+    fn test_project_sync_cleanup_false_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "project",
+            "sync",
+            "--path",
+            "/tmp/repo",
+            "--cleanup-old-branches",
+            "false",
+        ]);
+        match cli.command {
+            Commands::Project {
+                command:
+                    ProjectCommand::Sync {
+                        path,
+                        force: _,
+                        cleanup_old_branches,
+                    },
+            } => {
+                assert_eq!(path, Some(PathBuf::from("/tmp/repo")));
+                assert!(!cleanup_old_branches);
+            }
+            _ => panic!("expected project sync command"),
+        }
+    }
+
+    #[test]
+    fn test_project_policy_show_command_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from(["cortex", "project", "policy", "show", "--path", "/tmp/repo"]);
+        match cli.command {
+            Commands::Project {
+                command:
+                    ProjectCommand::Policy {
+                        command: ProjectPolicyCommand::Show { path },
+                    },
+            } => {
+                assert_eq!(path, Some(PathBuf::from("/tmp/repo")));
+            }
+            _ => panic!("expected project policy show command"),
+        }
+    }
+
+    #[test]
+    fn test_project_policy_set_command_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "project",
+            "policy",
+            "set",
+            "--path",
+            "/tmp/repo",
+            "--index-only",
+            "main",
+            "--exclude-pattern",
+            "generated/**",
+            "--max-parallel-index-jobs",
+            "2",
+        ]);
+        match cli.command {
+            Commands::Project {
+                command:
+                    ProjectCommand::Policy {
+                        command:
+                            ProjectPolicyCommand::Set {
+                                path,
+                                index_only,
+                                exclude_patterns,
+                                max_parallel_index_jobs,
+                            },
+                    },
+            } => {
+                assert_eq!(path, Some(PathBuf::from("/tmp/repo")));
+                assert_eq!(index_only, vec!["main".to_string()]);
+                assert_eq!(exclude_patterns, vec!["generated/**".to_string()]);
+                assert_eq!(max_parallel_index_jobs, Some(2));
+            }
+            _ => panic!("expected project policy set command"),
+        }
+    }
+
+    #[test]
     fn test_analyze_command_variants() {
         use clap::CommandFactory;
 
@@ -4458,6 +5829,7 @@ mod tests {
         assert!(subcommands.contains(&"overrides"));
         assert!(subcommands.contains(&"smells"));
         assert!(subcommands.contains(&"refactoring"));
+        assert!(subcommands.contains(&"branch-diff"));
     }
 
     #[test]
@@ -4505,6 +5877,38 @@ mod tests {
                 assert_eq!(limit, 500);
             }
             _ => panic!("expected analyze refactoring command"),
+        }
+    }
+
+    #[test]
+    fn test_analyze_branch_diff_command_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "analyze",
+            "branch-diff",
+            "feature/auth",
+            "main",
+            "--commit-limit",
+            "25",
+        ]);
+        match cli.command {
+            Commands::Analyze {
+                command:
+                    AnalyzeCommand::BranchDiff {
+                        source,
+                        target,
+                        path,
+                        commit_limit,
+                    },
+            } => {
+                assert_eq!(source, "feature/auth");
+                assert_eq!(target, "main");
+                assert!(path.is_none());
+                assert_eq!(commit_limit, 25);
+            }
+            _ => panic!("expected analyze branch-diff command"),
         }
     }
 

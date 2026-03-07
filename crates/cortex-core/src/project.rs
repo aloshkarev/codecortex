@@ -287,6 +287,18 @@ pub struct ProjectConfig {
     /// File extensions to index (empty = all supported)
     #[serde(default)]
     pub extensions: Vec<String>,
+
+    /// Optional allowlist of branches to index (empty = all branches)
+    #[serde(default)]
+    pub index_only: Vec<String>,
+
+    /// Additional exclude patterns enforced by project policy
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
+
+    /// Maximum parallel index jobs for this project in daemon scheduler
+    #[serde(default = "default_max_parallel_index_jobs")]
+    pub max_parallel_index_jobs: usize,
 }
 
 fn default_track_branch() -> bool {
@@ -313,6 +325,9 @@ fn default_index_on_switch() -> bool {
 fn default_debounce_ms() -> u64 {
     2000
 }
+fn default_max_parallel_index_jobs() -> usize {
+    1
+}
 
 impl Default for ProjectConfig {
     fn default() -> Self {
@@ -325,6 +340,9 @@ impl Default for ProjectConfig {
             debounce_ms: default_debounce_ms(),
             include_hidden: false,
             extensions: vec![],
+            index_only: vec![],
+            exclude_patterns: vec![],
+            max_parallel_index_jobs: default_max_parallel_index_jobs(),
         }
     }
 }
@@ -420,6 +438,9 @@ mod tests {
         assert!(config.index_on_switch);
         assert!(!config.include_hidden);
         assert_eq!(config.debounce_ms, 2000);
+        assert!(config.index_only.is_empty());
+        assert!(config.exclude_patterns.is_empty());
+        assert_eq!(config.max_parallel_index_jobs, 1);
     }
 
     #[test]

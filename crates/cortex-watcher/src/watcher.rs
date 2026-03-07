@@ -1,11 +1,11 @@
 use crate::debounce::{DebounceConfig, FileEventKind, SmartDebouncer};
 use crate::filter::{EventFilter, EventFilterBuilder, WatchEventKind};
 use crate::perf::{PerfConfig, PerformanceManager};
-use cortex_core::{CortexConfig, CortexError, Result};
+use cortex_core::{CortexConfig, CortexError, GitOperations, Result};
 use cortex_indexer::Indexer;
 use notify::RecursiveMode;
 use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -68,6 +68,8 @@ impl WatchSession {
     pub async fn run(self, indexer: Indexer) -> Result<()> {
         info!("Starting file watcher");
         let (tx, mut rx) = mpsc::channel::<PathBuf>(128);
+        let watched_roots: Vec<PathBuf> = self.list().into_iter().map(canonicalize_lossy).collect();
+        let mut branch_state: HashMap<PathBuf, (String, String)> = HashMap::new();
 
         let mut debouncer = new_debouncer(
             Duration::from_secs(2),
@@ -97,7 +99,7 @@ impl WatchSession {
 
         while let Some(changed_path) = rx.recv().await {
             debug!(path = %changed_path.display(), "File change detected");
-            let _ = indexer.index_path(&changed_path).await;
+            index_changed_path(&indexer, &changed_path, &watched_roots, &mut branch_state).await;
         }
 
         Ok(())
@@ -449,6 +451,8 @@ impl SmartWatchSession {
     pub async fn run(self, indexer: Indexer) -> Result<()> {
         info!("Starting smart file watcher");
         let (tx, mut rx) = mpsc::channel::<PathBuf>(128);
+        let watched_roots: Vec<PathBuf> = self.list().into_iter().map(canonicalize_lossy).collect();
+        let mut branch_state: HashMap<PathBuf, (String, String)> = HashMap::new();
 
         let mut debouncer = new_debouncer(
             Duration::from_millis(self.config.debounce.min_delay_ms),
@@ -492,7 +496,7 @@ impl SmartWatchSession {
                     "Processing debounced event"
                 );
 
-                let _ = indexer.index_path(&event.path).await;
+                index_changed_path(&indexer, &event.path, &watched_roots, &mut branch_state).await;
                 _event_count += 1;
             }
 
@@ -513,6 +517,118 @@ impl SmartWatchSession {
         }
 
         Ok(())
+    }
+}
+
+fn canonicalize_lossy(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
+}
+
+fn resolve_git_root(path: &Path) -> Option<PathBuf> {
+    let mut current = Some(path);
+    while let Some(dir) = current {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+fn resolve_repository_root(changed_path: &Path, watched_roots: &[PathBuf]) -> Option<PathBuf> {
+    let changed = changed_path
+        .canonicalize()
+        .unwrap_or_else(|_| changed_path.to_path_buf());
+
+    let watched_root = watched_roots
+        .iter()
+        .filter(|root| changed.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .cloned();
+
+    watched_root
+        .as_deref()
+        .and_then(resolve_git_root)
+        .or_else(|| resolve_git_root(&changed))
+}
+
+async fn index_changed_path(
+    indexer: &Indexer,
+    changed_path: &Path,
+    watched_roots: &[PathBuf],
+    branch_state: &mut HashMap<PathBuf, (String, String)>,
+) {
+    let repo_root = resolve_repository_root(changed_path, watched_roots);
+    let Some(repo_root) = repo_root else {
+        let _ = indexer.index_path(changed_path).await;
+        return;
+    };
+
+    let git_ops = GitOperations::new(&repo_root);
+    if !git_ops.is_git_repo() {
+        let _ = indexer.index_path(changed_path).await;
+        return;
+    }
+
+    let branch = match git_ops.get_current_branch() {
+        Ok(branch) => branch,
+        Err(err) => {
+            warn!(
+                path = %repo_root.display(),
+                error = %err,
+                "Failed to resolve current branch for watched change"
+            );
+            let _ = indexer.index_path(changed_path).await;
+            return;
+        }
+    };
+    let commit = match git_ops.get_current_commit() {
+        Ok(commit) => commit,
+        Err(err) => {
+            warn!(
+                path = %repo_root.display(),
+                error = %err,
+                "Failed to resolve current commit for watched change"
+            );
+            let _ = indexer.index_path(changed_path).await;
+            return;
+        }
+    };
+
+    let branch_changed = branch_state
+        .get(&repo_root)
+        .map(|(old_branch, old_commit)| old_branch != &branch || old_commit != &commit)
+        .unwrap_or(false);
+
+    if branch_changed {
+        info!(
+            repo = %repo_root.display(),
+            branch = %branch,
+            "Detected branch switch during watch; re-indexing repository for active branch"
+        );
+    }
+
+    let target_path = if branch_changed {
+        repo_root.as_path()
+    } else {
+        changed_path
+    };
+
+    match indexer
+        .index_path_with_branch_context(target_path, &branch, &commit, &repo_root, false, false)
+        .await
+    {
+        Ok(_) => {
+            branch_state.insert(repo_root, (branch, commit));
+        }
+        Err(err) => {
+            warn!(
+                repo = %repo_root.display(),
+                path = %target_path.display(),
+                error = %err,
+                "Failed to index watched change with branch context"
+            );
+        }
     }
 }
 

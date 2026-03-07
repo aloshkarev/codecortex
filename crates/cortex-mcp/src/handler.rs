@@ -3,7 +3,7 @@ use crate::contracts::{
 };
 use crate::jobs::JobRegistry;
 use cortex_analyzer::Analyzer;
-use cortex_core::{CortexConfig, ProjectStatus, SearchKind};
+use cortex_core::{CortexConfig, GitOperations, ProjectStatus, SearchKind};
 use cortex_graph::{BundleStore, GraphClient};
 use cortex_indexer::Indexer;
 use cortex_parser::SignatureExtractor;
@@ -282,6 +282,50 @@ pub struct ListBranchesReq {
     pub path: Option<String>,
     /// Whether to include remote branches
     pub include_remote: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProjectStatusReq {
+    /// Path to project (optional, uses current project)
+    pub path: Option<String>,
+    /// Include queue details
+    pub include_queue: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProjectSyncReq {
+    /// Path to project (optional, uses current project)
+    pub path: Option<String>,
+    /// Force full index mode
+    pub force: Option<bool>,
+    /// Cleanup old branches after sync
+    pub cleanup_old_branches: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProjectBranchDiffReq {
+    /// Source branch
+    pub source: String,
+    /// Target branch
+    pub target: String,
+    /// Path to project (optional, uses current project)
+    pub path: Option<String>,
+    /// Commit limit for ahead/behind lists
+    pub commit_limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProjectQueueStatusReq {
+    /// Path to project (optional filter)
+    pub path: Option<String>,
+    /// Maximum jobs returned
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProjectMetricsReq {
+    /// Path to project (optional, uses current project)
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -2876,6 +2920,342 @@ impl CortexHandler {
             )),
         }
     }
+
+    #[tool(description = "Get project freshness, branch health, and queue status")]
+    async fn project_status(
+        &self,
+        Parameters(req): Parameters<ProjectStatusReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let include_queue = req.include_queue.unwrap_or(true);
+        let project_path = req
+            .path
+            .map(PathBuf::from)
+            .or_else(|| self.projects.get_current_project().map(|p| p.path))
+            .ok_or_else(|| {
+                McpError::invalid_params("No project specified and no current project set", None)
+            })?;
+        let project = self.projects.get_project(&project_path);
+        let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+        let daemon_status = cortex_watcher::daemon_status(&daemon_paths)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let branch_health =
+            cortex_watcher::project_branch_health(&daemon_paths, &project_path).unwrap_or_default();
+
+        let queue = if include_queue {
+            cortex_watcher::list_index_jobs(&daemon_paths, 250)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|j| j.repository_path == project_path.display().to_string())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let stale_branches = branch_health.iter().filter(|b| b.is_stale).count();
+        let freshness = if stale_branches > 0 {
+            "stale"
+        } else if queue
+            .iter()
+            .any(|j| j.status == "pending" || j.status == "running")
+        {
+            "indexing"
+        } else {
+            "current"
+        };
+
+        Ok(Self::ok(
+            json!({
+                "path": project_path.display().to_string(),
+                "freshness": freshness,
+                "project": project,
+                "branch_health": branch_health,
+                "stale_branches": stale_branches,
+                "queue": queue,
+                "daemon": daemon_status,
+            })
+            .to_string(),
+        ))
+    }
+
+    #[tool(
+        description = "Sync project state (refresh -> detect switch -> enqueue index -> cleanup)"
+    )]
+    async fn project_sync(
+        &self,
+        Parameters(req): Parameters<ProjectSyncReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started_at = Instant::now();
+        let project_path = req
+            .path
+            .map(PathBuf::from)
+            .or_else(|| self.projects.get_current_project().map(|p| p.path))
+            .ok_or_else(|| {
+                McpError::invalid_params("No project specified and no current project set", None)
+            })?;
+
+        let branch_change = self
+            .projects
+            .check_branch_change(&project_path)
+            .ok()
+            .flatten();
+        let refresh = self.projects.refresh_git_info(&project_path);
+        let refresh_stage = match refresh {
+            Ok(ref info) => json!({
+                "status": "ok",
+                "branch": info.current_branch,
+                "commit": info.current_commit,
+                "branch_changed": branch_change,
+            }),
+            Err(err) => {
+                return Ok(envelope_error(
+                    "PROJECT_SYNC_REFRESH_FAILED",
+                    err.to_string(),
+                    None,
+                    started_at,
+                ));
+            }
+        };
+
+        let force = req.force.unwrap_or(false);
+        let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+        let daemon_status = cortex_watcher::daemon_status(&daemon_paths)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let mut index_stage = json!({
+            "status": "skipped",
+            "reason": "no_git_context",
+        });
+        if let Some((repo_root, branch, commit_hash)) = resolve_git_context_for_path(&project_path)
+        {
+            if daemon_status.running {
+                let enqueue = cortex_watcher::enqueue_index_job(
+                    &daemon_paths,
+                    &cortex_watcher::IndexJobRequest {
+                        repository_path: repo_root.display().to_string(),
+                        branch: branch.clone(),
+                        commit_hash: commit_hash.clone(),
+                        mode: if force {
+                            cortex_watcher::JobMode::Full
+                        } else {
+                            cortex_watcher::JobMode::IncrementalDiff
+                        },
+                    },
+                )
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                index_stage = json!({
+                    "status": "queued",
+                    "daemon": true,
+                    "job": enqueue.job,
+                    "deduplicated": enqueue.deduplicated,
+                    "branch": branch,
+                    "commit": commit_hash,
+                });
+            } else {
+                index_stage = json!({
+                    "status": "skipped",
+                    "reason": "daemon_not_running",
+                    "branch": branch,
+                    "commit": commit_hash,
+                });
+            }
+        }
+
+        let cleanup_stage = if req.cleanup_old_branches.unwrap_or(true) {
+            match self.projects.cleanup_old_branches(&project_path) {
+                Ok(removed) => json!({"status": "ok", "removed": removed}),
+                Err(err) => json!({"status": "error", "error": err.to_string()}),
+            }
+        } else {
+            json!({"status": "skipped"})
+        };
+
+        let branch_health =
+            cortex_watcher::project_branch_health(&daemon_paths, &project_path).unwrap_or_default();
+        Ok(Self::ok(
+            json!({
+                "status": "synced",
+                "path": project_path.display().to_string(),
+                "stages": {
+                    "refresh": refresh_stage,
+                    "index": index_stage,
+                    "cleanup": cleanup_stage,
+                },
+                "branch_health": branch_health,
+            })
+            .to_string(),
+        ))
+    }
+
+    #[tool(
+        description = "Compare two branches for a project (ahead/behind commits and changed files)"
+    )]
+    async fn project_branch_diff(
+        &self,
+        Parameters(req): Parameters<ProjectBranchDiffReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let project_path = req
+            .path
+            .map(PathBuf::from)
+            .or_else(|| self.projects.get_current_project().map(|p| p.path))
+            .ok_or_else(|| {
+                McpError::invalid_params("No project specified and no current project set", None)
+            })?;
+        let git = GitOperations::new(&project_path);
+        let diff = git
+            .compare_branches(&req.source, &req.target)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let limit = req.commit_limit.unwrap_or(50);
+        let ahead_commits = diff
+            .ahead_commits
+            .into_iter()
+            .take(limit)
+            .map(|commit| {
+                json!({
+                    "hash": commit.hash,
+                    "short_hash": commit.short_hash,
+                    "author": commit.author,
+                    "author_email": commit.author_email,
+                    "date": commit.date.to_rfc3339(),
+                    "message": commit.message,
+                    "message_full": commit.message_full,
+                    "parents": commit.parents,
+                })
+            })
+            .collect::<Vec<_>>();
+        let behind_commits = diff
+            .behind_commits
+            .into_iter()
+            .take(limit)
+            .map(|commit| {
+                json!({
+                    "hash": commit.hash,
+                    "short_hash": commit.short_hash,
+                    "author": commit.author,
+                    "author_email": commit.author_email,
+                    "date": commit.date.to_rfc3339(),
+                    "message": commit.message,
+                    "message_full": commit.message_full,
+                    "parents": commit.parents,
+                })
+            })
+            .collect::<Vec<_>>();
+        let changed_files = diff
+            .changed_files
+            .into_iter()
+            .map(|file| {
+                let change_type = match file.change_type {
+                    cortex_core::FileChangeType::Added => "added",
+                    cortex_core::FileChangeType::Modified => "modified",
+                    cortex_core::FileChangeType::Deleted => "deleted",
+                    cortex_core::FileChangeType::Renamed => "renamed",
+                };
+                json!({
+                    "path": file.path,
+                    "change_type": change_type,
+                    "additions": file.additions,
+                    "deletions": file.deletions,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(Self::ok(
+            json!({
+                "path": project_path.display().to_string(),
+                "source_branch": diff.source_branch,
+                "target_branch": diff.target_branch,
+                "ahead_count": diff.ahead_count,
+                "behind_count": diff.behind_count,
+                "ahead_commits": ahead_commits,
+                "behind_commits": behind_commits,
+                "changed_files": changed_files,
+            })
+            .to_string(),
+        ))
+    }
+
+    #[tool(description = "Get daemon queue status for project indexing jobs")]
+    async fn project_queue_status(
+        &self,
+        Parameters(req): Parameters<ProjectQueueStatusReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+        let limit = req.limit.unwrap_or(200);
+        let jobs = cortex_watcher::list_index_jobs(&daemon_paths, limit)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let filtered = if let Some(path) = req.path {
+            jobs.into_iter()
+                .filter(|j| j.repository_path == path)
+                .collect::<Vec<_>>()
+        } else {
+            jobs
+        };
+
+        Ok(Self::ok(
+            json!({
+                "count": filtered.len(),
+                "jobs": filtered,
+                "daemon": cortex_watcher::daemon_status(&daemon_paths).ok(),
+            })
+            .to_string(),
+        ))
+    }
+
+    #[tool(description = "Get project daemon metrics for watch/index orchestration")]
+    async fn project_metrics(
+        &self,
+        Parameters(req): Parameters<ProjectMetricsReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+        let counters = cortex_watcher::daemon_metrics(&daemon_paths)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?
+            .counters;
+        let project_path = req
+            .path
+            .map(PathBuf::from)
+            .or_else(|| self.projects.get_current_project().map(|p| p.path));
+        let queue = if let Some(ref path) = project_path {
+            cortex_watcher::list_index_jobs(&daemon_paths, 300)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|j| j.repository_path == path.display().to_string())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let avg_queue_wait_ms = {
+            let total = counters.get("queue_wait_ms_total").copied().unwrap_or(0);
+            let samples = counters.get("queue_wait_samples").copied().unwrap_or(0);
+            if samples > 0 {
+                Some(total as f64 / samples as f64)
+            } else {
+                None
+            }
+        };
+        let avg_index_duration_ms = {
+            let total = counters
+                .get("index_duration_ms_total")
+                .copied()
+                .unwrap_or(0);
+            let completed = counters.get("completed_jobs").copied().unwrap_or(0);
+            if completed > 0 {
+                Some(total as f64 / completed as f64)
+            } else {
+                None
+            }
+        };
+
+        Ok(Self::ok(
+            json!({
+                "project_path": project_path.map(|p| p.display().to_string()),
+                "counters": counters,
+                "derived": {
+                    "avg_queue_wait_ms": avg_queue_wait_ms,
+                    "avg_index_duration_ms": avg_index_duration_ms
+                },
+                "queue_size": queue.len(),
+            })
+            .to_string(),
+        ))
+    }
 }
 
 // ── ServerHandler ─────────────────────────────────────────────────────────────
@@ -3034,6 +3414,29 @@ fn default_repo_path() -> String {
     std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| ".".to_string())
+}
+
+fn find_git_repository_root(path: &Path) -> Option<PathBuf> {
+    let start = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mut current = Some(start.as_path());
+    while let Some(dir) = current {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+fn resolve_git_context_for_path(path: &Path) -> Option<(PathBuf, String, String)> {
+    let repo_root = find_git_repository_root(path)?;
+    let git_ops = GitOperations::new(&repo_root);
+    if !git_ops.is_git_repo() {
+        return None;
+    }
+    let branch = git_ops.get_current_branch().ok()?;
+    let commit = git_ops.get_current_commit().ok()?;
+    Some((repo_root, branch, commit))
 }
 
 fn build_skeleton(content: &str, mode: &str) -> String {

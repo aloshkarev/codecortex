@@ -156,12 +156,34 @@ impl Indexer {
         branch: &str,
         commit_hash: &str,
     ) -> Result<IndexReport> {
+        let index_path = path.as_ref().to_path_buf();
+        self.index_path_with_branch_context(
+            &index_path,
+            branch,
+            commit_hash,
+            &index_path,
+            false,
+            true,
+        )
+        .await
+    }
+
+    /// Index a path with explicit branch and repository context
+    pub async fn index_path_with_branch_context<P: AsRef<Path>, R: AsRef<Path>>(
+        &self,
+        path: P,
+        branch: &str,
+        commit_hash: &str,
+        repository_path: R,
+        force: bool,
+        skip_if_current: bool,
+    ) -> Result<IndexReport> {
         let mut config = self.config.clone();
         config.branch = Some(branch.to_string());
         config.commit_hash = Some(commit_hash.to_string());
-        config.repository_path = Some(path.as_ref().display().to_string());
-
-        self.index_path_with_config(path, false, &config).await
+        config.repository_path = Some(repository_path.as_ref().display().to_string());
+        config.skip_if_current = skip_if_current;
+        self.index_path_with_config(path, force, &config).await
     }
 
     /// Index with timeout support
@@ -307,7 +329,13 @@ impl Indexer {
                     return Err(CortexError::Timeout("Indexing timed out".to_string()));
                 }
 
-                let result = self.parse_and_filter_with_config(path, force, &compile_cmd_index);
+                let result = self.parse_and_filter_with_config(
+                    path,
+                    force,
+                    &compile_cmd_index,
+                    &branch,
+                    &repository_path,
+                );
                 processed.fetch_add(1, Ordering::Relaxed);
                 result
             })
@@ -527,13 +555,16 @@ impl Indexer {
         path: &Path,
         force: bool,
         compile_cmd_index: &HashMap<PathBuf, &crate::build_detector::CompileCommand>,
+        branch: &Option<String>,
+        repository_path: &str,
     ) -> Result<Option<IndexedFile>> {
         let source = std::fs::read_to_string(path).map_err(|e| CortexError::Io(e.to_string()))?;
         let hash = file_hash(&source);
+        let cache_key = cache_key_for_path(path, repository_path, branch);
         if !force
             && self
                 .cache
-                .get(path.to_string_lossy().as_bytes())
+                .get(cache_key.as_bytes())
                 .map_err(|e| CortexError::Io(e.to_string()))?
                 .as_deref()
                 == Some(hash.as_bytes())
@@ -553,7 +584,7 @@ impl Indexer {
         // For now, we just parse normally - the defines are captured for future use
         let parsed = parser.parse(&source, path)?;
         self.cache
-            .insert(path.to_string_lossy().as_bytes(), hash.as_bytes())
+            .insert(cache_key.as_bytes(), hash.as_bytes())
             .map_err(|e| CortexError::Io(e.to_string()))?;
 
         let language = cortex_core::Language::from_path(path)
@@ -565,6 +596,15 @@ impl Indexer {
             nodes: parsed.nodes,
             edges: parsed.edges,
         }))
+    }
+}
+
+fn cache_key_for_path(path: &Path, repository_path: &str, branch: &Option<String>) -> String {
+    let path_key = path.to_string_lossy();
+    if let Some(branch) = branch {
+        format!("{repository_path}::{branch}::{path_key}")
+    } else {
+        format!("{repository_path}::{path_key}")
     }
 }
 
@@ -606,6 +646,23 @@ fn directory_chain(root: &Path, file_path: &Path) -> Vec<PathBuf> {
 }
 
 fn collect_source_files_with_config(path: &Path, config: &ProjectConfig) -> Vec<PathBuf> {
+    let include_filter: Option<HashSet<PathBuf>> = std::env::var("CORTEX_INDEX_INCLUDE_FILES")
+        .ok()
+        .map(|raw| {
+            raw.lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
+        .filter(|set: &HashSet<PathBuf>| !set.is_empty());
+    let mut effective_excludes = config.exclude_patterns.clone();
+    if let Ok(raw) = std::env::var("CORTEX_INDEX_EXCLUDE_PATTERNS") {
+        for line in raw.lines().map(str::trim).filter(|line| !line.is_empty()) {
+            effective_excludes.push(line.to_string());
+        }
+    }
+
     let mut files = Vec::new();
     if path.is_file() {
         files.push(path.to_path_buf());
@@ -624,7 +681,17 @@ fn collect_source_files_with_config(path: &Path, config: &ProjectConfig) -> Vec<
         let entry_path = entry.path();
         let path_str = entry_path.to_string_lossy();
 
-        let should_exclude = config.exclude_patterns.iter().any(|pattern| {
+        if let Some(filter) = include_filter.as_ref() {
+            let canonical = entry_path
+                .canonicalize()
+                .unwrap_or_else(|_| entry_path.to_path_buf());
+            let absolute = entry_path.to_path_buf();
+            if !filter.contains(&canonical) && !filter.contains(&absolute) {
+                continue;
+            }
+        }
+
+        let should_exclude = effective_excludes.iter().any(|pattern| {
             if pattern.ends_with("/**") {
                 let dir = &pattern[..pattern.len() - 3];
                 // Check if any component matches
@@ -664,6 +731,9 @@ pub fn file_hash(source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_build_branch_properties() {
@@ -718,6 +788,21 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_key_for_path_branch_scoped() {
+        let path = Path::new("/repo/src/main.rs");
+        let key_main = cache_key_for_path(path, "/repo", &Some("main".to_string()));
+        let key_dev = cache_key_for_path(path, "/repo", &Some("dev".to_string()));
+        assert_ne!(key_main, key_dev);
+    }
+
+    #[test]
+    fn test_cache_key_for_path_without_branch() {
+        let path = Path::new("/repo/src/main.rs");
+        let key = cache_key_for_path(path, "/repo", &None);
+        assert_eq!(key, "/repo::/repo/src/main.rs");
+    }
+
+    #[test]
     fn test_normalize_root_file() {
         // Create a temp file to test is_file() behavior
         let temp_dir = tempfile::tempdir().unwrap();
@@ -752,5 +837,49 @@ mod tests {
         let file_path = PathBuf::from("/repo/main.rs");
         let chain = directory_chain(&root, &file_path);
         assert!(chain.is_empty());
+    }
+
+    #[test]
+    fn test_collect_source_files_with_include_filter_env() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let a = temp.path().join("a.rs");
+        let b = temp.path().join("b.rs");
+        std::fs::write(&a, "fn a() {}").unwrap();
+        std::fs::write(&b, "fn b() {}").unwrap();
+        unsafe {
+            std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
+            std::env::set_var("CORTEX_INDEX_INCLUDE_FILES", a.display().to_string());
+        }
+        let cfg = ProjectConfig::default();
+        let files = collect_source_files_with_config(temp.path(), &cfg);
+        unsafe {
+            std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
+        }
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], a);
+    }
+
+    #[test]
+    fn test_collect_source_files_with_exclude_filter_env() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let a = temp.path().join("a.rs");
+        let b = temp.path().join("b.rs");
+        std::fs::write(&a, "fn a() {}").unwrap();
+        std::fs::write(&b, "fn b() {}").unwrap();
+        unsafe {
+            std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
+            std::env::set_var("CORTEX_INDEX_EXCLUDE_PATTERNS", "b.rs");
+        }
+        let cfg = ProjectConfig::default();
+        let files = collect_source_files_with_config(temp.path(), &cfg);
+        unsafe {
+            std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
+        }
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0], a);
     }
 }

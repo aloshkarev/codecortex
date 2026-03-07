@@ -52,5 +52,10 @@ pub fn tool_names() -> &'static [&'static str] {
         "get_current_project",
         "list_branches",
         "refresh_project",
+        "project_status",
+        "project_sync",
+        "project_branch_diff",
+        "project_queue_status",
+        "project_metrics",
     ]
 }
