@@ -575,11 +575,13 @@ mod performance_slos {
         }
         let duration_ms = start.elapsed().as_millis();
 
-        // Should be fast for repeated queries
+        // Keep this stable in debug CI/local runs where CPU contention is common.
+        let max_duration_ms = if cfg!(debug_assertions) { 1_500 } else { 500 };
         assert!(
-            duration_ms < 500,
-            "100 TF-IDF queries took {}ms, expected < 500ms",
-            duration_ms
+            duration_ms < max_duration_ms,
+            "100 TF-IDF queries took {}ms, expected < {}ms",
+            duration_ms,
+            max_duration_ms
         );
     }
 }

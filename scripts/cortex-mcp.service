@@ -1,9 +1,8 @@
 [Unit]
 Description=CodeCortex MCP Server
-Documentation=https://github.com/codecortex/codecortex
+Documentation=https://github.com/aloshkarev/codecortex
 After=network.target network-online.target memgraph.service docker.service
 Wants=network-online.target memgraph.service
-After=network-online.target
 
 [Service]
 Type=simple

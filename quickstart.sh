@@ -152,6 +152,7 @@ cp target/release/cortex-cli "${BIN_DIR}/cortex"
 chmod +x "${BIN_DIR}/cortex"
 
 # Add to PATH
+ORIGINAL_PATH="${PATH}"
 export PATH="${BIN_DIR}:${PATH}"
 
 SHELL_RC=""
@@ -161,7 +162,7 @@ case "${SHELL:-/bin/bash}" in
     *)      SHELL_RC="${HOME}/.profile" ;;
 esac
 
-if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
+if [[ ":$ORIGINAL_PATH:" != *":${BIN_DIR}:"* ]]; then
     echo "export PATH=\"\${PATH}:${BIN_DIR}\"" >> "$SHELL_RC"
     log_info "Added ${BIN_DIR} to PATH in ${SHELL_RC}"
 fi
@@ -305,13 +306,15 @@ if [ "$LLM_PROVIDER" = "ollama" ] && [ -n "$EMBEDDING_MODEL" ]; then
 fi
 
 # Step 8: Offer interactive setup
-if [ "$NON_INTERACTIVE" = false ]; then
+if [ "$NON_INTERACTIVE" = false ] && [ -t 0 ]; then
     echo ""
-    read -p "$(echo -e ${CYAN}Run interactive setup wizard? [Y/n]: ${NC})" -n 1 -r
+    read -p "$(echo -e ${CYAN}Run interactive setup wizard? [Y/n]: ${NC})" -n 1 -r || true
     echo
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         cortex setup
     fi
+elif [ "$NON_INTERACTIVE" = false ]; then
+    log_info "Skipping interactive setup wizard (no TTY detected)"
 fi
 
 # Step 9: Verify

@@ -11,6 +11,13 @@ pub fn tool_names() -> &'static [&'static str] {
         "execute_cypher_query",
         "find_dead_code",
         "calculate_cyclomatic_complexity",
+        // Vector tools
+        "vector_index_repository",
+        "vector_index_file",
+        "vector_search",
+        "vector_search_hybrid",
+        "vector_index_status",
+        "vector_delete_repository",
         // Context and impact tools
         "get_context_capsule",
         "get_impact_graph",

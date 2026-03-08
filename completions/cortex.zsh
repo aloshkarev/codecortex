@@ -15,11 +15,14 @@ _cortex() {
 
     local context curcontext="$curcontext" state line
     _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 '-V[Print version]' \
 '--version[Print version]' \
 ":: :_cortex_commands" \
@@ -33,29 +36,146 @@ _cortex() {
         case $line[1] in
             (setup)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (doctor)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
+;;
+(daemon)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+":: :_cortex__daemon_commands" \
+"*::: :->daemon" \
+&& ret=0
+
+    case $state in
+    (daemon)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-daemon-command-$line[1]:"
+        case $line[1] in
+            (start)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(stop)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__daemon__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-daemon-help-command-$line[1]:"
+        case $line[1] in
+            (start)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(stop)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
 ;;
 (mcp)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_cortex__mcp_commands" \
 "*::: :->mcp" \
 && ret=0
@@ -68,20 +188,26 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (start)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (tools)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (help)
@@ -118,42 +244,56 @@ esac
 ;;
 (index)
 _arguments "${_arguments_options[@]}" : \
+'--mode=[Indexing mode]:MODE:(full incremental-diff)' \
+'--base-branch=[Base branch to use for incremental-diff mode]:BASE_BRANCH:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '--force[]' \
-'--json[]' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':path:_default' \
 && ret=0
 ;;
 (watch)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':path:_default' \
 && ret=0
 ;;
 (unwatch)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':path:_default' \
 && ret=0
 ;;
 (find)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_cortex__find_commands" \
 "*::: :->find" \
 && ret=0
@@ -166,61 +306,79 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (name)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':name:_default' \
 && ret=0
 ;;
 (pattern)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':pattern:_default' \
 && ret=0
 ;;
 (type)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':kind:_default' \
 && ret=0
 ;;
 (content)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':query:_default' \
 && ret=0
 ;;
 (decorator)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':name:_default' \
 && ret=0
 ;;
 (argument)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':name:_default' \
 && ret=0
 ;;
@@ -274,11 +432,14 @@ esac
 ;;
 (analyze)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_cortex__analyze_commands" \
 "*::: :->analyze" \
 && ret=0
@@ -291,83 +452,155 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (callers)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':target:_default' \
 && ret=0
 ;;
 (callees)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':target:_default' \
 && ret=0
 ;;
 (chain)
 _arguments "${_arguments_options[@]}" : \
 '--depth=[]:DEPTH:_default' \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':from:_default' \
 ':to:_default' \
 && ret=0
 ;;
 (hierarchy)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':class:_default' \
 && ret=0
 ;;
 (deps)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':module:_default' \
 && ret=0
 ;;
 (dead-code)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (complexity)
 _arguments "${_arguments_options[@]}" : \
 '--top=[]:TOP:_default' \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (overrides)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':method:_default' \
+&& ret=0
+;;
+(smells)
+_arguments "${_arguments_options[@]}" : \
+'--min-severity=[Minimum severity to report (info, warning, error, critical)]:MIN_SEVERITY:_default' \
+'--max-files=[Maximum number of files to scan]:MAX_FILES:_default' \
+'--limit=[Maximum number of findings to return]:LIMIT:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+'::path -- File or directory path to analyze:_default' \
+&& ret=0
+;;
+(refactoring)
+_arguments "${_arguments_options[@]}" : \
+'--min-severity=[Minimum smell severity to consider (info, warning, error, critical)]:MIN_SEVERITY:_default' \
+'--max-files=[Maximum number of files to scan]:MAX_FILES:_default' \
+'--limit=[Maximum number of recommendations to return]:LIMIT:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+'::path -- File or directory path to analyze:_default' \
+&& ret=0
+;;
+(branch-diff)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Repository path (optional, uses current project or cwd)]:PATH:_files' \
+'--commit-limit=[Maximum number of ahead/behind commits returned per side]:COMMIT_LIMIT:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':source -- Source branch (for example, feature/my-change):_default' \
+':target -- Target branch (for example, main):_default' \
 && ret=0
 ;;
 (help)
@@ -414,6 +647,18 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(smells)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(refactoring)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(branch-diff)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -428,11 +673,14 @@ esac
 ;;
 (bundle)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_cortex__bundle_commands" \
 "*::: :->bundle" \
 && ret=0
@@ -446,21 +694,27 @@ _arguments "${_arguments_options[@]}" : \
             (export)
 _arguments "${_arguments_options[@]}" : \
 '--repo=[]:REPO:_files' \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':output:_files' \
 && ret=0
 ;;
 (import)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':path:_files' \
 && ret=0
 ;;
@@ -498,11 +752,14 @@ esac
 ;;
 (config)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_cortex__config_commands" \
 "*::: :->config" \
 && ret=0
@@ -515,31 +772,40 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (show)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (set)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':key:_default' \
 ':value:_default' \
 && ret=0
 ;;
 (reset)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (help)
@@ -580,58 +846,76 @@ esac
 ;;
 (clean)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (list)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (delete)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':path:_default' \
 && ret=0
 ;;
 (stats)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (query)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':cypher:_default' \
 && ret=0
 ;;
 (jobs)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_cortex__jobs_commands" \
 "*::: :->jobs" \
 && ret=0
@@ -644,20 +928,26 @@ _arguments "${_arguments_options[@]}" : \
         case $line[1] in
             (list)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (status)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':id:_default' \
 && ret=0
 ;;
@@ -695,11 +985,14 @@ esac
 ;;
 (debug)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ":: :_cortex__debug_commands" \
 "*::: :->debug" \
 && ret=0
@@ -713,44 +1006,56 @@ _arguments "${_arguments_options[@]}" : \
             (capsule)
 _arguments "${_arguments_options[@]}" : \
 '--max-items=[Maximum items in capsule]:MAX_ITEMS:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '--explain[Explain the capsule building process]' \
-'--json[]' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':symbol -- Symbol name to build capsule for:_default' \
 && ret=0
 ;;
 (cache)
 _arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '--clear[Clear the cache]' \
-'--json[]' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (trace)
 _arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '-v[Enable verbose output]' \
 '--verbose[Enable verbose output]' \
-'--json[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':query -- Query to trace:_default' \
 && ret=0
 ;;
 (validate)
 _arguments "${_arguments_options[@]}" : \
 '--repo=[Repository path to validate]:REPO:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '--fix[Fix issues automatically]' \
-'--json[]' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 && ret=0
 ;;
 (help)
@@ -795,21 +1100,626 @@ esac
 ;;
 (completion)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
 ':shell -- Shell type (bash, zsh, fish, elvish, powershell):(bash elvish fish powershell zsh)' \
 && ret=0
 ;;
 (interactive)
 _arguments "${_arguments_options[@]}" : \
-'--json[]' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
 '*-v[]' \
 '*--verbose[]' \
-'-h[Print help]' \
-'--help[Print help]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(capsule)
+_arguments "${_arguments_options[@]}" : \
+'--max-items=[Maximum items in capsule]:MAX_ITEMS:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':symbol -- Symbol name to get context for:_default' \
+&& ret=0
+;;
+(impact)
+_arguments "${_arguments_options[@]}" : \
+'--depth=[Maximum depth to traverse]:DEPTH:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':symbol -- Symbol name to analyze impact for:_default' \
+&& ret=0
+;;
+(refactor)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':symbol -- Symbol name to analyze:_default' \
+&& ret=0
+;;
+(patterns)
+_arguments "${_arguments_options[@]}" : \
+'--pattern-type=[Filter by pattern type (singleton, factory, observer, etc.)]:PATTERN_TYPE:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(test)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':symbol -- Symbol name to find tests for:_default' \
+&& ret=0
+;;
+(diagnose)
+_arguments "${_arguments_options[@]}" : \
+'--component=[Check specific component]:COMPONENT:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(memory)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+":: :_cortex__memory_commands" \
+"*::: :->memory" \
+&& ret=0
+
+    case $state in
+    (memory)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-memory-command-$line[1]:"
+        case $line[1] in
+            (save)
+_arguments "${_arguments_options[@]}" : \
+'--classification=[Classification (architecture, decision, pattern, issue, note)]:CLASSIFICATION:_default' \
+'--severity=[Severity (low, medium, high, critical)]:SEVERITY:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':content -- Observation content:_default' \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+'--limit=[Maximum results]:LIMIT:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':query -- Search query:_default' \
+&& ret=0
+;;
+(context)
+_arguments "${_arguments_options[@]}" : \
+'--session=[Session ID (optional)]:SESSION:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+'--classification=[Filter by classification]:CLASSIFICATION:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(clear)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__memory__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-memory-help-command-$line[1]:"
+        case $line[1] in
+            (save)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(context)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(clear)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(project)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+":: :_cortex__project_commands" \
+"*::: :->project" \
+&& ret=0
+
+    case $state in
+    (project)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-project-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(add)
+_arguments "${_arguments_options[@]}" : \
+'--track-branch=[Whether to track branch changes]:TRACK_BRANCH:(true false)' \
+'--auto-index=[Automatically index checked-out branch after adding]:AUTO_INDEX:(true false)' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':path -- Path to the project:_files' \
+&& ret=0
+;;
+(remove)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':path -- Path to the project:_files' \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+'--branch=[Branch to use (optional, defaults to current)]:BRANCH:_default' \
+'--auto-index=[Automatically index checked-out branch after switching context]:AUTO_INDEX:(true false)' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':path -- Path to the project:_files' \
+&& ret=0
+;;
+(current)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(branches)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Path to the project (optional, uses current)]:PATH:_files' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(refresh)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Path to the project (optional, uses current)]:PATH:_files' \
+'--auto-index=[Automatically index when a branch switch is detected]:AUTO_INDEX:(true false)' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Path to the project (optional, uses current)]:PATH:_files' \
+'--include-queue=[Include daemon queue details for this project]:INCLUDE_QUEUE:(true false)' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(sync)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Path to the project (optional, uses current)]:PATH:_files' \
+'--cleanup-old-branches=[Cleanup old branch indexes after sync]:CLEANUP_OLD_BRANCHES:(true false)' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'--force[Force full indexing when syncing]' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(policy)
+_arguments "${_arguments_options[@]}" : \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+":: :_cortex__project__policy_commands" \
+"*::: :->policy" \
+&& ret=0
+
+    case $state in
+    (policy)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-project-policy-command-$line[1]:"
+        case $line[1] in
+            (show)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Path to the project (optional, uses current)]:PATH:_files' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Path to the project (optional, uses current)]:PATH:_files' \
+'*--index-only=[Branch allowlist for indexing (repeatable). Empty keeps current value]:INDEX_ONLY:_default' \
+'*--exclude-pattern=[Exclude patterns for indexing (repeatable)]:EXCLUDE_PATTERNS:_default' \
+'--max-parallel-index-jobs=[Maximum parallel daemon index jobs for this project]:MAX_PARALLEL_INDEX_JOBS:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__project__policy__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-project-policy-help-command-$line[1]:"
+        case $line[1] in
+            (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(metrics)
+_arguments "${_arguments_options[@]}" : \
+'--path=[Path to the project (optional, uses current)]:PATH:_files' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__project__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-project-help-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(add)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(remove)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(current)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(branches)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(refresh)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(sync)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(policy)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__project__help__policy_commands" \
+"*::: :->policy" \
+&& ret=0
+
+    case $state in
+    (policy)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-project-help-policy-command-$line[1]:"
+        case $line[1] in
+            (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(metrics)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(skeleton)
+_arguments "${_arguments_options[@]}" : \
+'--mode=[Skeleton mode (minimal, standard, full)]:MODE:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':path -- Path to the file:_files' \
+&& ret=0
+;;
+(signature)
+_arguments "${_arguments_options[@]}" : \
+'--repo=[Repository path filter]:REPO:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'--include-related[Include related symbols]' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':symbol -- Symbol name to get signature for:_default' \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+'--limit=[Number of results to return]:LIMIT:_default' \
+'--search-type=[Search type (semantic, structural, hybrid)]:SEARCH_TYPE:_default' \
+'--repo=[Filter by repository path]:REPO:_default' \
+'--path=[Filter by file path pattern]:PATH:_default' \
+'--kind=[Filter by symbol kind (function, class, method, etc.)]:KIND:_default' \
+'--language=[Filter by language]:LANGUAGE:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':query -- Search query (natural language description):_default' \
+&& ret=0
+;;
+(vector-index)
+_arguments "${_arguments_options[@]}" : \
+'--repo=[Repository path for metadata]:REPO:_default' \
+'--format=[Output format (format, json-pretty, yaml, table)]:FORMAT:((json\:"JSON output (default)"
+json-pretty\:"Pretty JSON with indentation"
+yaml\:"YAML output"
+table\:"Table format for tabular data"))' \
+'--force[Force reindex]' \
+'*-v[]' \
+'*--verbose[]' \
+'-h[Print help (see more with '\''--help'\'')]' \
+'--help[Print help (see more with '\''--help'\'')]' \
+':path -- Path to index (file or directory):_default' \
 && ret=0
 ;;
 (help)
@@ -831,6 +1741,38 @@ _arguments "${_arguments_options[@]}" : \
 (doctor)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
+;;
+(daemon)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__help__daemon_commands" \
+"*::: :->daemon" \
+&& ret=0
+
+    case $state in
+    (daemon)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-help-daemon-command-$line[1]:"
+        case $line[1] in
+            (start)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(stop)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(run)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
 ;;
 (mcp)
 _arguments "${_arguments_options[@]}" : \
@@ -949,6 +1891,18 @@ _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
 (overrides)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(smells)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(refactoring)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(branch-diff)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
@@ -1092,6 +2046,162 @@ _arguments "${_arguments_options[@]}" : \
 _arguments "${_arguments_options[@]}" : \
 && ret=0
 ;;
+(capsule)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(impact)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(refactor)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(patterns)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(test)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(diagnose)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(memory)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__help__memory_commands" \
+"*::: :->memory" \
+&& ret=0
+
+    case $state in
+    (memory)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-help-memory-command-$line[1]:"
+        case $line[1] in
+            (save)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(context)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(clear)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(project)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__help__project_commands" \
+"*::: :->project" \
+&& ret=0
+
+    case $state in
+    (project)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-help-project-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(add)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(remove)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(current)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(branches)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(refresh)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(sync)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(policy)
+_arguments "${_arguments_options[@]}" : \
+":: :_cortex__help__project__policy_commands" \
+"*::: :->policy" \
+&& ret=0
+
+    case $state in
+    (policy)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:cortex-help-project-policy-command-$line[1]:"
+        case $line[1] in
+            (show)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(metrics)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(skeleton)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(signature)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(vector-index)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
 (help)
 _arguments "${_arguments_options[@]}" : \
 && ret=0
@@ -1110,6 +2220,7 @@ _cortex_commands() {
     local commands; commands=(
 'setup:' \
 'doctor:' \
+'daemon:' \
 'mcp:' \
 'index:' \
 'watch:' \
@@ -1127,6 +2238,18 @@ _cortex_commands() {
 'debug:' \
 'completion:Generate shell completion scripts' \
 'interactive:Start interactive REPL mode' \
+'capsule:Get context capsule for a symbol' \
+'impact:Get impact graph for a symbol' \
+'refactor:Analyze refactoring suggestions for a symbol' \
+'patterns:Find design patterns in codebase' \
+'test:Find tests for a symbol' \
+'diagnose:Run diagnostic checks' \
+'memory:Memory operations' \
+'project:Project management operations' \
+'skeleton:Get skeleton (compressed view) of a file' \
+'signature:Get signature of a symbol' \
+'search:Semantic code search using vector embeddings' \
+'vector-index:Index code for vector search' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'cortex commands' commands "$@"
@@ -1142,9 +2265,17 @@ _cortex__analyze_commands() {
 'dead-code:' \
 'complexity:' \
 'overrides:' \
+'smells:Detect code smells from source files' \
+'refactoring:Recommend refactoring techniques based on detected smells' \
+'branch-diff:Compare two git branches for a project/repository' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'cortex analyze commands' commands "$@"
+}
+(( $+functions[_cortex__analyze__branch-diff_commands] )) ||
+_cortex__analyze__branch-diff_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex analyze branch-diff commands' commands "$@"
 }
 (( $+functions[_cortex__analyze__callees_commands] )) ||
 _cortex__analyze__callees_commands() {
@@ -1187,9 +2318,17 @@ _cortex__analyze__help_commands() {
 'dead-code:' \
 'complexity:' \
 'overrides:' \
+'smells:Detect code smells from source files' \
+'refactoring:Recommend refactoring techniques based on detected smells' \
+'branch-diff:Compare two git branches for a project/repository' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'cortex analyze help commands' commands "$@"
+}
+(( $+functions[_cortex__analyze__help__branch-diff_commands] )) ||
+_cortex__analyze__help__branch-diff_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex analyze help branch-diff commands' commands "$@"
 }
 (( $+functions[_cortex__analyze__help__callees_commands] )) ||
 _cortex__analyze__help__callees_commands() {
@@ -1236,6 +2375,16 @@ _cortex__analyze__help__overrides_commands() {
     local commands; commands=()
     _describe -t commands 'cortex analyze help overrides commands' commands "$@"
 }
+(( $+functions[_cortex__analyze__help__refactoring_commands] )) ||
+_cortex__analyze__help__refactoring_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex analyze help refactoring commands' commands "$@"
+}
+(( $+functions[_cortex__analyze__help__smells_commands] )) ||
+_cortex__analyze__help__smells_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex analyze help smells commands' commands "$@"
+}
 (( $+functions[_cortex__analyze__hierarchy_commands] )) ||
 _cortex__analyze__hierarchy_commands() {
     local commands; commands=()
@@ -1245,6 +2394,16 @@ _cortex__analyze__hierarchy_commands() {
 _cortex__analyze__overrides_commands() {
     local commands; commands=()
     _describe -t commands 'cortex analyze overrides commands' commands "$@"
+}
+(( $+functions[_cortex__analyze__refactoring_commands] )) ||
+_cortex__analyze__refactoring_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex analyze refactoring commands' commands "$@"
+}
+(( $+functions[_cortex__analyze__smells_commands] )) ||
+_cortex__analyze__smells_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex analyze smells commands' commands "$@"
 }
 (( $+functions[_cortex__bundle_commands] )) ||
 _cortex__bundle_commands() {
@@ -1288,6 +2447,11 @@ _cortex__bundle__help__import_commands() {
 _cortex__bundle__import_commands() {
     local commands; commands=()
     _describe -t commands 'cortex bundle import commands' commands "$@"
+}
+(( $+functions[_cortex__capsule_commands] )) ||
+_cortex__capsule_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex capsule commands' commands "$@"
 }
 (( $+functions[_cortex__clean_commands] )) ||
 _cortex__clean_commands() {
@@ -1353,6 +2517,73 @@ _cortex__config__set_commands() {
 _cortex__config__show_commands() {
     local commands; commands=()
     _describe -t commands 'cortex config show commands' commands "$@"
+}
+(( $+functions[_cortex__daemon_commands] )) ||
+_cortex__daemon_commands() {
+    local commands; commands=(
+'start:Start daemon in background' \
+'stop:Stop daemon process' \
+'status:Show daemon runtime status' \
+'run:Run daemon foreground loop (internal)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'cortex daemon commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__help_commands] )) ||
+_cortex__daemon__help_commands() {
+    local commands; commands=(
+'start:Start daemon in background' \
+'stop:Stop daemon process' \
+'status:Show daemon runtime status' \
+'run:Run daemon foreground loop (internal)' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'cortex daemon help commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__help__help_commands] )) ||
+_cortex__daemon__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon help help commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__help__run_commands] )) ||
+_cortex__daemon__help__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon help run commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__help__start_commands] )) ||
+_cortex__daemon__help__start_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon help start commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__help__status_commands] )) ||
+_cortex__daemon__help__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon help status commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__help__stop_commands] )) ||
+_cortex__daemon__help__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon help stop commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__run_commands] )) ||
+_cortex__daemon__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon run commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__start_commands] )) ||
+_cortex__daemon__start_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon start commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__status_commands] )) ||
+_cortex__daemon__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon status commands' commands "$@"
+}
+(( $+functions[_cortex__daemon__stop_commands] )) ||
+_cortex__daemon__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex daemon stop commands' commands "$@"
 }
 (( $+functions[_cortex__debug_commands] )) ||
 _cortex__debug_commands() {
@@ -1425,6 +2656,11 @@ _cortex__debug__validate_commands() {
 _cortex__delete_commands() {
     local commands; commands=()
     _describe -t commands 'cortex delete commands' commands "$@"
+}
+(( $+functions[_cortex__diagnose_commands] )) ||
+_cortex__diagnose_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex diagnose commands' commands "$@"
 }
 (( $+functions[_cortex__doctor_commands] )) ||
 _cortex__doctor_commands() {
@@ -1527,6 +2763,7 @@ _cortex__help_commands() {
     local commands; commands=(
 'setup:' \
 'doctor:' \
+'daemon:' \
 'mcp:' \
 'index:' \
 'watch:' \
@@ -1544,6 +2781,18 @@ _cortex__help_commands() {
 'debug:' \
 'completion:Generate shell completion scripts' \
 'interactive:Start interactive REPL mode' \
+'capsule:Get context capsule for a symbol' \
+'impact:Get impact graph for a symbol' \
+'refactor:Analyze refactoring suggestions for a symbol' \
+'patterns:Find design patterns in codebase' \
+'test:Find tests for a symbol' \
+'diagnose:Run diagnostic checks' \
+'memory:Memory operations' \
+'project:Project management operations' \
+'skeleton:Get skeleton (compressed view) of a file' \
+'signature:Get signature of a symbol' \
+'search:Semantic code search using vector embeddings' \
+'vector-index:Index code for vector search' \
 'help:Print this message or the help of the given subcommand(s)' \
     )
     _describe -t commands 'cortex help commands' commands "$@"
@@ -1559,8 +2808,16 @@ _cortex__help__analyze_commands() {
 'dead-code:' \
 'complexity:' \
 'overrides:' \
+'smells:Detect code smells from source files' \
+'refactoring:Recommend refactoring techniques based on detected smells' \
+'branch-diff:Compare two git branches for a project/repository' \
     )
     _describe -t commands 'cortex help analyze commands' commands "$@"
+}
+(( $+functions[_cortex__help__analyze__branch-diff_commands] )) ||
+_cortex__help__analyze__branch-diff_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help analyze branch-diff commands' commands "$@"
 }
 (( $+functions[_cortex__help__analyze__callees_commands] )) ||
 _cortex__help__analyze__callees_commands() {
@@ -1602,6 +2859,16 @@ _cortex__help__analyze__overrides_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help analyze overrides commands' commands "$@"
 }
+(( $+functions[_cortex__help__analyze__refactoring_commands] )) ||
+_cortex__help__analyze__refactoring_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help analyze refactoring commands' commands "$@"
+}
+(( $+functions[_cortex__help__analyze__smells_commands] )) ||
+_cortex__help__analyze__smells_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help analyze smells commands' commands "$@"
+}
 (( $+functions[_cortex__help__bundle_commands] )) ||
 _cortex__help__bundle_commands() {
     local commands; commands=(
@@ -1619,6 +2886,11 @@ _cortex__help__bundle__export_commands() {
 _cortex__help__bundle__import_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help bundle import commands' commands "$@"
+}
+(( $+functions[_cortex__help__capsule_commands] )) ||
+_cortex__help__capsule_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help capsule commands' commands "$@"
 }
 (( $+functions[_cortex__help__clean_commands] )) ||
 _cortex__help__clean_commands() {
@@ -1654,6 +2926,36 @@ _cortex__help__config__show_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help config show commands' commands "$@"
 }
+(( $+functions[_cortex__help__daemon_commands] )) ||
+_cortex__help__daemon_commands() {
+    local commands; commands=(
+'start:Start daemon in background' \
+'stop:Stop daemon process' \
+'status:Show daemon runtime status' \
+'run:Run daemon foreground loop (internal)' \
+    )
+    _describe -t commands 'cortex help daemon commands' commands "$@"
+}
+(( $+functions[_cortex__help__daemon__run_commands] )) ||
+_cortex__help__daemon__run_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help daemon run commands' commands "$@"
+}
+(( $+functions[_cortex__help__daemon__start_commands] )) ||
+_cortex__help__daemon__start_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help daemon start commands' commands "$@"
+}
+(( $+functions[_cortex__help__daemon__status_commands] )) ||
+_cortex__help__daemon__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help daemon status commands' commands "$@"
+}
+(( $+functions[_cortex__help__daemon__stop_commands] )) ||
+_cortex__help__daemon__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help daemon stop commands' commands "$@"
+}
 (( $+functions[_cortex__help__debug_commands] )) ||
 _cortex__help__debug_commands() {
     local commands; commands=(
@@ -1688,6 +2990,11 @@ _cortex__help__debug__validate_commands() {
 _cortex__help__delete_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help delete commands' commands "$@"
+}
+(( $+functions[_cortex__help__diagnose_commands] )) ||
+_cortex__help__diagnose_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help diagnose commands' commands "$@"
 }
 (( $+functions[_cortex__help__doctor_commands] )) ||
 _cortex__help__doctor_commands() {
@@ -1741,6 +3048,11 @@ _cortex__help__help_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help help commands' commands "$@"
 }
+(( $+functions[_cortex__help__impact_commands] )) ||
+_cortex__help__impact_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help impact commands' commands "$@"
+}
 (( $+functions[_cortex__help__index_commands] )) ||
 _cortex__help__index_commands() {
     local commands; commands=()
@@ -1792,30 +3104,191 @@ _cortex__help__mcp__tools_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help mcp tools commands' commands "$@"
 }
+(( $+functions[_cortex__help__memory_commands] )) ||
+_cortex__help__memory_commands() {
+    local commands; commands=(
+'save:Save an observation' \
+'search:Search observations' \
+'context:Get session context' \
+'list:List all observations' \
+'clear:Clear all observations' \
+    )
+    _describe -t commands 'cortex help memory commands' commands "$@"
+}
+(( $+functions[_cortex__help__memory__clear_commands] )) ||
+_cortex__help__memory__clear_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help memory clear commands' commands "$@"
+}
+(( $+functions[_cortex__help__memory__context_commands] )) ||
+_cortex__help__memory__context_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help memory context commands' commands "$@"
+}
+(( $+functions[_cortex__help__memory__list_commands] )) ||
+_cortex__help__memory__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help memory list commands' commands "$@"
+}
+(( $+functions[_cortex__help__memory__save_commands] )) ||
+_cortex__help__memory__save_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help memory save commands' commands "$@"
+}
+(( $+functions[_cortex__help__memory__search_commands] )) ||
+_cortex__help__memory__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help memory search commands' commands "$@"
+}
+(( $+functions[_cortex__help__patterns_commands] )) ||
+_cortex__help__patterns_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help patterns commands' commands "$@"
+}
+(( $+functions[_cortex__help__project_commands] )) ||
+_cortex__help__project_commands() {
+    local commands; commands=(
+'list:List all registered projects' \
+'add:Add a project to the registry' \
+'remove:Remove a project from the registry' \
+'set:Set the current active project' \
+'current:Get the current active project' \
+'branches:List branches for a project' \
+'refresh:Refresh Git info for a project' \
+'status:Show project indexing freshness/health status' \
+'sync:Sync project state\: refresh -> detect switch -> index/queue -> cleanup' \
+'policy:Project branch/indexing policy controls' \
+'metrics:Show daemon/project metrics snapshot' \
+    )
+    _describe -t commands 'cortex help project commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__add_commands] )) ||
+_cortex__help__project__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project add commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__branches_commands] )) ||
+_cortex__help__project__branches_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project branches commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__current_commands] )) ||
+_cortex__help__project__current_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project current commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__list_commands] )) ||
+_cortex__help__project__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project list commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__metrics_commands] )) ||
+_cortex__help__project__metrics_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project metrics commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__policy_commands] )) ||
+_cortex__help__project__policy_commands() {
+    local commands; commands=(
+'show:Show current project policy' \
+'set:Update project policy fields' \
+    )
+    _describe -t commands 'cortex help project policy commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__policy__set_commands] )) ||
+_cortex__help__project__policy__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project policy set commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__policy__show_commands] )) ||
+_cortex__help__project__policy__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project policy show commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__refresh_commands] )) ||
+_cortex__help__project__refresh_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project refresh commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__remove_commands] )) ||
+_cortex__help__project__remove_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project remove commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__set_commands] )) ||
+_cortex__help__project__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project set commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__status_commands] )) ||
+_cortex__help__project__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project status commands' commands "$@"
+}
+(( $+functions[_cortex__help__project__sync_commands] )) ||
+_cortex__help__project__sync_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help project sync commands' commands "$@"
+}
 (( $+functions[_cortex__help__query_commands] )) ||
 _cortex__help__query_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help query commands' commands "$@"
+}
+(( $+functions[_cortex__help__refactor_commands] )) ||
+_cortex__help__refactor_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help refactor commands' commands "$@"
+}
+(( $+functions[_cortex__help__search_commands] )) ||
+_cortex__help__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help search commands' commands "$@"
 }
 (( $+functions[_cortex__help__setup_commands] )) ||
 _cortex__help__setup_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help setup commands' commands "$@"
 }
+(( $+functions[_cortex__help__signature_commands] )) ||
+_cortex__help__signature_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help signature commands' commands "$@"
+}
+(( $+functions[_cortex__help__skeleton_commands] )) ||
+_cortex__help__skeleton_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help skeleton commands' commands "$@"
+}
 (( $+functions[_cortex__help__stats_commands] )) ||
 _cortex__help__stats_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help stats commands' commands "$@"
+}
+(( $+functions[_cortex__help__test_commands] )) ||
+_cortex__help__test_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help test commands' commands "$@"
 }
 (( $+functions[_cortex__help__unwatch_commands] )) ||
 _cortex__help__unwatch_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help unwatch commands' commands "$@"
 }
+(( $+functions[_cortex__help__vector-index_commands] )) ||
+_cortex__help__vector-index_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex help vector-index commands' commands "$@"
+}
 (( $+functions[_cortex__help__watch_commands] )) ||
 _cortex__help__watch_commands() {
     local commands; commands=()
     _describe -t commands 'cortex help watch commands' commands "$@"
+}
+(( $+functions[_cortex__impact_commands] )) ||
+_cortex__impact_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex impact commands' commands "$@"
 }
 (( $+functions[_cortex__index_commands] )) ||
 _cortex__index_commands() {
@@ -1918,25 +3391,341 @@ _cortex__mcp__tools_commands() {
     local commands; commands=()
     _describe -t commands 'cortex mcp tools commands' commands "$@"
 }
+(( $+functions[_cortex__memory_commands] )) ||
+_cortex__memory_commands() {
+    local commands; commands=(
+'save:Save an observation' \
+'search:Search observations' \
+'context:Get session context' \
+'list:List all observations' \
+'clear:Clear all observations' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'cortex memory commands' commands "$@"
+}
+(( $+functions[_cortex__memory__clear_commands] )) ||
+_cortex__memory__clear_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory clear commands' commands "$@"
+}
+(( $+functions[_cortex__memory__context_commands] )) ||
+_cortex__memory__context_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory context commands' commands "$@"
+}
+(( $+functions[_cortex__memory__help_commands] )) ||
+_cortex__memory__help_commands() {
+    local commands; commands=(
+'save:Save an observation' \
+'search:Search observations' \
+'context:Get session context' \
+'list:List all observations' \
+'clear:Clear all observations' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'cortex memory help commands' commands "$@"
+}
+(( $+functions[_cortex__memory__help__clear_commands] )) ||
+_cortex__memory__help__clear_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory help clear commands' commands "$@"
+}
+(( $+functions[_cortex__memory__help__context_commands] )) ||
+_cortex__memory__help__context_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory help context commands' commands "$@"
+}
+(( $+functions[_cortex__memory__help__help_commands] )) ||
+_cortex__memory__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory help help commands' commands "$@"
+}
+(( $+functions[_cortex__memory__help__list_commands] )) ||
+_cortex__memory__help__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory help list commands' commands "$@"
+}
+(( $+functions[_cortex__memory__help__save_commands] )) ||
+_cortex__memory__help__save_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory help save commands' commands "$@"
+}
+(( $+functions[_cortex__memory__help__search_commands] )) ||
+_cortex__memory__help__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory help search commands' commands "$@"
+}
+(( $+functions[_cortex__memory__list_commands] )) ||
+_cortex__memory__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory list commands' commands "$@"
+}
+(( $+functions[_cortex__memory__save_commands] )) ||
+_cortex__memory__save_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory save commands' commands "$@"
+}
+(( $+functions[_cortex__memory__search_commands] )) ||
+_cortex__memory__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex memory search commands' commands "$@"
+}
+(( $+functions[_cortex__patterns_commands] )) ||
+_cortex__patterns_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex patterns commands' commands "$@"
+}
+(( $+functions[_cortex__project_commands] )) ||
+_cortex__project_commands() {
+    local commands; commands=(
+'list:List all registered projects' \
+'add:Add a project to the registry' \
+'remove:Remove a project from the registry' \
+'set:Set the current active project' \
+'current:Get the current active project' \
+'branches:List branches for a project' \
+'refresh:Refresh Git info for a project' \
+'status:Show project indexing freshness/health status' \
+'sync:Sync project state\: refresh -> detect switch -> index/queue -> cleanup' \
+'policy:Project branch/indexing policy controls' \
+'metrics:Show daemon/project metrics snapshot' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'cortex project commands' commands "$@"
+}
+(( $+functions[_cortex__project__add_commands] )) ||
+_cortex__project__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project add commands' commands "$@"
+}
+(( $+functions[_cortex__project__branches_commands] )) ||
+_cortex__project__branches_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project branches commands' commands "$@"
+}
+(( $+functions[_cortex__project__current_commands] )) ||
+_cortex__project__current_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project current commands' commands "$@"
+}
+(( $+functions[_cortex__project__help_commands] )) ||
+_cortex__project__help_commands() {
+    local commands; commands=(
+'list:List all registered projects' \
+'add:Add a project to the registry' \
+'remove:Remove a project from the registry' \
+'set:Set the current active project' \
+'current:Get the current active project' \
+'branches:List branches for a project' \
+'refresh:Refresh Git info for a project' \
+'status:Show project indexing freshness/health status' \
+'sync:Sync project state\: refresh -> detect switch -> index/queue -> cleanup' \
+'policy:Project branch/indexing policy controls' \
+'metrics:Show daemon/project metrics snapshot' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'cortex project help commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__add_commands] )) ||
+_cortex__project__help__add_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help add commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__branches_commands] )) ||
+_cortex__project__help__branches_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help branches commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__current_commands] )) ||
+_cortex__project__help__current_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help current commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__help_commands] )) ||
+_cortex__project__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help help commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__list_commands] )) ||
+_cortex__project__help__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help list commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__metrics_commands] )) ||
+_cortex__project__help__metrics_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help metrics commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__policy_commands] )) ||
+_cortex__project__help__policy_commands() {
+    local commands; commands=(
+'show:Show current project policy' \
+'set:Update project policy fields' \
+    )
+    _describe -t commands 'cortex project help policy commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__policy__set_commands] )) ||
+_cortex__project__help__policy__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help policy set commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__policy__show_commands] )) ||
+_cortex__project__help__policy__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help policy show commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__refresh_commands] )) ||
+_cortex__project__help__refresh_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help refresh commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__remove_commands] )) ||
+_cortex__project__help__remove_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help remove commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__set_commands] )) ||
+_cortex__project__help__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help set commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__status_commands] )) ||
+_cortex__project__help__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help status commands' commands "$@"
+}
+(( $+functions[_cortex__project__help__sync_commands] )) ||
+_cortex__project__help__sync_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project help sync commands' commands "$@"
+}
+(( $+functions[_cortex__project__list_commands] )) ||
+_cortex__project__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project list commands' commands "$@"
+}
+(( $+functions[_cortex__project__metrics_commands] )) ||
+_cortex__project__metrics_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project metrics commands' commands "$@"
+}
+(( $+functions[_cortex__project__policy_commands] )) ||
+_cortex__project__policy_commands() {
+    local commands; commands=(
+'show:Show current project policy' \
+'set:Update project policy fields' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'cortex project policy commands' commands "$@"
+}
+(( $+functions[_cortex__project__policy__help_commands] )) ||
+_cortex__project__policy__help_commands() {
+    local commands; commands=(
+'show:Show current project policy' \
+'set:Update project policy fields' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'cortex project policy help commands' commands "$@"
+}
+(( $+functions[_cortex__project__policy__help__help_commands] )) ||
+_cortex__project__policy__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project policy help help commands' commands "$@"
+}
+(( $+functions[_cortex__project__policy__help__set_commands] )) ||
+_cortex__project__policy__help__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project policy help set commands' commands "$@"
+}
+(( $+functions[_cortex__project__policy__help__show_commands] )) ||
+_cortex__project__policy__help__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project policy help show commands' commands "$@"
+}
+(( $+functions[_cortex__project__policy__set_commands] )) ||
+_cortex__project__policy__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project policy set commands' commands "$@"
+}
+(( $+functions[_cortex__project__policy__show_commands] )) ||
+_cortex__project__policy__show_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project policy show commands' commands "$@"
+}
+(( $+functions[_cortex__project__refresh_commands] )) ||
+_cortex__project__refresh_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project refresh commands' commands "$@"
+}
+(( $+functions[_cortex__project__remove_commands] )) ||
+_cortex__project__remove_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project remove commands' commands "$@"
+}
+(( $+functions[_cortex__project__set_commands] )) ||
+_cortex__project__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project set commands' commands "$@"
+}
+(( $+functions[_cortex__project__status_commands] )) ||
+_cortex__project__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project status commands' commands "$@"
+}
+(( $+functions[_cortex__project__sync_commands] )) ||
+_cortex__project__sync_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex project sync commands' commands "$@"
+}
 (( $+functions[_cortex__query_commands] )) ||
 _cortex__query_commands() {
     local commands; commands=()
     _describe -t commands 'cortex query commands' commands "$@"
+}
+(( $+functions[_cortex__refactor_commands] )) ||
+_cortex__refactor_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex refactor commands' commands "$@"
+}
+(( $+functions[_cortex__search_commands] )) ||
+_cortex__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex search commands' commands "$@"
 }
 (( $+functions[_cortex__setup_commands] )) ||
 _cortex__setup_commands() {
     local commands; commands=()
     _describe -t commands 'cortex setup commands' commands "$@"
 }
+(( $+functions[_cortex__signature_commands] )) ||
+_cortex__signature_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex signature commands' commands "$@"
+}
+(( $+functions[_cortex__skeleton_commands] )) ||
+_cortex__skeleton_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex skeleton commands' commands "$@"
+}
 (( $+functions[_cortex__stats_commands] )) ||
 _cortex__stats_commands() {
     local commands; commands=()
     _describe -t commands 'cortex stats commands' commands "$@"
 }
+(( $+functions[_cortex__test_commands] )) ||
+_cortex__test_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex test commands' commands "$@"
+}
 (( $+functions[_cortex__unwatch_commands] )) ||
 _cortex__unwatch_commands() {
     local commands; commands=()
     _describe -t commands 'cortex unwatch commands' commands "$@"
+}
+(( $+functions[_cortex__vector-index_commands] )) ||
+_cortex__vector-index_commands() {
+    local commands; commands=()
+    _describe -t commands 'cortex vector-index commands' commands "$@"
 }
 (( $+functions[_cortex__watch_commands] )) ||
 _cortex__watch_commands() {

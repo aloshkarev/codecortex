@@ -66,6 +66,10 @@ pub struct FeatureFlags {
     pub memory_read: bool,
     /// Enable memory write operations
     pub memory_write: bool,
+    /// Enable vector read operations
+    pub vector_read: bool,
+    /// Enable vector write operations
+    pub vector_write: bool,
     /// Enable cache layer
     pub cache_enabled: bool,
     /// Enable telemetry collection
@@ -109,6 +113,8 @@ impl FeatureFlags {
             lsp_ingest: read_flag_from_env(&Self::make_env_key("lsp_ingest"), false),
             memory_read: read_flag_from_env(&Self::make_env_key("memory_read"), false),
             memory_write: read_flag_from_env(&Self::make_env_key("memory_write"), false),
+            vector_read: read_flag_from_env(&Self::make_env_key("vector_read"), true),
+            vector_write: read_flag_from_env(&Self::make_env_key("vector_write"), true),
             cache_enabled: read_flag_from_env(&Self::make_env_key("cache"), true),
             telemetry_enabled: read_flag_from_env(&Self::make_env_key("telemetry"), true),
             tfidf_scoring: read_flag_from_env(&Self::make_env_key("tfidf_scoring"), true),
@@ -133,6 +139,8 @@ impl FeatureFlags {
             "lsp_ingest" | "mcp.lsp_ingest.enabled" => self.lsp_ingest,
             "memory_read" | "mcp.memory.read.enabled" => self.memory_read,
             "memory_write" | "mcp.memory.write.enabled" => self.memory_write,
+            "vector_read" | "mcp.vector.read.enabled" => self.vector_read,
+            "vector_write" | "mcp.vector.write.enabled" => self.vector_write,
             "cache" | "mcp.cache.enabled" => self.cache_enabled,
             "telemetry" | "mcp.telemetry.enabled" => self.telemetry_enabled,
             "tfidf_scoring" => self.tfidf_scoring,
@@ -156,6 +164,8 @@ impl FeatureFlags {
         flags.insert("lsp_ingest", self.lsp_ingest);
         flags.insert("memory_read", self.memory_read);
         flags.insert("memory_write", self.memory_write);
+        flags.insert("vector_read", self.vector_read);
+        flags.insert("vector_write", self.vector_write);
         flags.insert("cache_enabled", self.cache_enabled);
         flags.insert("telemetry_enabled", self.telemetry_enabled);
         flags.insert("tfidf_scoring", self.tfidf_scoring);
@@ -175,6 +185,8 @@ impl FeatureFlags {
             lsp_ingest: true,
             memory_read: true,
             memory_write: true,
+            vector_read: true,
+            vector_write: true,
             cache_enabled: true,
             telemetry_enabled: true,
             tfidf_scoring: true,
@@ -194,6 +206,8 @@ impl FeatureFlags {
             lsp_ingest: false,
             memory_read: false,
             memory_write: false,
+            vector_read: false,
+            vector_write: false,
             cache_enabled: false,
             telemetry_enabled: false,
             tfidf_scoring: false,
@@ -250,6 +264,8 @@ mod tests {
         assert!(flags.lsp_ingest);
         assert!(flags.memory_read);
         assert!(flags.memory_write);
+        assert!(flags.vector_read);
+        assert!(flags.vector_write);
         assert!(flags.cache_enabled);
         assert!(flags.telemetry_enabled);
     }
@@ -266,6 +282,8 @@ mod tests {
         assert!(!flags.lsp_ingest);
         assert!(!flags.memory_read);
         assert!(!flags.memory_write);
+        assert!(!flags.vector_read);
+        assert!(!flags.vector_write);
         assert!(!flags.cache_enabled);
         assert!(!flags.telemetry_enabled);
     }
@@ -276,7 +294,7 @@ mod tests {
         let all = flags.all_flags();
         assert!(all.contains_key("context_capsule"));
         assert!(all.contains_key("impact_graph"));
-        assert_eq!(all.len(), 13);
+        assert_eq!(all.len(), 15);
     }
 
     #[test]

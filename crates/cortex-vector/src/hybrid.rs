@@ -82,6 +82,15 @@ pub struct HybridSearch {
     embedder: Arc<dyn Embedder>,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum QueryIntent {
+    Bugfix,
+    Refactor,
+    Tests,
+    ApiUsage,
+    Explore,
+}
+
 impl HybridSearch {
     /// Create a new hybrid search instance
     pub fn new(vector_store: Arc<dyn VectorStore>, embedder: Arc<dyn Embedder>) -> Self {
@@ -101,8 +110,8 @@ impl HybridSearch {
         match search_type {
             SearchType::Semantic => self.semantic_search(query, k).await,
             SearchType::Structural => {
-                // Structural search would need GraphClient - return semantic for now
-                self.semantic_search(query, k).await
+                // Structural fallback still uses vectors but applies stronger metadata priors.
+                self.hybrid_search(query, k).await
             }
             SearchType::Hybrid => self.hybrid_search(query, k).await,
         }
@@ -158,16 +167,31 @@ impl HybridSearch {
         query: &str,
         k: usize,
     ) -> Result<Vec<HybridResult>, crate::VectorError> {
-        // Get semantic results
-        let semantic_results = self.semantic_search(query, k * 2).await?;
+        let intent = detect_intent(query);
+        let semantic_results = self.semantic_search(query, k * 3).await?;
+        let mut reranked: Vec<HybridResult> = semantic_results
+            .into_iter()
+            .map(|mut r| {
+                let vector_score = r.result.score;
+                let graph_score = estimated_graph_signal(&r);
+                let lexical_hint = lexical_metadata_hint(query, &r);
+                let intent_boost = intent_kind_boost(intent, &r);
+                let (w_vector, w_graph, w_lexical) = intent_weights(intent);
+                r.combined_score = (vector_score * w_vector)
+                    + (graph_score * w_graph)
+                    + (lexical_hint * w_lexical)
+                    + intent_boost;
+                r
+            })
+            .collect();
 
-        // For now, just return semantic results
-        // In a full implementation, we would:
-        // 1. Get graph context for each result (callers, callees)
-        // 2. Re-rank based on combined scores
-        // 3. Add related symbols from graph
-
-        Ok(semantic_results.into_iter().take(k).collect())
+        reranked.sort_by(|a, b| {
+            b.combined_score
+                .partial_cmp(&a.combined_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        reranked.truncate(k);
+        Ok(reranked)
     }
 
     /// Search within a specific repository
@@ -282,6 +306,79 @@ impl HybridSearch {
     /// Get the underlying embedder
     pub fn embedder(&self) -> &dyn Embedder {
         self.embedder.as_ref()
+    }
+}
+
+fn detect_intent(query: &str) -> QueryIntent {
+    let q = query.to_ascii_lowercase();
+    if q.contains("bug") || q.contains("error") || q.contains("panic") || q.contains("fix") {
+        QueryIntent::Bugfix
+    } else if q.contains("refactor") || q.contains("cleanup") || q.contains("rename") {
+        QueryIntent::Refactor
+    } else if q.contains("test") || q.contains("assert") || q.contains("spec") {
+        QueryIntent::Tests
+    } else if q.contains("how to") || q.contains("usage") || q.contains("example") {
+        QueryIntent::ApiUsage
+    } else {
+        QueryIntent::Explore
+    }
+}
+
+fn intent_weights(intent: QueryIntent) -> (f32, f32, f32) {
+    match intent {
+        QueryIntent::Bugfix => (0.60, 0.25, 0.15),
+        QueryIntent::Refactor => (0.50, 0.35, 0.15),
+        QueryIntent::Tests => (0.45, 0.20, 0.35),
+        QueryIntent::ApiUsage => (0.55, 0.20, 0.25),
+        QueryIntent::Explore => (0.65, 0.15, 0.20),
+    }
+}
+
+fn estimated_graph_signal(result: &HybridResult) -> f32 {
+    result
+        .graph_context
+        .as_ref()
+        .map(|ctx| ((ctx.callers_count + ctx.callees_count) as f32 / 16.0).min(1.0))
+        .unwrap_or(0.0)
+}
+
+fn lexical_metadata_hint(query: &str, result: &HybridResult) -> f32 {
+    let q = query.to_ascii_lowercase();
+    let mut hint = 0.0f32;
+    if let Some(MetadataValue::String(kind)) = result.result.metadata.get("kind") {
+        let k = kind.to_ascii_lowercase();
+        if q.contains(&k) {
+            hint += 0.3;
+        }
+    }
+    if let Some(MetadataValue::String(path)) = result.result.metadata.get("path") {
+        let p = path.to_ascii_lowercase();
+        if p.contains("test") && q.contains("test") {
+            hint += 0.3;
+        }
+        if p.contains("api") && (q.contains("api") || q.contains("endpoint")) {
+            hint += 0.2;
+        }
+    }
+    hint.min(1.0)
+}
+
+fn intent_kind_boost(intent: QueryIntent, result: &HybridResult) -> f32 {
+    let kind = result
+        .result
+        .metadata
+        .get("kind")
+        .and_then(|v| match v {
+            MetadataValue::String(s) => Some(s.to_ascii_lowercase()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    match intent {
+        QueryIntent::Tests if kind.contains("test") => 0.15,
+        QueryIntent::Refactor if kind.contains("struct") || kind.contains("class") => 0.10,
+        QueryIntent::Bugfix if kind.contains("function") || kind.contains("method") => 0.08,
+        QueryIntent::ApiUsage if kind.contains("function") => 0.06,
+        _ => 0.0,
     }
 }
 
@@ -440,5 +537,25 @@ mod tests {
                 .expect("lock poisoned"),
             0
         );
+    }
+
+    #[test]
+    fn test_detect_intent_variants() {
+        assert!(matches!(
+            detect_intent("fix panic in parser"),
+            QueryIntent::Bugfix
+        ));
+        assert!(matches!(
+            detect_intent("refactor module layout"),
+            QueryIntent::Refactor
+        ));
+        assert!(matches!(
+            detect_intent("write tests for auth"),
+            QueryIntent::Tests
+        ));
+        assert!(matches!(
+            detect_intent("api usage for search"),
+            QueryIntent::ApiUsage
+        ));
     }
 }

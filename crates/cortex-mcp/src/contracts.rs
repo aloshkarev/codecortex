@@ -9,6 +9,11 @@ use serde_json::{Value, json};
 use std::time::Instant;
 use uuid::Uuid;
 
+/// Standardized warning codes for vector retrieval.
+pub const WARNING_VECTOR_STORE_UNAVAILABLE: &str = "vector_store_unavailable";
+pub const WARNING_EMBEDDER_TIMEOUT: &str = "embedder_timeout";
+pub const WARNING_FALLBACK_TO_LEXICAL: &str = "fallback_to_lexical";
+
 /// Response status indicating success, partial success, or error
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -27,6 +27,7 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand --version 'Print version'
             cand setup 'setup'
             cand doctor 'doctor'
+            cand daemon 'daemon'
             cand mcp 'mcp'
             cand index 'index'
             cand watch 'watch'
@@ -72,6 +73,63 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand -h 'Print help (see more with ''--help'')'
             cand --help 'Print help (see more with ''--help'')'
         }
+        &'cortex;daemon'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+            cand start 'Start daemon in background'
+            cand stop 'Stop daemon process'
+            cand status 'Show daemon runtime status'
+            cand run 'Run daemon foreground loop (internal)'
+            cand help 'Print this message or the help of the given subcommand(s)'
+        }
+        &'cortex;daemon;start'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;daemon;stop'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;daemon;status'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;daemon;run'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;daemon;help'= {
+            cand start 'Start daemon in background'
+            cand stop 'Stop daemon process'
+            cand status 'Show daemon runtime status'
+            cand run 'Run daemon foreground loop (internal)'
+            cand help 'Print this message or the help of the given subcommand(s)'
+        }
+        &'cortex;daemon;help;start'= {
+        }
+        &'cortex;daemon;help;stop'= {
+        }
+        &'cortex;daemon;help;status'= {
+        }
+        &'cortex;daemon;help;run'= {
+        }
+        &'cortex;daemon;help;help'= {
+        }
         &'cortex;mcp'= {
             cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
@@ -108,6 +166,8 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;mcp;help;help'= {
         }
         &'cortex;index'= {
+            cand --mode 'Indexing mode'
+            cand --base-branch 'Base branch to use for incremental-diff mode'
             cand --format 'Output format (format, json-pretty, yaml, table)'
             cand --force 'force'
             cand -v 'v'
@@ -222,6 +282,9 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand dead-code 'dead-code'
             cand complexity 'complexity'
             cand overrides 'overrides'
+            cand smells 'Detect code smells from source files'
+            cand refactoring 'Recommend refactoring techniques based on detected smells'
+            cand branch-diff 'Compare two git branches for a project/repository'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;analyze;callers'= {
@@ -282,6 +345,35 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand -h 'Print help (see more with ''--help'')'
             cand --help 'Print help (see more with ''--help'')'
         }
+        &'cortex;analyze;smells'= {
+            cand --min-severity 'Minimum severity to report (info, warning, error, critical)'
+            cand --max-files 'Maximum number of files to scan'
+            cand --limit 'Maximum number of findings to return'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;analyze;refactoring'= {
+            cand --min-severity 'Minimum smell severity to consider (info, warning, error, critical)'
+            cand --max-files 'Maximum number of files to scan'
+            cand --limit 'Maximum number of recommendations to return'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;analyze;branch-diff'= {
+            cand --path 'Repository path (optional, uses current project or cwd)'
+            cand --commit-limit 'Maximum number of ahead/behind commits returned per side'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
         &'cortex;analyze;help'= {
             cand callers 'callers'
             cand callees 'callees'
@@ -291,6 +383,9 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand dead-code 'dead-code'
             cand complexity 'complexity'
             cand overrides 'overrides'
+            cand smells 'Detect code smells from source files'
+            cand refactoring 'Recommend refactoring techniques based on detected smells'
+            cand branch-diff 'Compare two git branches for a project/repository'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;analyze;help;callers'= {
@@ -308,6 +403,12 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;analyze;help;complexity'= {
         }
         &'cortex;analyze;help;overrides'= {
+        }
+        &'cortex;analyze;help;smells'= {
+        }
+        &'cortex;analyze;help;refactoring'= {
+        }
+        &'cortex;analyze;help;branch-diff'= {
         }
         &'cortex;analyze;help;help'= {
         }
@@ -671,6 +772,10 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand current 'Get the current active project'
             cand branches 'List branches for a project'
             cand refresh 'Refresh Git info for a project'
+            cand status 'Show project indexing freshness/health status'
+            cand sync 'Sync project state: refresh -> detect switch -> index/queue -> cleanup'
+            cand policy 'Project branch/indexing policy controls'
+            cand metrics 'Show daemon/project metrics snapshot'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;project;list'= {
@@ -681,8 +786,9 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand --help 'Print help (see more with ''--help'')'
         }
         &'cortex;project;add'= {
-            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand --track-branch 'Whether to track branch changes'
+            cand --auto-index 'Automatically index checked-out branch after adding'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
             cand -h 'Print help (see more with ''--help'')'
@@ -697,6 +803,7 @@ set edit:completion:arg-completer[cortex] = {|@words|
         }
         &'cortex;project;set'= {
             cand --branch 'Branch to use (optional, defaults to current)'
+            cand --auto-index 'Automatically index checked-out branch after switching context'
             cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
@@ -720,6 +827,74 @@ set edit:completion:arg-completer[cortex] = {|@words|
         }
         &'cortex;project;refresh'= {
             cand --path 'Path to the project (optional, uses current)'
+            cand --auto-index 'Automatically index when a branch switch is detected'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;status'= {
+            cand --path 'Path to the project (optional, uses current)'
+            cand --include-queue 'Include daemon queue details for this project'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;sync'= {
+            cand --path 'Path to the project (optional, uses current)'
+            cand --cleanup-old-branches 'Cleanup old branch indexes after sync'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand --force 'Force full indexing when syncing'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;policy'= {
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+            cand show 'Show current project policy'
+            cand set 'Update project policy fields'
+            cand help 'Print this message or the help of the given subcommand(s)'
+        }
+        &'cortex;project;policy;show'= {
+            cand --path 'Path to the project (optional, uses current)'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;policy;set'= {
+            cand --path 'Path to the project (optional, uses current)'
+            cand --index-only 'Branch allowlist for indexing (repeatable). Empty keeps current value'
+            cand --exclude-pattern 'Exclude patterns for indexing (repeatable)'
+            cand --max-parallel-index-jobs 'Maximum parallel daemon index jobs for this project'
+            cand --format 'Output format (format, json-pretty, yaml, table)'
+            cand -v 'v'
+            cand --verbose 'verbose'
+            cand -h 'Print help (see more with ''--help'')'
+            cand --help 'Print help (see more with ''--help'')'
+        }
+        &'cortex;project;policy;help'= {
+            cand show 'Show current project policy'
+            cand set 'Update project policy fields'
+            cand help 'Print this message or the help of the given subcommand(s)'
+        }
+        &'cortex;project;policy;help;show'= {
+        }
+        &'cortex;project;policy;help;set'= {
+        }
+        &'cortex;project;policy;help;help'= {
+        }
+        &'cortex;project;metrics'= {
+            cand --path 'Path to the project (optional, uses current)'
             cand --format 'Output format (format, json-pretty, yaml, table)'
             cand -v 'v'
             cand --verbose 'verbose'
@@ -734,6 +909,10 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand current 'Get the current active project'
             cand branches 'List branches for a project'
             cand refresh 'Refresh Git info for a project'
+            cand status 'Show project indexing freshness/health status'
+            cand sync 'Sync project state: refresh -> detect switch -> index/queue -> cleanup'
+            cand policy 'Project branch/indexing policy controls'
+            cand metrics 'Show daemon/project metrics snapshot'
             cand help 'Print this message or the help of the given subcommand(s)'
         }
         &'cortex;project;help;list'= {
@@ -749,6 +928,20 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;project;help;branches'= {
         }
         &'cortex;project;help;refresh'= {
+        }
+        &'cortex;project;help;status'= {
+        }
+        &'cortex;project;help;sync'= {
+        }
+        &'cortex;project;help;policy'= {
+            cand show 'Show current project policy'
+            cand set 'Update project policy fields'
+        }
+        &'cortex;project;help;policy;show'= {
+        }
+        &'cortex;project;help;policy;set'= {
+        }
+        &'cortex;project;help;metrics'= {
         }
         &'cortex;project;help;help'= {
         }
@@ -794,6 +987,7 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;help'= {
             cand setup 'setup'
             cand doctor 'doctor'
+            cand daemon 'daemon'
             cand mcp 'mcp'
             cand index 'index'
             cand watch 'watch'
@@ -828,6 +1022,20 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;help;setup'= {
         }
         &'cortex;help;doctor'= {
+        }
+        &'cortex;help;daemon'= {
+            cand start 'Start daemon in background'
+            cand stop 'Stop daemon process'
+            cand status 'Show daemon runtime status'
+            cand run 'Run daemon foreground loop (internal)'
+        }
+        &'cortex;help;daemon;start'= {
+        }
+        &'cortex;help;daemon;stop'= {
+        }
+        &'cortex;help;daemon;status'= {
+        }
+        &'cortex;help;daemon;run'= {
         }
         &'cortex;help;mcp'= {
             cand start 'start'
@@ -872,6 +1080,9 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand dead-code 'dead-code'
             cand complexity 'complexity'
             cand overrides 'overrides'
+            cand smells 'Detect code smells from source files'
+            cand refactoring 'Recommend refactoring techniques based on detected smells'
+            cand branch-diff 'Compare two git branches for a project/repository'
         }
         &'cortex;help;analyze;callers'= {
         }
@@ -888,6 +1099,12 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;help;analyze;complexity'= {
         }
         &'cortex;help;analyze;overrides'= {
+        }
+        &'cortex;help;analyze;smells'= {
+        }
+        &'cortex;help;analyze;refactoring'= {
+        }
+        &'cortex;help;analyze;branch-diff'= {
         }
         &'cortex;help;bundle'= {
             cand export 'export'
@@ -981,6 +1198,10 @@ set edit:completion:arg-completer[cortex] = {|@words|
             cand current 'Get the current active project'
             cand branches 'List branches for a project'
             cand refresh 'Refresh Git info for a project'
+            cand status 'Show project indexing freshness/health status'
+            cand sync 'Sync project state: refresh -> detect switch -> index/queue -> cleanup'
+            cand policy 'Project branch/indexing policy controls'
+            cand metrics 'Show daemon/project metrics snapshot'
         }
         &'cortex;help;project;list'= {
         }
@@ -995,6 +1216,20 @@ set edit:completion:arg-completer[cortex] = {|@words|
         &'cortex;help;project;branches'= {
         }
         &'cortex;help;project;refresh'= {
+        }
+        &'cortex;help;project;status'= {
+        }
+        &'cortex;help;project;sync'= {
+        }
+        &'cortex;help;project;policy'= {
+            cand show 'Show current project policy'
+            cand set 'Update project policy fields'
+        }
+        &'cortex;help;project;policy;show'= {
+        }
+        &'cortex;help;project;policy;set'= {
+        }
+        &'cortex;help;project;metrics'= {
         }
         &'cortex;help;skeleton'= {
         }

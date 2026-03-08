@@ -39,6 +39,9 @@ pub struct MetricsRegistry {
     /// Indexing metrics
     files_indexed: AtomicU64,
     bytes_processed: AtomicU64,
+    vector_embeddings_generated: AtomicU64,
+    vector_indexed_documents: AtomicU64,
+    vector_fallbacks: AtomicU64,
     /// Start time for uptime calculation
     start_time: Instant,
 }
@@ -127,6 +130,9 @@ impl MetricsRegistry {
             total_requests: AtomicU64::new(0),
             files_indexed: AtomicU64::new(0),
             bytes_processed: AtomicU64::new(0),
+            vector_embeddings_generated: AtomicU64::new(0),
+            vector_indexed_documents: AtomicU64::new(0),
+            vector_fallbacks: AtomicU64::new(0),
             start_time: Instant::now(),
         }
     }
@@ -186,6 +192,23 @@ impl MetricsRegistry {
         self.bytes_processed.fetch_add(bytes, Ordering::Relaxed);
     }
 
+    /// Record generated embeddings count.
+    pub fn record_embeddings_generated(&self, count: u64) {
+        self.vector_embeddings_generated
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Record indexed vector documents count.
+    pub fn record_vector_documents_indexed(&self, count: u64) {
+        self.vector_indexed_documents
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Record fallback from semantic to lexical retrieval.
+    pub fn record_vector_fallback(&self) {
+        self.vector_fallbacks.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Get current metrics snapshot
     pub fn snapshot(&self) -> MetricsSnapshot {
         let tool_invocations: HashMap<String, u64> = self
@@ -228,6 +251,9 @@ impl MetricsRegistry {
             cache_misses: self.cache_misses.load(Ordering::Relaxed),
             files_indexed: self.files_indexed.load(Ordering::Relaxed),
             bytes_processed: self.bytes_processed.load(Ordering::Relaxed),
+            vector_embeddings_generated: self.vector_embeddings_generated.load(Ordering::Relaxed),
+            vector_indexed_documents: self.vector_indexed_documents.load(Ordering::Relaxed),
+            vector_fallbacks: self.vector_fallbacks.load(Ordering::Relaxed),
             tool_invocations,
             tool_latencies,
             error_counts,
@@ -277,6 +303,31 @@ impl MetricsRegistry {
         output.push_str(&format!(
             "cortex_files_indexed_total {}\n",
             snapshot.files_indexed
+        ));
+
+        output.push_str(
+            "\n# HELP cortex_vector_embeddings_generated_total Embeddings generated count\n",
+        );
+        output.push_str("# TYPE cortex_vector_embeddings_generated_total counter\n");
+        output.push_str(&format!(
+            "cortex_vector_embeddings_generated_total {}\n",
+            snapshot.vector_embeddings_generated
+        ));
+
+        output.push_str(
+            "\n# HELP cortex_vector_documents_indexed_total Vector documents indexed count\n",
+        );
+        output.push_str("# TYPE cortex_vector_documents_indexed_total counter\n");
+        output.push_str(&format!(
+            "cortex_vector_documents_indexed_total {}\n",
+            snapshot.vector_indexed_documents
+        ));
+
+        output.push_str("\n# HELP cortex_vector_fallbacks_total Semantic fallback events count\n");
+        output.push_str("# TYPE cortex_vector_fallbacks_total counter\n");
+        output.push_str(&format!(
+            "cortex_vector_fallbacks_total {}\n",
+            snapshot.vector_fallbacks
         ));
 
         // Tool invocations
@@ -331,6 +382,9 @@ pub struct MetricsSnapshot {
     pub cache_misses: u64,
     pub files_indexed: u64,
     pub bytes_processed: u64,
+    pub vector_embeddings_generated: u64,
+    pub vector_indexed_documents: u64,
+    pub vector_fallbacks: u64,
     pub tool_invocations: HashMap<String, u64>,
     pub tool_latencies: HashMap<String, LatencySnapshot>,
     pub error_counts: HashMap<String, u64>,

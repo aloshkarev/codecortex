@@ -1,0 +1,10 @@
+{
+  "context_servers": {
+    "codecortex": {
+      "source": "custom",
+      "command": "cortex",
+      "args": ["mcp", "start"],
+      "env": {}
+    }
+  }
+}

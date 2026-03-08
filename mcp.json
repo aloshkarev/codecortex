@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "codecortex": {
+      "args": [
+        "mcp",
+        "start"
+      ],
+      "command": "/Users/alex/.local/bin/cortex",
+      "cwd": "/Users/alex/Projects/open/codecortex"
+    }
+  }
+}

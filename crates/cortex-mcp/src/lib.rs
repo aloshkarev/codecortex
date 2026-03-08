@@ -95,6 +95,7 @@ mod project_tools;
 pub mod quality;
 mod telemetry;
 mod tfidf;
+mod vector_service;
 
 pub use cache::{CacheHierarchy, CacheStats, L1Cache, L2Cache};
 pub use capsule::{
@@ -125,6 +126,7 @@ pub use quality::{
 };
 pub use telemetry::{TelemetryCollector, TelemetryRegistry, ToolTelemetry};
 pub use tfidf::{Document, TfIdfScorer, tokenize};
+pub use vector_service::{VectorIndexResult, VectorService};
 
 /// Names of all tools this server exposes.
 pub fn tool_names() -> &'static [&'static str] {
@@ -152,6 +154,12 @@ pub fn tool_names() -> &'static [&'static str] {
         "execute_cypher_query",
         "find_dead_code",
         "calculate_cyclomatic_complexity",
+        "vector_index_repository",
+        "vector_index_file",
+        "vector_search",
+        "vector_search_hybrid",
+        "vector_index_status",
+        "vector_delete_repository",
         "list_indexed_repositories",
         "delete_repository",
         "check_job_status",
@@ -197,5 +205,14 @@ mod tests {
             tools.contains(&"get_context_capsule"),
             "get_context_capsule must be in tool_names (used by handler and docs)"
         );
+    }
+
+    #[test]
+    fn tool_names_include_vector_tools() {
+        let tools = tool_names();
+        assert!(tools.contains(&"vector_index_repository"));
+        assert!(tools.contains(&"vector_search"));
+        assert!(tools.contains(&"vector_search_hybrid"));
+        assert!(tools.contains(&"vector_index_status"));
     }
 }

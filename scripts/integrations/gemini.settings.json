@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "codecortex": {
+      "command": "cortex",
+      "args": ["mcp", "start"],
+      "env": {}
+    }
+  }
+}

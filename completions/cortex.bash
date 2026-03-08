@@ -34,6 +34,9 @@ _cortex() {
             cortex,config)
                 cmd="cortex__config"
                 ;;
+            cortex,daemon)
+                cmd="cortex__daemon"
+                ;;
             cortex,debug)
                 cmd="cortex__debug"
                 ;;
@@ -112,6 +115,9 @@ _cortex() {
             cortex,watch)
                 cmd="cortex__watch"
                 ;;
+            cortex__analyze,branch-diff)
+                cmd="cortex__analyze__branch__diff"
+                ;;
             cortex__analyze,callees)
                 cmd="cortex__analyze__callees"
                 ;;
@@ -139,6 +145,15 @@ _cortex() {
             cortex__analyze,overrides)
                 cmd="cortex__analyze__overrides"
                 ;;
+            cortex__analyze,refactoring)
+                cmd="cortex__analyze__refactoring"
+                ;;
+            cortex__analyze,smells)
+                cmd="cortex__analyze__smells"
+                ;;
+            cortex__analyze__help,branch-diff)
+                cmd="cortex__analyze__help__branch__diff"
+                ;;
             cortex__analyze__help,callees)
                 cmd="cortex__analyze__help__callees"
                 ;;
@@ -165,6 +180,12 @@ _cortex() {
                 ;;
             cortex__analyze__help,overrides)
                 cmd="cortex__analyze__help__overrides"
+                ;;
+            cortex__analyze__help,refactoring)
+                cmd="cortex__analyze__help__refactoring"
+                ;;
+            cortex__analyze__help,smells)
+                cmd="cortex__analyze__help__smells"
                 ;;
             cortex__bundle,export)
                 cmd="cortex__bundle__export"
@@ -207,6 +228,36 @@ _cortex() {
                 ;;
             cortex__config__help,show)
                 cmd="cortex__config__help__show"
+                ;;
+            cortex__daemon,help)
+                cmd="cortex__daemon__help"
+                ;;
+            cortex__daemon,run)
+                cmd="cortex__daemon__run"
+                ;;
+            cortex__daemon,start)
+                cmd="cortex__daemon__start"
+                ;;
+            cortex__daemon,status)
+                cmd="cortex__daemon__status"
+                ;;
+            cortex__daemon,stop)
+                cmd="cortex__daemon__stop"
+                ;;
+            cortex__daemon__help,help)
+                cmd="cortex__daemon__help__help"
+                ;;
+            cortex__daemon__help,run)
+                cmd="cortex__daemon__help__run"
+                ;;
+            cortex__daemon__help,start)
+                cmd="cortex__daemon__help__start"
+                ;;
+            cortex__daemon__help,status)
+                cmd="cortex__daemon__help__status"
+                ;;
+            cortex__daemon__help,stop)
+                cmd="cortex__daemon__help__stop"
                 ;;
             cortex__debug,cache)
                 cmd="cortex__debug__cache"
@@ -298,6 +349,9 @@ _cortex() {
             cortex__help,config)
                 cmd="cortex__help__config"
                 ;;
+            cortex__help,daemon)
+                cmd="cortex__help__daemon"
+                ;;
             cortex__help,debug)
                 cmd="cortex__help__debug"
                 ;;
@@ -376,6 +430,9 @@ _cortex() {
             cortex__help,watch)
                 cmd="cortex__help__watch"
                 ;;
+            cortex__help__analyze,branch-diff)
+                cmd="cortex__help__analyze__branch__diff"
+                ;;
             cortex__help__analyze,callees)
                 cmd="cortex__help__analyze__callees"
                 ;;
@@ -400,6 +457,12 @@ _cortex() {
             cortex__help__analyze,overrides)
                 cmd="cortex__help__analyze__overrides"
                 ;;
+            cortex__help__analyze,refactoring)
+                cmd="cortex__help__analyze__refactoring"
+                ;;
+            cortex__help__analyze,smells)
+                cmd="cortex__help__analyze__smells"
+                ;;
             cortex__help__bundle,export)
                 cmd="cortex__help__bundle__export"
                 ;;
@@ -414,6 +477,18 @@ _cortex() {
                 ;;
             cortex__help__config,show)
                 cmd="cortex__help__config__show"
+                ;;
+            cortex__help__daemon,run)
+                cmd="cortex__help__daemon__run"
+                ;;
+            cortex__help__daemon,start)
+                cmd="cortex__help__daemon__start"
+                ;;
+            cortex__help__daemon,status)
+                cmd="cortex__help__daemon__status"
+                ;;
+            cortex__help__daemon,stop)
+                cmd="cortex__help__daemon__stop"
                 ;;
             cortex__help__debug,cache)
                 cmd="cortex__help__debug__cache"
@@ -484,6 +559,12 @@ _cortex() {
             cortex__help__project,list)
                 cmd="cortex__help__project__list"
                 ;;
+            cortex__help__project,metrics)
+                cmd="cortex__help__project__metrics"
+                ;;
+            cortex__help__project,policy)
+                cmd="cortex__help__project__policy"
+                ;;
             cortex__help__project,refresh)
                 cmd="cortex__help__project__refresh"
                 ;;
@@ -492,6 +573,18 @@ _cortex() {
                 ;;
             cortex__help__project,set)
                 cmd="cortex__help__project__set"
+                ;;
+            cortex__help__project,status)
+                cmd="cortex__help__project__status"
+                ;;
+            cortex__help__project,sync)
+                cmd="cortex__help__project__sync"
+                ;;
+            cortex__help__project__policy,set)
+                cmd="cortex__help__project__policy__set"
+                ;;
+            cortex__help__project__policy,show)
+                cmd="cortex__help__project__policy__show"
                 ;;
             cortex__jobs,help)
                 cmd="cortex__jobs__help"
@@ -580,6 +673,12 @@ _cortex() {
             cortex__project,list)
                 cmd="cortex__project__list"
                 ;;
+            cortex__project,metrics)
+                cmd="cortex__project__metrics"
+                ;;
+            cortex__project,policy)
+                cmd="cortex__project__policy"
+                ;;
             cortex__project,refresh)
                 cmd="cortex__project__refresh"
                 ;;
@@ -588,6 +687,12 @@ _cortex() {
                 ;;
             cortex__project,set)
                 cmd="cortex__project__set"
+                ;;
+            cortex__project,status)
+                cmd="cortex__project__status"
+                ;;
+            cortex__project,sync)
+                cmd="cortex__project__sync"
                 ;;
             cortex__project__help,add)
                 cmd="cortex__project__help__add"
@@ -604,6 +709,12 @@ _cortex() {
             cortex__project__help,list)
                 cmd="cortex__project__help__list"
                 ;;
+            cortex__project__help,metrics)
+                cmd="cortex__project__help__metrics"
+                ;;
+            cortex__project__help,policy)
+                cmd="cortex__project__help__policy"
+                ;;
             cortex__project__help,refresh)
                 cmd="cortex__project__help__refresh"
                 ;;
@@ -613,6 +724,36 @@ _cortex() {
             cortex__project__help,set)
                 cmd="cortex__project__help__set"
                 ;;
+            cortex__project__help,status)
+                cmd="cortex__project__help__status"
+                ;;
+            cortex__project__help,sync)
+                cmd="cortex__project__help__sync"
+                ;;
+            cortex__project__help__policy,set)
+                cmd="cortex__project__help__policy__set"
+                ;;
+            cortex__project__help__policy,show)
+                cmd="cortex__project__help__policy__show"
+                ;;
+            cortex__project__policy,help)
+                cmd="cortex__project__policy__help"
+                ;;
+            cortex__project__policy,set)
+                cmd="cortex__project__policy__set"
+                ;;
+            cortex__project__policy,show)
+                cmd="cortex__project__policy__show"
+                ;;
+            cortex__project__policy__help,help)
+                cmd="cortex__project__policy__help__help"
+                ;;
+            cortex__project__policy__help,set)
+                cmd="cortex__project__policy__help__set"
+                ;;
+            cortex__project__policy__help,show)
+                cmd="cortex__project__policy__help__show"
+                ;;
             *)
                 ;;
         esac
@@ -620,7 +761,7 @@ _cortex() {
 
     case "${cmd}" in
         cortex)
-            opts="-v -h -V --format --verbose --help --version setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help"
+            opts="-v -h -V --format --verbose --help --version setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 1 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -638,12 +779,38 @@ _cortex() {
             return 0
             ;;
         cortex__analyze)
-            opts="-v -h --format --verbose --help callers callees chain hierarchy deps dead-code complexity overrides help"
+            opts="-v -h --format --verbose --help callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__analyze__branch__diff)
+            opts="-v -h --path --commit-limit --format --verbose --help <SOURCE> <TARGET>"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --path)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --commit-limit)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 --format)
                     COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
                     return 0
@@ -772,8 +939,22 @@ _cortex() {
             return 0
             ;;
         cortex__analyze__help)
-            opts="callers callees chain hierarchy deps dead-code complexity overrides help"
+            opts="callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__analyze__help__branch__diff)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -911,6 +1092,34 @@ _cortex() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        cortex__analyze__help__refactoring)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__analyze__help__smells)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         cortex__analyze__hierarchy)
             opts="-v -h --format --verbose --help <CLASS>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
@@ -936,6 +1145,66 @@ _cortex() {
                 return 0
             fi
             case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__analyze__refactoring)
+            opts="-v -h --min-severity --max-files --limit --format --verbose --help [PATH]"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --min-severity)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --max-files)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --limit)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__analyze__smells)
+            opts="-v -h --min-severity --max-files --limit --format --verbose --help [PATH]"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --min-severity)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --max-files)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --limit)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 --format)
                     COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
                     return 0
@@ -1244,6 +1513,180 @@ _cortex() {
             return 0
             ;;
         cortex__config__show)
+            opts="-v -h --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon)
+            opts="-v -h --format --verbose --help start stop status run help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__help)
+            opts="start stop status run help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__help__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__help__run)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__help__start)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__help__status)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__help__stop)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__run)
+            opts="-v -h --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__start)
+            opts="-v -h --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__status)
+            opts="-v -h --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__daemon__stop)
             opts="-v -h --format --verbose --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -1740,7 +2183,7 @@ _cortex() {
             return 0
             ;;
         cortex__help)
-            opts="setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help"
+            opts="setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -1754,8 +2197,22 @@ _cortex() {
             return 0
             ;;
         cortex__help__analyze)
-            opts="callers callees chain hierarchy deps dead-code complexity overrides"
+            opts="callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__analyze__branch__diff)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
@@ -1866,6 +2323,34 @@ _cortex() {
             return 0
             ;;
         cortex__help__analyze__overrides)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__analyze__refactoring)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__analyze__smells)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -2006,6 +2491,76 @@ _cortex() {
             return 0
             ;;
         cortex__help__config__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__daemon)
+            opts="start stop status run"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__daemon__run)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__daemon__start)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__daemon__status)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__daemon__stop)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -2482,7 +3037,7 @@ _cortex() {
             return 0
             ;;
         cortex__help__project)
-            opts="list add remove set current branches refresh"
+            opts="list add remove set current branches refresh status sync policy metrics"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -2551,6 +3106,62 @@ _cortex() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        cortex__help__project__metrics)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__project__policy)
+            opts="show set"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__project__policy__set)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__project__policy__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         cortex__help__project__refresh)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
@@ -2580,6 +3191,34 @@ _cortex() {
             return 0
             ;;
         cortex__help__project__set)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__project__status)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__help__project__sync)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -2770,12 +3409,20 @@ _cortex() {
             return 0
             ;;
         cortex__index)
-            opts="-v -h --force --format --verbose --help <PATH>"
+            opts="-v -h --force --mode --base-branch --format --verbose --help <PATH>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --mode)
+                    COMPREPLY=($(compgen -W "full incremental-diff" -- "${cur}"))
+                    return 0
+                    ;;
+                --base-branch)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
                 --format)
                     COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
                     return 0
@@ -3292,7 +3939,7 @@ _cortex() {
             return 0
             ;;
         cortex__project)
-            opts="-v -h --format --verbose --help list add remove set current branches refresh help"
+            opts="-v -h --format --verbose --help list add remove set current branches refresh status sync policy metrics help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 2 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3310,12 +3957,20 @@ _cortex() {
             return 0
             ;;
         cortex__project__add)
-            opts="-v -h --track-branch --format --verbose --help <PATH>"
+            opts="-v -h --track-branch --auto-index --format --verbose --help <PATH>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
             fi
             case "${prev}" in
+                --track-branch)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
+                    return 0
+                    ;;
+                --auto-index)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
+                    return 0
+                    ;;
                 --format)
                     COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
                     return 0
@@ -3368,7 +4023,7 @@ _cortex() {
             return 0
             ;;
         cortex__project__help)
-            opts="list add remove set current branches refresh help"
+            opts="list add remove set current branches refresh status sync policy metrics help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3451,6 +4106,62 @@ _cortex() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        cortex__project__help__metrics)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__help__policy)
+            opts="show set"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__help__policy__set)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__help__policy__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         cortex__project__help__refresh)
             opts=""
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
@@ -3493,6 +4204,34 @@ _cortex() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
+        cortex__project__help__status)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__help__sync)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
         cortex__project__list)
             opts="-v -h --format --verbose --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
@@ -3511,7 +4250,7 @@ _cortex() {
             COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
             return 0
             ;;
-        cortex__project__refresh)
+        cortex__project__metrics)
             opts="-v -h --path --format --verbose --help"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
@@ -3520,6 +4259,162 @@ _cortex() {
             case "${prev}" in
                 --path)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__policy)
+            opts="-v -h --format --verbose --help show set help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__policy__help)
+            opts="show set help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__policy__help__help)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__policy__help__set)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__policy__help__show)
+            opts=""
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 5 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__policy__set)
+            opts="-v -h --path --index-only --exclude-pattern --max-parallel-index-jobs --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --path)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --index-only)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --exclude-pattern)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --max-parallel-index-jobs)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__policy__show)
+            opts="-v -h --path --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 4 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --path)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__refresh)
+            opts="-v -h --path --auto-index --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --path)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --auto-index)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
                     return 0
                     ;;
                 --format)
@@ -3552,7 +4447,7 @@ _cortex() {
             return 0
             ;;
         cortex__project__set)
-            opts="-v -h --branch --format --verbose --help <PATH>"
+            opts="-v -h --branch --auto-index --format --verbose --help <PATH>"
             if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
                 COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
                 return 0
@@ -3560,6 +4455,62 @@ _cortex() {
             case "${prev}" in
                 --branch)
                     COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --auto-index)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__status)
+            opts="-v -h --path --include-queue --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --path)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --include-queue)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
+                    return 0
+                    ;;
+                --format)
+                    COMPREPLY=($(compgen -W "json json-pretty yaml table" -- "${cur}"))
+                    return 0
+                    ;;
+                *)
+                    COMPREPLY=()
+                    ;;
+            esac
+            COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+            return 0
+            ;;
+        cortex__project__sync)
+            opts="-v -h --path --force --cleanup-old-branches --format --verbose --help"
+            if [[ ${cur} == -* || ${COMP_CWORD} -eq 3 ]] ; then
+                COMPREPLY=( $(compgen -W "${opts}" -- "${cur}") )
+                return 0
+            fi
+            case "${prev}" in
+                --path)
+                    COMPREPLY=($(compgen -f "${cur}"))
+                    return 0
+                    ;;
+                --cleanup-old-branches)
+                    COMPREPLY=($(compgen -W "true false" -- "${cur}"))
                     return 0
                     ;;
                 --format)

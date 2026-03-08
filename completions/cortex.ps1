@@ -30,6 +30,7 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('--version', '--version', [CompletionResultType]::ParameterName, 'Print version')
             [CompletionResult]::new('setup', 'setup', [CompletionResultType]::ParameterValue, 'setup')
             [CompletionResult]::new('doctor', 'doctor', [CompletionResultType]::ParameterValue, 'doctor')
+            [CompletionResult]::new('daemon', 'daemon', [CompletionResultType]::ParameterValue, 'daemon')
             [CompletionResult]::new('mcp', 'mcp', [CompletionResultType]::ParameterValue, 'mcp')
             [CompletionResult]::new('index', 'index', [CompletionResultType]::ParameterValue, 'index')
             [CompletionResult]::new('watch', 'watch', [CompletionResultType]::ParameterValue, 'watch')
@@ -78,6 +79,74 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'cortex;daemon' {
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('start', 'start', [CompletionResultType]::ParameterValue, 'Start daemon in background')
+            [CompletionResult]::new('stop', 'stop', [CompletionResultType]::ParameterValue, 'Stop daemon process')
+            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show daemon runtime status')
+            [CompletionResult]::new('run', 'run', [CompletionResultType]::ParameterValue, 'Run daemon foreground loop (internal)')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'cortex;daemon;start' {
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;daemon;stop' {
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;daemon;status' {
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;daemon;run' {
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;daemon;help' {
+            [CompletionResult]::new('start', 'start', [CompletionResultType]::ParameterValue, 'Start daemon in background')
+            [CompletionResult]::new('stop', 'stop', [CompletionResultType]::ParameterValue, 'Stop daemon process')
+            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show daemon runtime status')
+            [CompletionResult]::new('run', 'run', [CompletionResultType]::ParameterValue, 'Run daemon foreground loop (internal)')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'cortex;daemon;help;start' {
+            break
+        }
+        'cortex;daemon;help;stop' {
+            break
+        }
+        'cortex;daemon;help;status' {
+            break
+        }
+        'cortex;daemon;help;run' {
+            break
+        }
+        'cortex;daemon;help;help' {
+            break
+        }
         'cortex;mcp' {
             [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
@@ -121,6 +190,8 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             break
         }
         'cortex;index' {
+            [CompletionResult]::new('--mode', '--mode', [CompletionResultType]::ParameterName, 'Indexing mode')
+            [CompletionResult]::new('--base-branch', '--base-branch', [CompletionResultType]::ParameterName, 'Base branch to use for incremental-diff mode')
             [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
             [CompletionResult]::new('--force', '--force', [CompletionResultType]::ParameterName, 'force')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
@@ -253,6 +324,9 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('dead-code', 'dead-code', [CompletionResultType]::ParameterValue, 'dead-code')
             [CompletionResult]::new('complexity', 'complexity', [CompletionResultType]::ParameterValue, 'complexity')
             [CompletionResult]::new('overrides', 'overrides', [CompletionResultType]::ParameterValue, 'overrides')
+            [CompletionResult]::new('smells', 'smells', [CompletionResultType]::ParameterValue, 'Detect code smells from source files')
+            [CompletionResult]::new('refactoring', 'refactoring', [CompletionResultType]::ParameterValue, 'Recommend refactoring techniques based on detected smells')
+            [CompletionResult]::new('branch-diff', 'branch-diff', [CompletionResultType]::ParameterValue, 'Compare two git branches for a project/repository')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -322,6 +396,38 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
             break
         }
+        'cortex;analyze;smells' {
+            [CompletionResult]::new('--min-severity', '--min-severity', [CompletionResultType]::ParameterName, 'Minimum severity to report (info, warning, error, critical)')
+            [CompletionResult]::new('--max-files', '--max-files', [CompletionResultType]::ParameterName, 'Maximum number of files to scan')
+            [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Maximum number of findings to return')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;analyze;refactoring' {
+            [CompletionResult]::new('--min-severity', '--min-severity', [CompletionResultType]::ParameterName, 'Minimum smell severity to consider (info, warning, error, critical)')
+            [CompletionResult]::new('--max-files', '--max-files', [CompletionResultType]::ParameterName, 'Maximum number of files to scan')
+            [CompletionResult]::new('--limit', '--limit', [CompletionResultType]::ParameterName, 'Maximum number of recommendations to return')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;analyze;branch-diff' {
+            [CompletionResult]::new('--path', '--path', [CompletionResultType]::ParameterName, 'Repository path (optional, uses current project or cwd)')
+            [CompletionResult]::new('--commit-limit', '--commit-limit', [CompletionResultType]::ParameterName, 'Maximum number of ahead/behind commits returned per side')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
         'cortex;analyze;help' {
             [CompletionResult]::new('callers', 'callers', [CompletionResultType]::ParameterValue, 'callers')
             [CompletionResult]::new('callees', 'callees', [CompletionResultType]::ParameterValue, 'callees')
@@ -331,6 +437,9 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('dead-code', 'dead-code', [CompletionResultType]::ParameterValue, 'dead-code')
             [CompletionResult]::new('complexity', 'complexity', [CompletionResultType]::ParameterValue, 'complexity')
             [CompletionResult]::new('overrides', 'overrides', [CompletionResultType]::ParameterValue, 'overrides')
+            [CompletionResult]::new('smells', 'smells', [CompletionResultType]::ParameterValue, 'Detect code smells from source files')
+            [CompletionResult]::new('refactoring', 'refactoring', [CompletionResultType]::ParameterValue, 'Recommend refactoring techniques based on detected smells')
+            [CompletionResult]::new('branch-diff', 'branch-diff', [CompletionResultType]::ParameterValue, 'Compare two git branches for a project/repository')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -356,6 +465,15 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             break
         }
         'cortex;analyze;help;overrides' {
+            break
+        }
+        'cortex;analyze;help;smells' {
+            break
+        }
+        'cortex;analyze;help;refactoring' {
+            break
+        }
+        'cortex;analyze;help;branch-diff' {
             break
         }
         'cortex;analyze;help;help' {
@@ -781,6 +899,10 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('current', 'current', [CompletionResultType]::ParameterValue, 'Get the current active project')
             [CompletionResult]::new('branches', 'branches', [CompletionResultType]::ParameterValue, 'List branches for a project')
             [CompletionResult]::new('refresh', 'refresh', [CompletionResultType]::ParameterValue, 'Refresh Git info for a project')
+            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show project indexing freshness/health status')
+            [CompletionResult]::new('sync', 'sync', [CompletionResultType]::ParameterValue, 'Sync project state: refresh -> detect switch -> index/queue -> cleanup')
+            [CompletionResult]::new('policy', 'policy', [CompletionResultType]::ParameterValue, 'Project branch/indexing policy controls')
+            [CompletionResult]::new('metrics', 'metrics', [CompletionResultType]::ParameterValue, 'Show daemon/project metrics snapshot')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -793,8 +915,9 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             break
         }
         'cortex;project;add' {
-            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
             [CompletionResult]::new('--track-branch', '--track-branch', [CompletionResultType]::ParameterName, 'Whether to track branch changes')
+            [CompletionResult]::new('--auto-index', '--auto-index', [CompletionResultType]::ParameterName, 'Automatically index checked-out branch after adding')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
             [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
             [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
@@ -811,6 +934,7 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
         }
         'cortex;project;set' {
             [CompletionResult]::new('--branch', '--branch', [CompletionResultType]::ParameterName, 'Branch to use (optional, defaults to current)')
+            [CompletionResult]::new('--auto-index', '--auto-index', [CompletionResultType]::ParameterName, 'Automatically index checked-out branch after switching context')
             [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
             [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
@@ -837,6 +961,84 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
         }
         'cortex;project;refresh' {
             [CompletionResult]::new('--path', '--path', [CompletionResultType]::ParameterName, 'Path to the project (optional, uses current)')
+            [CompletionResult]::new('--auto-index', '--auto-index', [CompletionResultType]::ParameterName, 'Automatically index when a branch switch is detected')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;project;status' {
+            [CompletionResult]::new('--path', '--path', [CompletionResultType]::ParameterName, 'Path to the project (optional, uses current)')
+            [CompletionResult]::new('--include-queue', '--include-queue', [CompletionResultType]::ParameterName, 'Include daemon queue details for this project')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;project;sync' {
+            [CompletionResult]::new('--path', '--path', [CompletionResultType]::ParameterName, 'Path to the project (optional, uses current)')
+            [CompletionResult]::new('--cleanup-old-branches', '--cleanup-old-branches', [CompletionResultType]::ParameterName, 'Cleanup old branch indexes after sync')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('--force', '--force', [CompletionResultType]::ParameterName, 'Force full indexing when syncing')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;project;policy' {
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('show', 'show', [CompletionResultType]::ParameterValue, 'Show current project policy')
+            [CompletionResult]::new('set', 'set', [CompletionResultType]::ParameterValue, 'Update project policy fields')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'cortex;project;policy;show' {
+            [CompletionResult]::new('--path', '--path', [CompletionResultType]::ParameterName, 'Path to the project (optional, uses current)')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;project;policy;set' {
+            [CompletionResult]::new('--path', '--path', [CompletionResultType]::ParameterName, 'Path to the project (optional, uses current)')
+            [CompletionResult]::new('--index-only', '--index-only', [CompletionResultType]::ParameterName, 'Branch allowlist for indexing (repeatable). Empty keeps current value')
+            [CompletionResult]::new('--exclude-pattern', '--exclude-pattern', [CompletionResultType]::ParameterName, 'Exclude patterns for indexing (repeatable)')
+            [CompletionResult]::new('--max-parallel-index-jobs', '--max-parallel-index-jobs', [CompletionResultType]::ParameterName, 'Maximum parallel daemon index jobs for this project')
+            [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
+            [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
+            [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
+            [CompletionResult]::new('-h', '-h', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            [CompletionResult]::new('--help', '--help', [CompletionResultType]::ParameterName, 'Print help (see more with ''--help'')')
+            break
+        }
+        'cortex;project;policy;help' {
+            [CompletionResult]::new('show', 'show', [CompletionResultType]::ParameterValue, 'Show current project policy')
+            [CompletionResult]::new('set', 'set', [CompletionResultType]::ParameterValue, 'Update project policy fields')
+            [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
+            break
+        }
+        'cortex;project;policy;help;show' {
+            break
+        }
+        'cortex;project;policy;help;set' {
+            break
+        }
+        'cortex;project;policy;help;help' {
+            break
+        }
+        'cortex;project;metrics' {
+            [CompletionResult]::new('--path', '--path', [CompletionResultType]::ParameterName, 'Path to the project (optional, uses current)')
             [CompletionResult]::new('--format', '--format', [CompletionResultType]::ParameterName, 'Output format (format, json-pretty, yaml, table)')
             [CompletionResult]::new('-v', '-v', [CompletionResultType]::ParameterName, 'v')
             [CompletionResult]::new('--verbose', '--verbose', [CompletionResultType]::ParameterName, 'verbose')
@@ -852,6 +1054,10 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('current', 'current', [CompletionResultType]::ParameterValue, 'Get the current active project')
             [CompletionResult]::new('branches', 'branches', [CompletionResultType]::ParameterValue, 'List branches for a project')
             [CompletionResult]::new('refresh', 'refresh', [CompletionResultType]::ParameterValue, 'Refresh Git info for a project')
+            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show project indexing freshness/health status')
+            [CompletionResult]::new('sync', 'sync', [CompletionResultType]::ParameterValue, 'Sync project state: refresh -> detect switch -> index/queue -> cleanup')
+            [CompletionResult]::new('policy', 'policy', [CompletionResultType]::ParameterValue, 'Project branch/indexing policy controls')
+            [CompletionResult]::new('metrics', 'metrics', [CompletionResultType]::ParameterValue, 'Show daemon/project metrics snapshot')
             [CompletionResult]::new('help', 'help', [CompletionResultType]::ParameterValue, 'Print this message or the help of the given subcommand(s)')
             break
         }
@@ -874,6 +1080,26 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             break
         }
         'cortex;project;help;refresh' {
+            break
+        }
+        'cortex;project;help;status' {
+            break
+        }
+        'cortex;project;help;sync' {
+            break
+        }
+        'cortex;project;help;policy' {
+            [CompletionResult]::new('show', 'show', [CompletionResultType]::ParameterValue, 'Show current project policy')
+            [CompletionResult]::new('set', 'set', [CompletionResultType]::ParameterValue, 'Update project policy fields')
+            break
+        }
+        'cortex;project;help;policy;show' {
+            break
+        }
+        'cortex;project;help;policy;set' {
+            break
+        }
+        'cortex;project;help;metrics' {
             break
         }
         'cortex;project;help;help' {
@@ -925,6 +1151,7 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
         'cortex;help' {
             [CompletionResult]::new('setup', 'setup', [CompletionResultType]::ParameterValue, 'setup')
             [CompletionResult]::new('doctor', 'doctor', [CompletionResultType]::ParameterValue, 'doctor')
+            [CompletionResult]::new('daemon', 'daemon', [CompletionResultType]::ParameterValue, 'daemon')
             [CompletionResult]::new('mcp', 'mcp', [CompletionResultType]::ParameterValue, 'mcp')
             [CompletionResult]::new('index', 'index', [CompletionResultType]::ParameterValue, 'index')
             [CompletionResult]::new('watch', 'watch', [CompletionResultType]::ParameterValue, 'watch')
@@ -961,6 +1188,25 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             break
         }
         'cortex;help;doctor' {
+            break
+        }
+        'cortex;help;daemon' {
+            [CompletionResult]::new('start', 'start', [CompletionResultType]::ParameterValue, 'Start daemon in background')
+            [CompletionResult]::new('stop', 'stop', [CompletionResultType]::ParameterValue, 'Stop daemon process')
+            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show daemon runtime status')
+            [CompletionResult]::new('run', 'run', [CompletionResultType]::ParameterValue, 'Run daemon foreground loop (internal)')
+            break
+        }
+        'cortex;help;daemon;start' {
+            break
+        }
+        'cortex;help;daemon;stop' {
+            break
+        }
+        'cortex;help;daemon;status' {
+            break
+        }
+        'cortex;help;daemon;run' {
             break
         }
         'cortex;help;mcp' {
@@ -1019,6 +1265,9 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('dead-code', 'dead-code', [CompletionResultType]::ParameterValue, 'dead-code')
             [CompletionResult]::new('complexity', 'complexity', [CompletionResultType]::ParameterValue, 'complexity')
             [CompletionResult]::new('overrides', 'overrides', [CompletionResultType]::ParameterValue, 'overrides')
+            [CompletionResult]::new('smells', 'smells', [CompletionResultType]::ParameterValue, 'Detect code smells from source files')
+            [CompletionResult]::new('refactoring', 'refactoring', [CompletionResultType]::ParameterValue, 'Recommend refactoring techniques based on detected smells')
+            [CompletionResult]::new('branch-diff', 'branch-diff', [CompletionResultType]::ParameterValue, 'Compare two git branches for a project/repository')
             break
         }
         'cortex;help;analyze;callers' {
@@ -1043,6 +1292,15 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             break
         }
         'cortex;help;analyze;overrides' {
+            break
+        }
+        'cortex;help;analyze;smells' {
+            break
+        }
+        'cortex;help;analyze;refactoring' {
+            break
+        }
+        'cortex;help;analyze;branch-diff' {
             break
         }
         'cortex;help;bundle' {
@@ -1171,6 +1429,10 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             [CompletionResult]::new('current', 'current', [CompletionResultType]::ParameterValue, 'Get the current active project')
             [CompletionResult]::new('branches', 'branches', [CompletionResultType]::ParameterValue, 'List branches for a project')
             [CompletionResult]::new('refresh', 'refresh', [CompletionResultType]::ParameterValue, 'Refresh Git info for a project')
+            [CompletionResult]::new('status', 'status', [CompletionResultType]::ParameterValue, 'Show project indexing freshness/health status')
+            [CompletionResult]::new('sync', 'sync', [CompletionResultType]::ParameterValue, 'Sync project state: refresh -> detect switch -> index/queue -> cleanup')
+            [CompletionResult]::new('policy', 'policy', [CompletionResultType]::ParameterValue, 'Project branch/indexing policy controls')
+            [CompletionResult]::new('metrics', 'metrics', [CompletionResultType]::ParameterValue, 'Show daemon/project metrics snapshot')
             break
         }
         'cortex;help;project;list' {
@@ -1192,6 +1454,26 @@ Register-ArgumentCompleter -Native -CommandName 'cortex' -ScriptBlock {
             break
         }
         'cortex;help;project;refresh' {
+            break
+        }
+        'cortex;help;project;status' {
+            break
+        }
+        'cortex;help;project;sync' {
+            break
+        }
+        'cortex;help;project;policy' {
+            [CompletionResult]::new('show', 'show', [CompletionResultType]::ParameterValue, 'Show current project policy')
+            [CompletionResult]::new('set', 'set', [CompletionResultType]::ParameterValue, 'Update project policy fields')
+            break
+        }
+        'cortex;help;project;policy;show' {
+            break
+        }
+        'cortex;help;project;policy;set' {
+            break
+        }
+        'cortex;help;project;metrics' {
             break
         }
         'cortex;help;skeleton' {

@@ -1241,6 +1241,7 @@ dependencies = [
  "cortex-vector",
  "cortex-watcher",
  "dialoguer",
+ "dotenvy",
  "glob",
  "indicatif",
  "owo-colors",
@@ -1314,6 +1315,7 @@ dependencies = [
  "cortex-graph",
  "cortex-indexer",
  "cortex-parser",
+ "cortex-vector",
  "cortex-watcher",
  "dashmap",
  "jsonschema",
@@ -2386,6 +2388,12 @@ checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
 ]
+
+[[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "downcast-rs"
@@ -3757,9 +3765,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.44.1"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f98b64a413c93a1b413dfbaf973b78d271648b9cae50b10302ad88af78991672"
+checksum = "6f29616f6e19415398eb186964fb7cbbeef572c79bede3622a8277667924bbe3"
 dependencies = [
  "ahash",
  "bytecount",
@@ -5785,9 +5793,9 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.44.1"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22952642836711d7a730d23a4dfb0d732e75a85e4c4f5704266d9c8fac278ff1"
+checksum = "b8a618c14f8ba29d8193bb55e2bf13e4fb2b1115313ecb7ae94b43100c7ac7d5"
 dependencies = [
  "ahash",
  "fluent-uri",
@@ -5940,9 +5948,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "0.17.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a0ce46f9101dc911f07e1468084c057839d15b08040d110820c5513312ef56a"
+checksum = "d2cb14cb9278a12eae884c9f3c0cfeca2cc28f361211206424a1d7abed95f090"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -5962,9 +5970,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp-macros"
-version = "0.17.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "abad6f5f46e220e3bda2fc90fd1ad64c1c2a2bd716d52c845eb5c9c64cda7542"
+checksum = "6a02ea81d9482b07e1fe156ac7cf98b6823d51fb84531936a5e1cbb4eec31ad5"
 dependencies = [
  "darling 0.23.0",
  "proc-macro2",

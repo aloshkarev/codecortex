@@ -21,6 +21,7 @@ BIN_DIR="${HOME}/.local/bin"
 CORTEX_BIN="${BIN_DIR}/cortex"
 CONFIG_DIR="${HOME}/.cortex"
 LOG_DIR="${CONFIG_DIR}/logs"
+REPO_URL="https://github.com/aloshkarev/codecortex"
 
 # Detect OS
 get_os() {
@@ -114,12 +115,25 @@ macos_install() {
     <key>RunAtLoad</key>
     <false/>
     <key>KeepAlive</key>
-    <false/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>${BIN_DIR}:/usr/local/bin:/usr/bin:/bin</string>
+        <key>RUST_LOG</key>
+        <string>info</string>
     </dict>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>LegacyTimers</key>
+    <true/>
 </dict>
 </plist>
 EOF
@@ -174,17 +188,28 @@ linux_install() {
     cat | sudo tee "$SYSTEMD_SERVICE" > /dev/null <<EOF
 [Unit]
 Description=CodeCortex MCP Server
-After=network.target memgraph.service docker.service
-Wants=memgraph.service
+Documentation=${REPO_URL}
+After=network.target network-online.target memgraph.service docker.service
+Wants=network-online.target memgraph.service
 
 [Service]
 Type=simple
 User=${USER}
+Group=${USER}
 WorkingDirectory=${HOME}
 ExecStart=${CORTEX_BIN} mcp start
 Restart=on-failure
 RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
 Environment=PATH=${BIN_DIR}:/usr/local/bin:/usr/bin:/bin
+Environment=RUST_LOG=info
+Environment=RUST_BACKTRACE=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cortex-mcp
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

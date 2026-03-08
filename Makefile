@@ -1,4 +1,4 @@
-.PHONY: all build install clean test release run-mcp run-memgraph status help
+.PHONY: all build install clean test release run-mcp run-memgraph status help mcp-bootstrap mcp-smoke
 
 # Directories
 BIN_DIR := $(HOME)/.local/bin
@@ -41,6 +41,22 @@ clean:
 # Start MCP server
 run-mcp:
 	cargo run -p cortex-cli -- mcp start
+
+# Bootstrap index + vector + MCP server for a repo
+mcp-bootstrap:
+	@if [ -z "$(REPO)" ]; then \
+		echo "Usage: make mcp-bootstrap REPO=/path/to/repo"; \
+		exit 1; \
+	fi
+	@./scripts/bootstrap-codecortex-mcp.sh "$(REPO)"
+
+# Quick local MCP readiness check
+mcp-smoke:
+	@echo "Checking CLI health..."
+	@$(CORTEX_BIN) doctor >/dev/null || (echo "doctor failed" && exit 1)
+	@echo "Checking tools list..."
+	@$(CORTEX_BIN) mcp tools >/dev/null || (echo "mcp tools failed" && exit 1)
+	@echo "MCP smoke check passed"
 
 # Start Memgraph with Docker
 run-memgraph:
@@ -101,6 +117,8 @@ help:
 	@echo "  uninstall    Remove installed binary"
 	@echo "  clean        Remove build artifacts"
 	@echo "  run-mcp      Start MCP server"
+	@echo "  mcp-bootstrap Bootstrap index/vector/MCP (REPO=/path)"
+	@echo "  mcp-smoke    Run quick MCP readiness checks"
 	@echo "  run-memgraph Start Memgraph with Docker"
 	@echo "  stop-memgraph Stop Memgraph container"
 	@echo "  status       Show installation status"

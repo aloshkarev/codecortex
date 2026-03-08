@@ -1,21 +1,16 @@
 services:
   memgraph:
     image: memgraph/memgraph:3.8.1
+    container_name: codecortex-memgraph
     ports:
       - "7687:7687"
-      - "7444:7444"
     volumes:
-      - memgraph_data:/var/lib/memgraph
+      - codecortex-memgraph:/var/lib/memgraph
     command:
       - "--also-log-to-stderr=true"
-      - "--query-modules-directory=/usr/lib/memgraph/query_modules"
-
-  memgraph_lab:
-    image: memgraph/lab:latest
-    ports:
-      - "3000:3000"
-    depends_on:
-      - memgraph
+    environment:
+      - MEMGRAPH_USER=memgraph
+      - MEMGRAPH_PASSWORD=memgraph
 
 volumes:
-  memgraph_data:
+  codecortex-memgraph:

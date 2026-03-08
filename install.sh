@@ -17,6 +17,7 @@ set -e
 
 CORTEX_VERSION="1.0.0"
 CORTEX_BIN_NAME="cortex"
+REPO_URL="https://github.com/aloshkarev/codecortex"
 CORTEX_CONFIG_DIR="${HOME}/.cortex"
 CORTEX_BIN_DIR="${HOME}/.local/bin"
 CORTEX_DATA_DIR="${HOME}/.cortex/data"
@@ -259,7 +260,7 @@ install_cortex_binary() {
 
     local os=$(get_os)
     local arch=$(get_arch)
-    local binary_url="https://github.com/codecortex/codecortex/releases/download/v${CORTEX_VERSION}/cortex-${os}-${arch}.tar.gz"
+    local binary_url="${REPO_URL}/releases/download/v${CORTEX_VERSION}/cortex-${os}-${arch}.tar.gz"
 
     # For now, build from source since releases aren't available
     log_warning "Pre-built binaries not yet available"
@@ -731,12 +732,25 @@ setup_launchd_service() {
     <key>RunAtLoad</key>
     <false/>
     <key>KeepAlive</key>
-    <false/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
         <string>${CORTEX_BIN_DIR}:/usr/local/bin:/usr/bin:/bin</string>
+        <key>RUST_LOG</key>
+        <string>info</string>
     </dict>
+    <key>ProcessType</key>
+    <string>Interactive</string>
+    <key>LegacyTimers</key>
+    <true/>
 </dict>
 </plist>
 EOF
@@ -770,17 +784,28 @@ setup_systemd_service() {
     cat | sudo tee "$service_path" > /dev/null <<EOF
 [Unit]
 Description=CodeCortex MCP Server
-After=network.target memgraph.service docker.service
-Wants=memgraph.service
+Documentation=${REPO_URL}
+After=network.target network-online.target memgraph.service docker.service
+Wants=network-online.target memgraph.service
 
 [Service]
 Type=simple
 User=${USER}
+Group=${USER}
 WorkingDirectory=${HOME}
 ExecStart=${cortex_bin} mcp start
 Restart=on-failure
 RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
 Environment=PATH=${CORTEX_BIN_DIR}:/usr/local/bin:/usr/bin:/bin
+Environment=RUST_LOG=info
+Environment=RUST_BACKTRACE=1
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cortex-mcp
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

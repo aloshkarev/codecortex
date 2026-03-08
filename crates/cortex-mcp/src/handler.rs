@@ -1,12 +1,16 @@
 use crate::contracts::{
+    WARNING_EMBEDDER_TIMEOUT, WARNING_FALLBACK_TO_LEXICAL, WARNING_VECTOR_STORE_UNAVAILABLE,
     error as envelope_error, feature_flag_enabled, success as envelope_success,
 };
 use crate::jobs::JobRegistry;
+use crate::metrics::global_metrics;
+use crate::vector_service::{VectorSearchFilters, VectorSearchRequest, VectorService};
 use cortex_analyzer::Analyzer;
 use cortex_core::{CortexConfig, GitOperations, ProjectStatus, SearchKind};
 use cortex_graph::{BundleStore, GraphClient};
 use cortex_indexer::Indexer;
 use cortex_parser::SignatureExtractor;
+use cortex_vector::SearchType;
 use cortex_watcher::{ProjectRegistry, WatchSession};
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
@@ -33,11 +37,58 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub struct IndexPathReq {
     /// Directory or file path to index
     pub path: String,
+    /// Also perform vector indexing for semantic retrieval
+    pub include_vector: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PathReq {
     pub path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VectorIndexRepositoryReq {
+    /// Directory path to index
+    pub path: String,
+    /// Optional repository identifier
+    pub repo_path: Option<String>,
+    /// Optional git branch
+    pub branch: Option<String>,
+    /// Optional source revision
+    pub revision: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VectorIndexFileReq {
+    /// File path to index
+    pub path: String,
+    /// Optional repository identifier
+    pub repo_path: Option<String>,
+    /// Optional git branch
+    pub branch: Option<String>,
+    /// Optional source revision
+    pub revision: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VectorSearchReq {
+    pub query: String,
+    pub k: Option<usize>,
+    pub repo_path: Option<String>,
+    pub path: Option<String>,
+    pub kind: Option<String>,
+    pub language: Option<String>,
+    pub search_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VectorIndexStatusReq {
+    pub repo_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct VectorDeleteRepositoryReq {
+    pub repo_path: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -343,6 +394,8 @@ struct ObservationRecord {
     pub severity: String,
     pub tags: Vec<String>,
     pub source_revision: String,
+    #[serde(default)]
+    pub embedding: Option<Vec<f32>>,
 }
 
 // ── handler ───────────────────────────────────────────────────────────────────
@@ -392,6 +445,7 @@ impl CortexHandler {
         &self,
         Parameters(req): Parameters<IndexPathReq>,
     ) -> Result<CallToolResult, McpError> {
+        let include_vector = req.include_vector.unwrap_or(false);
         let job_id = format!("index-{}", now_millis());
         self.jobs
             .mark_running(&job_id, format!("Indexing {}", req.path));
@@ -404,8 +458,83 @@ impl CortexHandler {
             let outcome = async {
                 let client = GraphClient::connect(&cfg).await?;
                 let indexer = Indexer::new(client, cfg.max_batch_size)?;
-                let report = indexer.index_path(&path).await?;
-                anyhow::Ok(report)
+                let graph_report = indexer.index_path(&path).await?;
+                let mut vector_status = serde_json::json!({
+                    "enabled": include_vector,
+                    "status": "skipped"
+                });
+                if include_vector {
+                    match VectorService::from_env().await {
+                        Ok(service) => {
+                            let (repo_root, branch, revision) =
+                                resolve_git_context_for_path(Path::new(&path)).map_or_else(
+                                    || {
+                                        (
+                                            PathBuf::from(&path),
+                                            "unknown".to_string(),
+                                            "unknown".to_string(),
+                                        )
+                                    },
+                                    |(root, b, rev)| (root, b, rev),
+                                );
+                            let vector_outcome = if Path::new(&path).is_file() {
+                                service
+                                    .index_file(
+                                        Path::new(&path),
+                                        &repo_root.display().to_string(),
+                                        &branch,
+                                        &revision,
+                                    )
+                                    .await
+                            } else {
+                                service
+                                    .index_repository(
+                                        &repo_root,
+                                        &repo_root.display().to_string(),
+                                        &branch,
+                                        &revision,
+                                    )
+                                    .await
+                            };
+                            match vector_outcome {
+                                Ok(indexed) => {
+                                    global_metrics().record_vector_documents_indexed(
+                                        indexed.indexed_documents as u64,
+                                    );
+                                    vector_status = serde_json::json!({
+                                        "enabled": true,
+                                        "status": "completed",
+                                        "indexed_documents": indexed.indexed_documents,
+                                        "scanned_files": indexed.scanned_files,
+                                        "skipped_files": indexed.skipped_files
+                                    });
+                                }
+                                Err(err) => {
+                                    global_metrics().record_vector_fallback();
+                                    vector_status = serde_json::json!({
+                                        "enabled": true,
+                                        "status": "failed",
+                                        "warning": "vector_index_failed",
+                                        "error": err
+                                    });
+                                }
+                            }
+                        }
+                        Err(err) => {
+                            global_metrics().record_vector_fallback();
+                            vector_status = serde_json::json!({
+                                "enabled": true,
+                                "status": "failed",
+                                        "warning": WARNING_VECTOR_STORE_UNAVAILABLE,
+                                "error": err
+                            });
+                        }
+                    }
+                }
+                anyhow::Ok(serde_json::json!({
+                    "graph": graph_report,
+                    "vector": vector_status
+                }))
             }
             .await;
 
@@ -422,7 +551,8 @@ impl CortexHandler {
             serde_json::json!({
                 "job_id": job_id,
                 "state": "running",
-                "path": req.path
+                "path": req.path,
+                "include_vector": include_vector
             })
             .to_string(),
         ))
@@ -600,6 +730,308 @@ impl CortexHandler {
         ))
     }
 
+    #[tool(description = "Index all code files in a repository into vector storage")]
+    async fn vector_index_repository(
+        &self,
+        Parameters(req): Parameters<VectorIndexRepositoryReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.vector.write.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "vector_index_repository is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let root = PathBuf::from(&req.path);
+        if !root.exists() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                format!("path does not exist: {}", req.path),
+                None,
+                started,
+            ));
+        }
+        if !root.is_dir() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                format!(
+                    "vector_index_repository expects a directory path, got file: {}",
+                    req.path
+                ),
+                None,
+                started,
+            ));
+        }
+        let service = match VectorService::from_env().await {
+            Ok(s) => s,
+            Err(err) => {
+                return Ok(envelope_error(
+                    "UNAVAILABLE",
+                    "vector store unavailable",
+                    Some(json!({"warning": WARNING_VECTOR_STORE_UNAVAILABLE, "error": err})),
+                    started,
+                ));
+            }
+        };
+        let repository = req
+            .repo_path
+            .clone()
+            .unwrap_or_else(|| root.display().to_string());
+        let branch = req.branch.clone().unwrap_or_else(|| "unknown".to_string());
+        let revision = req
+            .revision
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let result = service
+            .index_repository(&root, &repository, &branch, &revision)
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        global_metrics().record_vector_documents_indexed(result.indexed_documents as u64);
+        Ok(envelope_success(
+            json!({
+                "repository": repository,
+                "branch": branch,
+                "revision": revision,
+                "indexed_documents": result.indexed_documents,
+                "scanned_files": result.scanned_files,
+                "skipped_files": result.skipped_files
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Index a single file into vector storage")]
+    async fn vector_index_file(
+        &self,
+        Parameters(req): Parameters<VectorIndexFileReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.vector.write.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "vector_index_file is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let file = PathBuf::from(&req.path);
+        if !file.exists() || !file.is_file() {
+            return Ok(envelope_error(
+                "INVALID_ARGUMENT",
+                format!("file does not exist: {}", req.path),
+                None,
+                started,
+            ));
+        }
+        let service = match VectorService::from_env().await {
+            Ok(s) => s,
+            Err(err) => {
+                return Ok(envelope_error(
+                    "UNAVAILABLE",
+                    "vector store unavailable",
+                    Some(json!({"warning": WARNING_VECTOR_STORE_UNAVAILABLE, "error": err})),
+                    started,
+                ));
+            }
+        };
+        let repository = req.repo_path.clone().unwrap_or_else(default_repo_path);
+        let branch = req.branch.clone().unwrap_or_else(|| "unknown".to_string());
+        let revision = req
+            .revision
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let result = service
+            .index_file(&file, &repository, &branch, &revision)
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        global_metrics().record_vector_documents_indexed(result.indexed_documents as u64);
+        Ok(envelope_success(
+            json!({
+                "file": req.path,
+                "repository": repository,
+                "branch": branch,
+                "revision": revision,
+                "indexed_documents": result.indexed_documents,
+                "scanned_files": result.scanned_files,
+                "skipped_files": result.skipped_files
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Search indexed vectors for semantic code matches")]
+    async fn vector_search(
+        &self,
+        Parameters(req): Parameters<VectorSearchReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.vector.read.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "vector_search is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let k = req.k.unwrap_or(20).clamp(1, 200);
+        let search_type = req
+            .search_type
+            .as_deref()
+            .and_then(|s| s.parse::<SearchType>().ok())
+            .unwrap_or(SearchType::Semantic);
+        let service = match VectorService::from_env().await {
+            Ok(s) => s,
+            Err(err) => {
+                return Ok(envelope_error(
+                    "UNAVAILABLE",
+                    "vector store unavailable",
+                    Some(json!({"warning": WARNING_VECTOR_STORE_UNAVAILABLE, "error": err})),
+                    started,
+                ));
+            }
+        };
+        let results = service
+            .search(VectorSearchRequest {
+                query: &req.query,
+                search_type,
+                k,
+                filters: VectorSearchFilters {
+                    repository: req.repo_path.as_deref(),
+                    path: req.path.as_deref(),
+                    kind: req.kind.as_deref(),
+                    language: req.language.as_deref(),
+                },
+            })
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        let output: Vec<_> = results
+            .into_iter()
+            .map(|r| {
+                json!({
+                    "id": r.result.id,
+                    "score": r.combined_score,
+                    "content": r.result.content,
+                    "metadata": r.result.metadata,
+                    "graph_context": r.graph_context
+                })
+            })
+            .collect();
+        Ok(envelope_success(
+            json!({
+                "query": req.query,
+                "search_type": search_type.to_string(),
+                "count": output.len(),
+                "results": output
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Search indexed vectors using hybrid graph-aware mode")]
+    async fn vector_search_hybrid(
+        &self,
+        Parameters(req): Parameters<VectorSearchReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let req = VectorSearchReq {
+            search_type: Some("hybrid".to_string()),
+            ..req
+        };
+        self.vector_search(Parameters(req)).await
+    }
+
+    #[tool(description = "Return vector index health and document counts")]
+    async fn vector_index_status(
+        &self,
+        Parameters(req): Parameters<VectorIndexStatusReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.vector.read.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "vector_index_status is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let service = match VectorService::from_env().await {
+            Ok(s) => s,
+            Err(err) => {
+                return Ok(envelope_error(
+                    "UNAVAILABLE",
+                    "vector store unavailable",
+                    Some(json!({"warning": WARNING_VECTOR_STORE_UNAVAILABLE, "error": err})),
+                    started,
+                ));
+            }
+        };
+        let healthy = service
+            .health_check()
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        let total_documents = service
+            .total_documents()
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        Ok(envelope_success(
+            json!({
+                "healthy": healthy,
+                "total_documents": total_documents,
+                "repo_path": req.repo_path
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
+    #[tool(description = "Delete all vector entries belonging to a repository")]
+    async fn vector_delete_repository(
+        &self,
+        Parameters(req): Parameters<VectorDeleteRepositoryReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let started = Instant::now();
+        if !self.tool_enabled("mcp.vector.write.enabled", true) {
+            return Ok(envelope_error(
+                "UNAVAILABLE",
+                "vector_delete_repository is disabled by feature flag",
+                None,
+                started,
+            ));
+        }
+        let service = match VectorService::from_env().await {
+            Ok(s) => s,
+            Err(err) => {
+                return Ok(envelope_error(
+                    "UNAVAILABLE",
+                    "vector store unavailable",
+                    Some(json!({"warning": WARNING_VECTOR_STORE_UNAVAILABLE, "error": err})),
+                    started,
+                ));
+            }
+        };
+        let deleted = service
+            .delete_repository(&req.repo_path)
+            .await
+            .map_err(|e| McpError::internal_error(e, None))?;
+        Ok(envelope_success(
+            json!({
+                "repo_path": req.repo_path,
+                "deleted_documents": deleted
+            }),
+            started,
+            Vec::new(),
+            false,
+        ))
+    }
+
     #[tool(description = "Build a token-budgeted context capsule with ranking explanations")]
     async fn get_context_capsule(
         &self,
@@ -638,6 +1070,111 @@ impl CortexHandler {
 
         let mut items = Vec::<Value>::new();
         let mut token_estimate = 0usize;
+        let mut warnings = Vec::<String>::new();
+
+        // Vector-first candidate retrieval for better NL relevance.
+        if self.tool_enabled("mcp.vector.read.enabled", true) {
+            match VectorService::from_env().await {
+                Ok(service) => {
+                    match service
+                        .search(VectorSearchRequest {
+                            query: req.query.as_str(),
+                            search_type: SearchType::Hybrid,
+                            k: max_items * 2,
+                            filters: VectorSearchFilters {
+                                repository: req.repo_path.as_deref(),
+                                ..Default::default()
+                            },
+                        })
+                        .await
+                    {
+                        Ok(vector_results) => {
+                            for result in vector_results {
+                                if items.len() >= max_items || token_estimate >= max_tokens {
+                                    break;
+                                }
+                                let metadata = &result.result.metadata;
+                                let path = metadata
+                                    .get("path")
+                                    .and_then(|v| match v {
+                                        cortex_vector::MetadataValue::String(s) => Some(s.as_str()),
+                                        _ => None,
+                                    })
+                                    .unwrap_or_default();
+                                if !include_tests && path.contains("/test") {
+                                    continue;
+                                }
+                                if !filters.is_empty() && !filters.iter().any(|f| path.contains(f))
+                                {
+                                    continue;
+                                }
+                                let name = metadata
+                                    .get("name")
+                                    .and_then(|v| match v {
+                                        cortex_vector::MetadataValue::String(s) => Some(s.as_str()),
+                                        _ => None,
+                                    })
+                                    .unwrap_or_default()
+                                    .to_string();
+                                let kind = metadata
+                                    .get("kind")
+                                    .and_then(|v| match v {
+                                        cortex_vector::MetadataValue::String(s) => Some(s.as_str()),
+                                        _ => None,
+                                    })
+                                    .unwrap_or("CodeNode")
+                                    .to_string();
+                                let snippet = result
+                                    .result
+                                    .content
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .chars()
+                                    .take(320)
+                                    .collect::<String>();
+                                let lex = simple_lexical_score(&req.query, &name, &snippet);
+                                let vector_score = result.combined_score as f64;
+                                let graph_score = result
+                                    .graph_context
+                                    .as_ref()
+                                    .map(|ctx| {
+                                        ((ctx.callers_count + ctx.callees_count) as f64 / 20.0)
+                                            .min(1.0)
+                                    })
+                                    .unwrap_or(0.0);
+                                let score =
+                                    (vector_score * 0.65) + (lex * 0.25) + (graph_score * 0.10);
+                                token_estimate += snippet.len() / 4 + 32;
+                                items.push(json!({
+                                    "id": result.result.id,
+                                    "kind": kind,
+                                    "path": path,
+                                    "name": name,
+                                    "snippet": snippet,
+                                    "score": score,
+                                    "why": {
+                                        "vector": vector_score,
+                                        "graph": graph_score,
+                                        "lexical": lex
+                                    }
+                                }));
+                            }
+                        }
+                        Err(err) => {
+                            global_metrics().record_vector_fallback();
+                            warnings.push(warning_with_reason(WARNING_FALLBACK_TO_LEXICAL, &err));
+                        }
+                    }
+                }
+                Err(err) => {
+                    global_metrics().record_vector_fallback();
+                    warnings.push(warning_with_reason(WARNING_VECTOR_STORE_UNAVAILABLE, &err));
+                }
+            }
+        } else {
+            warnings.push("vector_read_disabled".to_string());
+        }
+
         for row in rows {
             if items.len() >= max_items || token_estimate >= max_tokens {
                 break;
@@ -686,18 +1223,17 @@ impl CortexHandler {
                 "snippet": snippet,
                 "score": score,
                 "why": {
-                    "fts": lex,
-                    "tfidf": tfidf,
-                    "centrality": centrality
+                    "vector": 0.0,
+                    "graph": centrality,
+                    "lexical": lex,
+                    "tfidf": tfidf
                 }
             }));
         }
         let partial = token_estimate >= max_tokens || items.len() >= max_items;
-        let warnings = if items.is_empty() {
-            vec!["fallback_relaxed_no_results".to_string()]
-        } else {
-            Vec::new()
-        };
+        if items.is_empty() {
+            warnings.push("fallback_relaxed_no_results".to_string());
+        }
         Ok(envelope_success(
             json!({
                 "intent_detected": intent,
@@ -1148,6 +1684,30 @@ impl CortexHandler {
             ));
         }
         let linked_symbols = req.symbol_refs.clone().unwrap_or_default();
+        let mut warnings = Vec::new();
+        let embedding = if self.tool_enabled("mcp.vector.write.enabled", true) {
+            match VectorService::from_env().await {
+                Ok(service) => match service.embed_query(req.text.as_str()).await {
+                    Ok(embedding) => {
+                        global_metrics().record_embeddings_generated(1);
+                        Some(embedding)
+                    }
+                    Err(err) => {
+                        global_metrics().record_vector_fallback();
+                        warnings.push(warning_with_reason(WARNING_EMBEDDER_TIMEOUT, &err));
+                        None
+                    }
+                },
+                Err(err) => {
+                    global_metrics().record_vector_fallback();
+                    warnings.push(warning_with_reason(WARNING_VECTOR_STORE_UNAVAILABLE, &err));
+                    None
+                }
+            }
+        } else {
+            warnings.push("vector_write_disabled".to_string());
+            None
+        };
         let rec = ObservationRecord {
             observation_id: format!("obs-{}", now_millis()),
             repo_id: req.repo_path.clone(),
@@ -1162,6 +1722,7 @@ impl CortexHandler {
             severity: req.severity.unwrap_or_else(|| "info".to_string()),
             tags: req.tags.unwrap_or_default(),
             source_revision: "unknown".to_string(),
+            embedding,
         };
         let obs_id = rec.observation_id.clone();
         db.observations.push(rec);
@@ -1175,7 +1736,7 @@ impl CortexHandler {
                 "stale": false
             }),
             started,
-            Vec::new(),
+            warnings,
             false,
         ))
     }
@@ -1246,6 +1807,30 @@ impl CortexHandler {
         let max_items = req.max_items.unwrap_or(20).min(100);
         let include_stale = req.include_stale.unwrap_or(false);
         let mut results = Vec::<Value>::new();
+        let mut warnings = Vec::new();
+        let query_embedding = if self.tool_enabled("mcp.vector.read.enabled", true) {
+            match VectorService::from_env().await {
+                Ok(service) => match service.embed_query(req.query.as_str()).await {
+                    Ok(embedding) => {
+                        global_metrics().record_embeddings_generated(1);
+                        Some(embedding)
+                    }
+                    Err(err) => {
+                        global_metrics().record_vector_fallback();
+                        warnings.push(warning_with_reason(WARNING_FALLBACK_TO_LEXICAL, &err));
+                        None
+                    }
+                },
+                Err(err) => {
+                    global_metrics().record_vector_fallback();
+                    warnings.push(warning_with_reason(WARNING_VECTOR_STORE_UNAVAILABLE, &err));
+                    None
+                }
+            }
+        } else {
+            warnings.push("vector_read_disabled".to_string());
+            None
+        };
         for obs in db
             .observations
             .iter()
@@ -1260,7 +1845,12 @@ impl CortexHandler {
             let recency = 1.0;
             let graph_proximity = if obs.symbol_refs.is_empty() { 0.0 } else { 0.2 };
             let staleness_penalty = if obs.stale { -0.2 } else { 0.0 };
-            let score = bm25 + tfidf + recency + graph_proximity + staleness_penalty;
+            let semantic = match (&query_embedding, &obs.embedding) {
+                (Some(query), Some(obs_vec)) => cosine_similarity(query, obs_vec),
+                _ => 0.0,
+            };
+            let score =
+                (semantic * 1.2) + bm25 + tfidf + recency + graph_proximity + staleness_penalty;
             results.push(json!({
                 "id": obs.observation_id,
                 "text": obs.text,
@@ -1268,6 +1858,7 @@ impl CortexHandler {
                 "classification": obs.classification,
                 "stale": obs.stale,
                 "why": {
+                    "semantic": semantic,
                     "bm25": bm25,
                     "tfidf": tfidf,
                     "recency": recency,
@@ -1282,7 +1873,6 @@ impl CortexHandler {
             left.partial_cmp(&right)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        let mut warnings = Vec::new();
         let partial = results.is_empty();
         if partial {
             warnings.push("memory_empty".to_string());
@@ -3273,19 +3863,11 @@ impl CortexHandler {
 #[tool_handler]
 impl ServerHandler for CortexHandler {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some(
-                "CodeCortex: index codebases, query call graphs, find dead code & complexity."
-                    .into(),
-            ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation {
-                name: "cortex".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions(
+                "CodeCortex: index codebases, query call graphs, find dead code & complexity.",
+            )
+            .with_server_info(Implementation::new("cortex", env!("CARGO_PKG_VERSION")))
     }
 }
 
@@ -3399,6 +3981,30 @@ fn simple_lexical_score(query: &str, title: &str, body: &str) -> f64 {
     let title_hit = if t.contains(q.as_str()) { 1.0 } else { 0.0 };
     let body_hit = if b.contains(q.as_str()) { 1.0 } else { 0.0 };
     (title_hit * 0.7) + (body_hit * 0.3)
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f64 {
+    if left.is_empty() || right.is_empty() || left.len() != right.len() {
+        return 0.0;
+    }
+    let mut dot = 0.0f64;
+    let mut left_norm = 0.0f64;
+    let mut right_norm = 0.0f64;
+    for (a, b) in left.iter().zip(right.iter()) {
+        let a = *a as f64;
+        let b = *b as f64;
+        dot += a * b;
+        left_norm += a * a;
+        right_norm += b * b;
+    }
+    if left_norm == 0.0 || right_norm == 0.0 {
+        return 0.0;
+    }
+    dot / (left_norm.sqrt() * right_norm.sqrt())
+}
+
+fn warning_with_reason(code: &str, reason: &str) -> String {
+    format!("{code}:{reason}")
 }
 
 fn detect_intent(query: &str) -> &'static str {
@@ -3536,6 +4142,7 @@ mod tests {
                 severity: "info".to_string(),
                 tags: Vec::new(),
                 source_revision: "rev".to_string(),
+                embedding: None,
             });
         }
         assert!(exceeded_rate_limit(&db, "s"));

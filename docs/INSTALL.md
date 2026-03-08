@@ -22,7 +22,7 @@ Complete installation guide for CodeCortex on **macOS** and **Ubuntu/Debian Linu
 
 | Dependency | macOS | Ubuntu/Debian |
 |------------|-------|---------------|
-| **Rust** (1.70+) | `brew install rust` or [rustup](https://rustup.rs) | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| **Rust** (1.85+) | `brew install rust` or [rustup](https://rustup.rs) | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | **Git** | `brew install git` | `sudo apt install git` |
 | **curl** | (pre-installed) | `sudo apt install curl` |
 
@@ -41,14 +41,14 @@ Complete installation guide for CodeCortex on **macOS** and **Ubuntu/Debian Linu
 
 ```bash
 # Clone and install in one command
-curl -fsSL https://raw.githubusercontent.com/codecortex/codecortex/main/quickstart.sh | bash
+curl -fsSL https://raw.githubusercontent.com/aloshkarev/codecortex/main/quickstart.sh | bash
 ```
 
 ### Interactive Install
 
 ```bash
 # Clone the repository
-git clone https://github.com/codecortex/codecortex.git
+git clone https://github.com/aloshkarev/codecortex.git
 cd codecortex
 
 # Run the installer
@@ -82,7 +82,7 @@ source ~/.cargo/env
 ### Step 2: Clone and Build
 
 ```bash
-git clone https://github.com/codecortex/codecortex.git
+git clone https://github.com/aloshkarev/codecortex.git
 cd codecortex
 
 # Build release binary
@@ -327,6 +327,10 @@ sudo systemctl disable cortex-mcp
 
 ## IDE Integration
 
+For full editor and AI CLI integration patterns (Cursor, Neovim, Zed, Claude Code, Codex CLI, Gemini CLI), see:
+
+- [AI_AGENT_INTEGRATIONS.md](AI_AGENT_INTEGRATIONS.md)
+
 ### Cursor
 
 Create or edit `~/.cursor/mcp.json`:
@@ -370,6 +374,33 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
       "command": "/home/YOUR_USERNAME/.local/bin/cortex",
       "args": ["mcp", "start"],
       "cwd": "/home/YOUR_USERNAME"
+    }
+  }
+}
+```
+
+### Claude Code
+
+```bash
+claude mcp add cortex -- cortex mcp start
+```
+
+### Codex CLI
+
+```bash
+codex mcp add cortex -- cortex mcp start
+```
+
+### Gemini CLI
+
+Add an MCP server entry in `~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "codecortex": {
+      "command": "cortex",
+      "args": ["mcp", "start"]
     }
   }
 }
@@ -640,6 +671,6 @@ sudo apt remove memgraph
 
 ## Support
 
-- **Documentation:** [https://github.com/codecortex/codecortex](https://github.com/codecortex/codecortex)
-- **Issues:** [https://github.com/codecortex/codecortex/issues](https://github.com/codecortex/codecortex/issues)
-- **Discussions:** [https://github.com/codecortex/codecortex/discussions](https://github.com/codecortex/codecortex/discussions)
+- **Documentation:** [https://github.com/aloshkarev/codecortex](https://github.com/aloshkarev/codecortex)
+- **Issues:** [https://github.com/aloshkarev/codecortex/issues](https://github.com/aloshkarev/codecortex/issues)
+- **Discussions:** [https://github.com/aloshkarev/codecortex/discussions](https://github.com/aloshkarev/codecortex/discussions)

@@ -33,6 +33,7 @@ complete -c cortex -n "__fish_cortex_needs_command" -s h -l help -d 'Print help 
 complete -c cortex -n "__fish_cortex_needs_command" -s V -l version -d 'Print version'
 complete -c cortex -n "__fish_cortex_needs_command" -f -a "setup"
 complete -c cortex -n "__fish_cortex_needs_command" -f -a "doctor"
+complete -c cortex -n "__fish_cortex_needs_command" -f -a "daemon"
 complete -c cortex -n "__fish_cortex_needs_command" -f -a "mcp"
 complete -c cortex -n "__fish_cortex_needs_command" -f -a "index"
 complete -c cortex -n "__fish_cortex_needs_command" -f -a "watch"
@@ -75,6 +76,46 @@ yaml\t'YAML output'
 table\t'Table format for tabular data'"
 complete -c cortex -n "__fish_cortex_using_subcommand doctor" -s v -l verbose
 complete -c cortex -n "__fish_cortex_using_subcommand doctor" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and not __fish_seen_subcommand_from start stop status run help" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and not __fish_seen_subcommand_from start stop status run help" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and not __fish_seen_subcommand_from start stop status run help" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and not __fish_seen_subcommand_from start stop status run help" -f -a "start" -d 'Start daemon in background'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and not __fish_seen_subcommand_from start stop status run help" -f -a "stop" -d 'Stop daemon process'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and not __fish_seen_subcommand_from start stop status run help" -f -a "status" -d 'Show daemon runtime status'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and not __fish_seen_subcommand_from start stop status run help" -f -a "run" -d 'Run daemon foreground loop (internal)'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and not __fish_seen_subcommand_from start stop status run help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from start" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from start" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from start" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from stop" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from stop" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from stop" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from status" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from status" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from status" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from run" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from run" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from run" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from help" -f -a "start" -d 'Start daemon in background'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from help" -f -a "stop" -d 'Stop daemon process'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from help" -f -a "status" -d 'Show daemon runtime status'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from help" -f -a "run" -d 'Run daemon foreground loop (internal)'
+complete -c cortex -n "__fish_cortex_using_subcommand daemon; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c cortex -n "__fish_cortex_using_subcommand mcp; and not __fish_seen_subcommand_from start tools help" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
@@ -99,6 +140,9 @@ complete -c cortex -n "__fish_cortex_using_subcommand mcp; and __fish_seen_subco
 complete -c cortex -n "__fish_cortex_using_subcommand mcp; and __fish_seen_subcommand_from help" -f -a "start"
 complete -c cortex -n "__fish_cortex_using_subcommand mcp; and __fish_seen_subcommand_from help" -f -a "tools"
 complete -c cortex -n "__fish_cortex_using_subcommand mcp; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c cortex -n "__fish_cortex_using_subcommand index" -l mode -d 'Indexing mode' -r -f -a "full\t''
+incremental-diff\t''"
+complete -c cortex -n "__fish_cortex_using_subcommand index" -l base-branch -d 'Base branch to use for incremental-diff mode' -r
 complete -c cortex -n "__fish_cortex_using_subcommand index" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
@@ -174,21 +218,24 @@ complete -c cortex -n "__fish_cortex_using_subcommand find; and __fish_seen_subc
 complete -c cortex -n "__fish_cortex_using_subcommand find; and __fish_seen_subcommand_from help" -f -a "decorator"
 complete -c cortex -n "__fish_cortex_using_subcommand find; and __fish_seen_subcommand_from help" -f -a "argument"
 complete -c cortex -n "__fish_cortex_using_subcommand find; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
 table\t'Table format for tabular data'"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -s v -l verbose
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -s h -l help -d 'Print help (see more with \'--help\')'
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "callers"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "callees"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "chain"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "hierarchy"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "deps"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "dead-code"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "complexity"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "overrides"
-complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "callers"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "callees"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "chain"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "hierarchy"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "deps"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "dead-code"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "complexity"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "overrides"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "smells" -d 'Detect code smells from source files'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "refactoring" -d 'Recommend refactoring techniques based on detected smells'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "branch-diff" -d 'Compare two git branches for a project/repository'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and not __fish_seen_subcommand_from callers callees chain hierarchy deps dead-code complexity overrides smells refactoring branch-diff help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from callers" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
@@ -239,6 +286,32 @@ yaml\t'YAML output'
 table\t'Table format for tabular data'"
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from overrides" -s v -l verbose
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from overrides" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from smells" -l min-severity -d 'Minimum severity to report (info, warning, error, critical)' -r
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from smells" -l max-files -d 'Maximum number of files to scan' -r
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from smells" -l limit -d 'Maximum number of findings to return' -r
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from smells" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from smells" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from smells" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from refactoring" -l min-severity -d 'Minimum smell severity to consider (info, warning, error, critical)' -r
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from refactoring" -l max-files -d 'Maximum number of files to scan' -r
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from refactoring" -l limit -d 'Maximum number of recommendations to return' -r
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from refactoring" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from refactoring" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from refactoring" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from branch-diff" -l path -d 'Repository path (optional, uses current project or cwd)' -r -F
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from branch-diff" -l commit-limit -d 'Maximum number of ahead/behind commits returned per side' -r
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from branch-diff" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from branch-diff" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from branch-diff" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "callers"
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "callees"
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "chain"
@@ -247,6 +320,9 @@ complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_s
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "dead-code"
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "complexity"
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "overrides"
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "smells" -d 'Detect code smells from source files'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "refactoring" -d 'Recommend refactoring techniques based on detected smells'
+complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "branch-diff" -d 'Compare two git branches for a project/repository'
 complete -c cortex -n "__fish_cortex_using_subcommand analyze; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c cortex -n "__fish_cortex_using_subcommand bundle; and not __fish_seen_subcommand_from export import help" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
@@ -509,31 +585,38 @@ complete -c cortex -n "__fish_cortex_using_subcommand memory; and __fish_seen_su
 complete -c cortex -n "__fish_cortex_using_subcommand memory; and __fish_seen_subcommand_from help" -f -a "list" -d 'List all observations'
 complete -c cortex -n "__fish_cortex_using_subcommand memory; and __fish_seen_subcommand_from help" -f -a "clear" -d 'Clear all observations'
 complete -c cortex -n "__fish_cortex_using_subcommand memory; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
 table\t'Table format for tabular data'"
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -s v -l verbose
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -s h -l help -d 'Print help (see more with \'--help\')'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -f -a "list" -d 'List all registered projects'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -f -a "add" -d 'Add a project to the registry'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -f -a "remove" -d 'Remove a project from the registry'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -f -a "set" -d 'Set the current active project'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -f -a "current" -d 'Get the current active project'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -f -a "branches" -d 'List branches for a project'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -f -a "refresh" -d 'Refresh Git info for a project'
-complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "list" -d 'List all registered projects'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "add" -d 'Add a project to the registry'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "remove" -d 'Remove a project from the registry'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "set" -d 'Set the current active project'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "current" -d 'Get the current active project'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "branches" -d 'List branches for a project'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "refresh" -d 'Refresh Git info for a project'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "status" -d 'Show project indexing freshness/health status'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "sync" -d 'Sync project state: refresh -> detect switch -> index/queue -> cleanup'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "policy" -d 'Project branch/indexing policy controls'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "metrics" -d 'Show daemon/project metrics snapshot'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and not __fish_seen_subcommand_from list add remove set current branches refresh status sync policy metrics help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from list" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
 table\t'Table format for tabular data'"
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from list" -s v -l verbose
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from list" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from add" -l track-branch -d 'Whether to track branch changes' -r -f -a "true\t''
+false\t''"
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from add" -l auto-index -d 'Automatically index checked-out branch after adding' -r -f -a "true\t''
+false\t''"
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from add" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
 table\t'Table format for tabular data'"
-complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from add" -l track-branch -d 'Whether to track branch changes'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from add" -s v -l verbose
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from add" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from remove" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
@@ -543,6 +626,8 @@ table\t'Table format for tabular data'"
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from remove" -s v -l verbose
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from remove" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from set" -l branch -d 'Branch to use (optional, defaults to current)' -r
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from set" -l auto-index -d 'Automatically index checked-out branch after switching context' -r -f -a "true\t''
+false\t''"
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from set" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
@@ -563,12 +648,49 @@ table\t'Table format for tabular data'"
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from branches" -s v -l verbose
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from branches" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from refresh" -l path -d 'Path to the project (optional, uses current)' -r -F
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from refresh" -l auto-index -d 'Automatically index when a branch switch is detected' -r -f -a "true\t''
+false\t''"
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from refresh" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
 json-pretty\t'Pretty JSON with indentation'
 yaml\t'YAML output'
 table\t'Table format for tabular data'"
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from refresh" -s v -l verbose
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from refresh" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from status" -l path -d 'Path to the project (optional, uses current)' -r -F
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from status" -l include-queue -d 'Include daemon queue details for this project' -r -f -a "true\t''
+false\t''"
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from status" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from status" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from status" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from sync" -l path -d 'Path to the project (optional, uses current)' -r -F
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from sync" -l cleanup-old-branches -d 'Cleanup old branch indexes after sync' -r -f -a "true\t''
+false\t''"
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from sync" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from sync" -l force -d 'Force full indexing when syncing'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from sync" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from sync" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from policy" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from policy" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from policy" -s h -l help -d 'Print help (see more with \'--help\')'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from policy" -f -a "show" -d 'Show current project policy'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from policy" -f -a "set" -d 'Update project policy fields'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from policy" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from metrics" -l path -d 'Path to the project (optional, uses current)' -r -F
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from metrics" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
+json-pretty\t'Pretty JSON with indentation'
+yaml\t'YAML output'
+table\t'Table format for tabular data'"
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from metrics" -s v -l verbose
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from metrics" -s h -l help -d 'Print help (see more with \'--help\')'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "list" -d 'List all registered projects'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "add" -d 'Add a project to the registry'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "remove" -d 'Remove a project from the registry'
@@ -576,6 +698,10 @@ complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_s
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "current" -d 'Get the current active project'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "branches" -d 'List branches for a project'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "refresh" -d 'Refresh Git info for a project'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "status" -d 'Show project indexing freshness/health status'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "sync" -d 'Sync project state: refresh -> detect switch -> index/queue -> cleanup'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "policy" -d 'Project branch/indexing policy controls'
+complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "metrics" -d 'Show daemon/project metrics snapshot'
 complete -c cortex -n "__fish_cortex_using_subcommand project; and __fish_seen_subcommand_from help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
 complete -c cortex -n "__fish_cortex_using_subcommand skeleton" -l mode -d 'Skeleton mode (minimal, standard, full)' -r
 complete -c cortex -n "__fish_cortex_using_subcommand skeleton" -l format -d 'Output format (format, json-pretty, yaml, table)' -r -f -a "json\t'JSON output (default)'
@@ -612,38 +738,43 @@ table\t'Table format for tabular data'"
 complete -c cortex -n "__fish_cortex_using_subcommand vector-index" -l force -d 'Force reindex'
 complete -c cortex -n "__fish_cortex_using_subcommand vector-index" -s v -l verbose
 complete -c cortex -n "__fish_cortex_using_subcommand vector-index" -s h -l help -d 'Print help (see more with \'--help\')'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "setup"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "doctor"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "mcp"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "index"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "watch"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "unwatch"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "find"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "analyze"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "bundle"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "config"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "clean"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "list"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "delete"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "stats"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "query"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "jobs"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "debug"
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "completion" -d 'Generate shell completion scripts'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "interactive" -d 'Start interactive REPL mode'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "capsule" -d 'Get context capsule for a symbol'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "impact" -d 'Get impact graph for a symbol'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "refactor" -d 'Analyze refactoring suggestions for a symbol'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "patterns" -d 'Find design patterns in codebase'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "test" -d 'Find tests for a symbol'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "diagnose" -d 'Run diagnostic checks'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "memory" -d 'Memory operations'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "project" -d 'Project management operations'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "skeleton" -d 'Get skeleton (compressed view) of a file'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "signature" -d 'Get signature of a symbol'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "search" -d 'Semantic code search using vector embeddings'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "vector-index" -d 'Index code for vector search'
-complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "setup"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "doctor"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "daemon"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "mcp"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "index"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "watch"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "unwatch"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "find"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "analyze"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "bundle"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "config"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "clean"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "list"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "delete"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "stats"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "query"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "jobs"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "debug"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "completion" -d 'Generate shell completion scripts'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "interactive" -d 'Start interactive REPL mode'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "capsule" -d 'Get context capsule for a symbol'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "impact" -d 'Get impact graph for a symbol'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "refactor" -d 'Analyze refactoring suggestions for a symbol'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "patterns" -d 'Find design patterns in codebase'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "test" -d 'Find tests for a symbol'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "diagnose" -d 'Run diagnostic checks'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "memory" -d 'Memory operations'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "project" -d 'Project management operations'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "skeleton" -d 'Get skeleton (compressed view) of a file'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "signature" -d 'Get signature of a symbol'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "search" -d 'Semantic code search using vector embeddings'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "vector-index" -d 'Index code for vector search'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and not __fish_seen_subcommand_from setup doctor daemon mcp index watch unwatch find analyze bundle config clean list delete stats query jobs debug completion interactive capsule impact refactor patterns test diagnose memory project skeleton signature search vector-index help" -f -a "help" -d 'Print this message or the help of the given subcommand(s)'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from daemon" -f -a "start" -d 'Start daemon in background'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from daemon" -f -a "stop" -d 'Stop daemon process'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from daemon" -f -a "status" -d 'Show daemon runtime status'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from daemon" -f -a "run" -d 'Run daemon foreground loop (internal)'
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from mcp" -f -a "start"
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from mcp" -f -a "tools"
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from find" -f -a "name"
@@ -660,6 +791,9 @@ complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subc
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from analyze" -f -a "dead-code"
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from analyze" -f -a "complexity"
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from analyze" -f -a "overrides"
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from analyze" -f -a "smells" -d 'Detect code smells from source files'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from analyze" -f -a "refactoring" -d 'Recommend refactoring techniques based on detected smells'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from analyze" -f -a "branch-diff" -d 'Compare two git branches for a project/repository'
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from bundle" -f -a "export"
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from bundle" -f -a "import"
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from config" -f -a "show"
@@ -683,3 +817,7 @@ complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subc
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from project" -f -a "current" -d 'Get the current active project'
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from project" -f -a "branches" -d 'List branches for a project'
 complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from project" -f -a "refresh" -d 'Refresh Git info for a project'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from project" -f -a "status" -d 'Show project indexing freshness/health status'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from project" -f -a "sync" -d 'Sync project state: refresh -> detect switch -> index/queue -> cleanup'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from project" -f -a "policy" -d 'Project branch/indexing policy controls'
+complete -c cortex -n "__fish_cortex_using_subcommand help; and __fish_seen_subcommand_from project" -f -a "metrics" -d 'Show daemon/project metrics snapshot'
