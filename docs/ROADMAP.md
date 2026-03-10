@@ -1,17 +1,17 @@
 # CodeCortex Strategic Roadmap
 
-**Version:** 1.0.0 | **Last Updated:** 2026-03-03 | **Status:** Production Ready
+**Version:** 1.0.0 | **Last Updated:** 2026-03-09 | **Status:** Production Ready
 
 ## Executive Summary
 
-CodeCortex v1.0.0 is a **production-ready** Rust-based code intelligence platform with 550+ tests across 11 crates, exposing 40 MCP tools for AI-assisted development. All core features are complete:
+CodeCortex v1.0.0 is a **production-ready** Rust-based code intelligence platform with 550+ tests across 11 crates, exposing **46 MCP tools** for AI-assisted development. All core features are complete:
 
 - ✅ Multi-language parsing (10 languages via Tree-sitter)
 - ✅ Graph database integration (Memgraph/Neo4j)
 - ✅ Hybrid search (vector + graph)
 - ✅ ECL Pipeline (Extract → Cognify → Embed → Load)
 - ✅ Enhanced memory system with importance scoring
-- ✅ 40 MCP tools for AI productivity
+- ✅ 46 MCP tools (graph, vector, project, memory, health, bundles, LSP; see [cortex-mcp](../crates/cortex-mcp/src/lib.rs))
 
 This roadmap outlines **future development priorities** for v1.1 and beyond.
 
@@ -27,7 +27,7 @@ This roadmap outlines **future development priorities** for v1.1 and beyond.
                               │
 ┌─────────────────────────────────────────────────────────────────┐
 │                        cortex-mcp                               │
-│  (40 AI Productivity Tools, L1/L2 Cache, Quality Metrics)       │
+│  (46 AI Productivity Tools, L1/L2 Cache, Quality Metrics)       │
 └─────────────────────────────────────────────────────────────────┘
                               │
 ┌───────────────┬───────────────┬───────────────┬────────────────┐

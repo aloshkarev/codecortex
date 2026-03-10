@@ -839,7 +839,7 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
         println!("   {} Database is not running", "✗".red());
         println!("      Start with: docker start codecortex-memgraph");
         println!(
-            "      Or run: docker run -d --name codecortex-memgraph -p 7687:7687 memgraph/memgraph:3.8.1"
+            "      Or run: docker run -d --name codecortex-memgraph -p 7687:7687 memgraph/memgraph-mage:3.8.1"
         );
         all_healthy = false;
     } else {

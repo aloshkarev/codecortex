@@ -1,7 +1,7 @@
 /// Live integration tests against a running Memgraph instance on 127.0.0.1:7687.
 ///
 /// These tests do NOT use testcontainers — they require Memgraph to already be
-/// running (e.g. via `docker run -p 7687:7687 memgraph/memgraph:3.8.1`).
+/// running (e.g. via `docker run -p 7687:7687 memgraph/memgraph-mage:3.8.1`).
 ///
 /// Run with:
 ///   cargo test -p cortex-graph --test live_test -- --nocapture

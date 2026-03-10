@@ -1,9 +1,10 @@
 services:
   memgraph:
-    image: memgraph/memgraph:3.8.1
+    image: memgraph/memgraph-mage:3.8.1
     container_name: codecortex-memgraph
     ports:
       - "7687:7687"
+      - "7444:7444"
     volumes:
       - codecortex-memgraph:/var/lib/memgraph
     command:
@@ -11,6 +12,16 @@ services:
     environment:
       - MEMGRAPH_USER=memgraph
       - MEMGRAPH_PASSWORD=memgraph
+  lab:
+    image: memgraph/lab:latest
+    container_name: memgraph-lab
+    ports:
+      - "3000:3000"
+    depends_on:
+      - memgraph
+    environment:
+      - QUICK_CONNECT_MG_HOST=memgraph
+      - QUICK_CONNECT_MG_PORT=7687
 
 volumes:
   codecortex-memgraph:

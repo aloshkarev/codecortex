@@ -1,4 +1,4 @@
-.PHONY: all build install clean test release run-mcp run-memgraph status help mcp-bootstrap mcp-smoke
+.PHONY: all build install clean test release run-mcp run-memgraph status help mcp-bootstrap mcp-smoke measure-init measure-session-start measure-session-end measure-report measure-mcp-capture measure-bootstrap
 
 # Directories
 BIN_DIR := $(HOME)/.local/bin
@@ -58,10 +58,65 @@ mcp-smoke:
 	@$(CORTEX_BIN) mcp tools >/dev/null || (echo "mcp tools failed" && exit 1)
 	@echo "MCP smoke check passed"
 
+# Initialize measurement kit database
+measure-init:
+	@python3 scripts/measurement/codecortex_measure.py $(if $(DB),--db "$(DB)",) init
+
+# Start measurement session (MODE=baseline|cortex [SESSION=<id>])
+measure-session-start:
+	@if [ -z "$(MODE)" ]; then \
+		echo "Usage: make measure-session-start MODE=baseline|cortex [SESSION=<id>]"; \
+		exit 1; \
+	fi
+	@python3 scripts/measurement/codecortex_measure.py $(if $(DB),--db "$(DB)",) session-start \
+		--mode "$(MODE)" \
+		--repo-path "$(PWD)" \
+		$(if $(SESSION),--session-id "$(SESSION)",)
+
+# End measurement session (SESSION=<id>)
+measure-session-end:
+	@if [ -z "$(SESSION)" ]; then \
+		echo "Usage: make measure-session-end SESSION=<id>"; \
+		exit 1; \
+	fi
+	@python3 scripts/measurement/codecortex_measure.py $(if $(DB),--db "$(DB)",) session-end --session-id "$(SESSION)"
+
+# Report measurement KPIs
+measure-report:
+	@python3 scripts/measurement/codecortex_measure.py $(if $(DB),--db "$(DB)",) report
+
+# Start MCP server with capture logging (SESSION=<id>)
+measure-mcp-capture:
+	@if [ -z "$(SESSION)" ]; then \
+		echo "Usage: make measure-mcp-capture SESSION=<id>"; \
+		exit 1; \
+	fi
+	@./scripts/measurement/start_mcp_capture.sh "$(SESSION)"
+
+# Bootstrap measurement flow in one command (MODE=baseline|cortex)
+measure-bootstrap:
+	@MODE_VAL="$(if $(MODE),$(MODE),cortex)"; \
+	if [ "$$MODE_VAL" != "baseline" ] && [ "$$MODE_VAL" != "cortex" ]; then \
+		echo "Usage: make measure-bootstrap [MODE=baseline|cortex] [DB=/path/to.db]"; \
+		exit 1; \
+	fi; \
+	python3 scripts/measurement/codecortex_measure.py $(if $(DB),--db "$(DB)",) init >/dev/null; \
+	SESSION_ID=$$(python3 scripts/measurement/codecortex_measure.py $(if $(DB),--db "$(DB)",) session-start --mode "$$MODE_VAL" --repo-path "$(PWD)" --assistant cursor); \
+	echo "Measurement bootstrap complete"; \
+	echo "  mode: $$MODE_VAL"; \
+	echo "  session_id: $$SESSION_ID"; \
+	echo ""; \
+	echo "Next steps:"; \
+	echo "  make measure-mcp-capture SESSION=$$SESSION_ID$(if $(DB), DB=$(DB),)"; \
+	echo "  python3 scripts/measurement/codecortex_measure.py $(if $(DB),--db \"$(DB)\",) task-log --session-id $$SESSION_ID --task-key TASK-001 --category bugfix --minutes 20 --success true --rework false"; \
+	echo "  python3 scripts/measurement/codecortex_measure.py $(if $(DB),--db \"$(DB)\",) tokens-import --session-id $$SESSION_ID --csv-path ./token-usage.csv --provider cursor"; \
+	echo "  make measure-session-end SESSION=$$SESSION_ID$(if $(DB), DB=$(DB),)"; \
+	echo "  make measure-report$(if $(DB), DB=$(DB),)"
+
 # Start Memgraph with Docker
 run-memgraph:
 	@docker ps --format '{{.Names}}' | grep -q '^memgraph$$' && echo "Memgraph already running" || \
-		docker run -d --name memgraph -p 7687:7687 -p 7444:7444 memgraph/memgraph:3.8.1 --also-log-to-stderr=true
+		docker run -d --name memgraph -p 7687:7687 -p 7444:7444 memgraph/memgraph-mage:3.8.1 --also-log-to-stderr=true
 
 # Stop Memgraph
 stop-memgraph:
@@ -119,6 +174,12 @@ help:
 	@echo "  run-mcp      Start MCP server"
 	@echo "  mcp-bootstrap Bootstrap index/vector/MCP (REPO=/path)"
 	@echo "  mcp-smoke    Run quick MCP readiness checks"
+	@echo "  measure-init Initialize measurement DB"
+	@echo "  measure-session-start Start baseline/cortex measurement session"
+	@echo "  measure-session-end Close measurement session (SESSION=<id>)"
+	@echo "  measure-mcp-capture Start MCP with log capture (SESSION=<id>)"
+	@echo "  measure-report Show token/time/quality KPI report"
+	@echo "  measure-bootstrap One-shot measurement session bootstrap"
 	@echo "  run-memgraph Start Memgraph with Docker"
 	@echo "  stop-memgraph Stop Memgraph container"
 	@echo "  status       Show installation status"

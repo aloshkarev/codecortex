@@ -16,7 +16,7 @@ It combines:
 ## What You Get
 
 - `cortex` CLI for indexing, querying, diagnostics, and interactive exploration
-- MCP server with 40 tools for code-aware AI workflows
+- MCP server with 46 tools for code-aware AI workflows
 - Memgraph/Neo4j graph backend support
 - Tree-sitter parsing for 10 languages
 - Optional vector search with LanceDB/Qdrant
@@ -94,7 +94,7 @@ See [docs/INSTALL.md](docs/INSTALL.md).
 
 ```bash
 # 1) Start Memgraph
-docker run -d --name codecortex-memgraph -p 7687:7687 memgraph/memgraph:3.8.1
+docker run -d --name codecortex-memgraph -p 7687:7687 memgraph/memgraph-mage:3.8.1
 
 # 2) Configure connection (example)
 cat > ~/.cortex/config.toml <<'CFG'
@@ -143,12 +143,13 @@ cortex --help
 
 Primary command families:
 
-- Indexing/Repo: `index`, `list`, `delete`, `stats`, `watch`, `unwatch`
-- Search/Analysis: `find`, `analyze`, `query`, `skeleton`, `signature`, `patterns`
-- AI Context: `capsule`, `impact`, `refactor`, `test`, `diagnose`, `memory`
-- Vector: `vector-index`, `search`
-- MCP: `mcp start`, `mcp tools`
-- Ops: `doctor`, `config`, `jobs`, `debug`, `completion`, `interactive`
+- **Indexing/Repo:** `index`, `list`, `delete`, `stats`, `watch`, `unwatch`
+- **Search/Analysis:** `find`, `analyze`, `query`, `skeleton`, `signature`, `patterns`
+- **AI Context:** `capsule`, `impact`, `refactor`, `test`, `diagnose`, `memory`
+- **Vector:** `vector-index`, `search` (semantic/hybrid code search)
+- **Project:** `project` (list, add, set-current, branches, refresh, status, sync, queue-status, metrics)
+- **MCP:** `mcp start`, `mcp tools`
+- **Ops:** `doctor`, `config`, `jobs`, `debug`, `daemon`, `completion`, `interactive`
 
 ### Interactive REPL
 
@@ -185,16 +186,20 @@ cortex mcp tools
 }
 ```
 
-### MCP Tool Coverage (40 tools)
+For Cursor, Claude, Zed, and other clients see [docs/INTEGRATION.md](docs/INTEGRATION.md).
 
-- Index/repository lifecycle
-- Symbol/code search and signatures
-- Impact graph and logic flow
-- Refactoring and pattern analysis
-- Health/diagnostics/job status
-- Project and branch management
-- Session memory
-- LSP edge ingestion
+### MCP Tool Coverage (46 tools)
+
+- **Index/repository:** `add_code_to_graph`, `list_indexed_repositories`, `delete_repository`, `get_repository_stats`
+- **Vector:** `vector_index_repository`, `vector_index_file`, `vector_search`, `vector_search_hybrid`, `vector_index_status`, `vector_delete_repository`
+- **Search/analysis:** `find_code`, `get_skeleton`, `get_signature`, `analyze_code_relationships`, `find_dead_code`, `calculate_cyclomatic_complexity`, `analyze_refactoring`, `find_patterns`, `find_tests`
+- **Context/impact:** `get_context_capsule`, `get_impact_graph`, `search_logic_flow`
+- **Health/diagnostics:** `check_health`, `index_status`, `diagnose`, `explain_result`
+- **Project management:** `list_projects`, `add_project`, `remove_project`, `set_current_project`, `get_current_project`, `list_branches`, `refresh_project`, `project_status`, `project_sync`, `project_branch_diff`, `project_queue_status`, `project_metrics`
+- **Watch/jobs:** `watch_directory`, `unwatch_directory`, `list_watched_paths`, `check_job_status`, `list_jobs`
+- **Memory:** `save_observation`, `get_session_context`, `search_memory`
+- **Bundles/LSP:** `load_bundle`, `export_bundle`, `submit_lsp_edges`, `workspace_setup`
+- **Advanced:** `execute_cypher_query`
 
 ## Crate-by-Crate Documentation
 
@@ -266,15 +271,17 @@ The workspace contains 11 crates. This section explains role, key APIs, and how 
 
 ### `cortex-mcp`
 
-- Exposes CodeCortex capabilities as MCP tools
+- Exposes 46 MCP tools (see [crates/cortex-mcp/src/lib.rs](crates/cortex-mcp/src/lib.rs) for categories)
 - Uses `cortex-analyzer`, `cortex-indexer`, `cortex-graph`, `cortex-vector`, `cortex-watcher`
-- Intended integration point for Cursor/Claude/VS Code agents
+- Tool descriptions and parameter schemas guide AI agents; see [docs/INTEGRATION.md](docs/INTEGRATION.md) for best practices
+- Intended integration point for Cursor, Claude, Zed, and other MCP clients
 
 ### `cortex-cli`
 
-- Thin orchestration and UX layer over workspace crates
+- Orchestrates all workspace crates; entrypoint is `cortex` (binary `cortex-cli`)
+- Subcommands: `index`, `find`, `analyze`, `query`, `capsule`, `impact`, `vector-index`, `search`, `project`, `mcp start` / `mcp tools`, `doctor`, `config`, `jobs`, `daemon`, `debug`, `completion`, `interactive`, and more
 - Supports JSON/YAML/table output for scripts and CI
-- Includes `doctor` and `debug` surfaces for operations
+- Includes `doctor` and `debug` for operations and troubleshooting
 
 ### `cortex-benches`
 
@@ -334,6 +341,16 @@ cortex mcp tools
 cortex vector-index /path/to/repo --force
 cortex search "how auth middleware handles token refresh"
 ```
+
+### Measure ROI in daily work
+
+Use the ready-to-run measurement kit to track token/time/quality impact of baseline vs Cortex workflows:
+
+- [docs/MEASUREMENT_KIT.md](docs/MEASUREMENT_KIT.md)
+- `make measure-init`
+- `make measure-session-start MODE=baseline|cortex`
+- `make measure-mcp-capture SESSION=<id>`
+- `make measure-report`
 
 ## Comparison: CodeCortex vs `codegraphcontext` and Other OSS Solutions
 

@@ -1,6 +1,6 @@
 //! # CodeCortex MCP Server Library
 //!
-//! Model Context Protocol server implementation with 40 production-ready tools.
+//! Model Context Protocol server implementation with 46 production-ready tools.
 //!
 //! ## Overview
 //!

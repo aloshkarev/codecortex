@@ -62,7 +62,7 @@ async fn start_memgraph_or_skip() -> Option<(testcontainers::ContainerAsync<Gene
     }
     let started = timeout(
         Duration::from_secs(30),
-        GenericImage::new("memgraph/memgraph", "3.8.1")
+        GenericImage::new("memgraph/memgraph-mage", "3.8.1")
             .with_exposed_port(ContainerPort::Tcp(7687))
             .with_wait_for(WaitFor::Duration {
                 length: Duration::from_secs(8),

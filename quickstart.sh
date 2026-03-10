@@ -178,7 +178,7 @@ log_info "Setting up Memgraph..."
 if command_exists docker; then
     if ! docker info &>/dev/null; then
         log_warning "Docker not running. Please start Docker and run:"
-        echo "  docker run -d --name ${CONTAINER_NAME} -p ${MEMGRAPH_PORT}:7687 memgraph/memgraph:3.8.1"
+        echo "  docker run -d --name ${CONTAINER_NAME} -p ${MEMGRAPH_PORT}:7687 memgraph/memgraph-mage:3.8.1"
     else
         # Check for existing container FIRST (before any port checking)
         EXISTING_CONTAINER=""

@@ -57,3 +57,13 @@ schemars = "1.0"
 tempfile = "3"
 testcontainers = "0.27.1"
 dotenvy = "0.15"
+
+[profile.dev]
+incremental = false
+
+[profile.release]
+incremental = false
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

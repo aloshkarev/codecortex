@@ -16,6 +16,7 @@ use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::*,
+    service::ServerInitializeError,
     tool, tool_handler, tool_router,
     transport::stdio,
 };
@@ -43,6 +44,7 @@ pub struct IndexPathReq {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PathReq {
+    /// Directory or file path
     pub path: String,
 }
 
@@ -72,27 +74,37 @@ pub struct VectorIndexFileReq {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct VectorSearchReq {
+    /// Natural-language or keyword search query (e.g. "auth token refresh", "where is login validated")
     pub query: String,
+    /// Maximum number of results to return (default often 10–20)
     pub k: Option<usize>,
+    /// Restrict search to this repository path
     pub repo_path: Option<String>,
+    /// Restrict search to files under this path prefix
     pub path: Option<String>,
+    /// Filter by node kind (e.g. function, class, method)
     pub kind: Option<String>,
+    /// Filter by language (e.g. rust, python, typescript)
     pub language: Option<String>,
+    /// One of: semantic | hybrid | structural (default: semantic)
     pub search_type: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct VectorIndexStatusReq {
+    /// Repository path to check; omit for all repos
     pub repo_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct VectorDeleteRepositoryReq {
+    /// Repository identifier/path whose vector index should be removed
     pub repo_path: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FindCodeReq {
+    /// Search string: symbol name, regex pattern, or content snippet depending on kind
     pub query: String,
     /// One of: name | pattern | type | content  (default: pattern)
     pub kind: Option<String>,
@@ -113,6 +125,7 @@ pub struct RelationshipReq {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CypherReq {
+    /// Cypher query string (e.g. MATCH (n:CodeNode) RETURN n LIMIT 10)
     pub query: String,
 }
 
@@ -134,46 +147,71 @@ pub struct ExportBundleReq {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ContextCapsuleReq {
+    /// Task or topic description (e.g. "refactor auth", "find bug in login")
     pub query: String,
+    /// Optional intent hint (e.g. debug, refactor, onboard); can improve ranking
     pub task_intent: Option<String>,
+    /// Restrict to this repository path
     pub repo_path: Option<String>,
+    /// Approximate token budget for returned snippets (default 6000, max 12000)
     pub max_tokens: Option<usize>,
+    /// Maximum number of items to return (default 40, max 100)
     pub max_items: Option<usize>,
+    /// Whether to include test files in results
     pub include_tests: Option<bool>,
+    /// Path substrings to filter by (e.g. ["src/auth"]); items must match at least one
     pub path_filter: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ImpactGraphReq {
+    /// Symbol name (function, class, method) to get call graph for
     pub symbol: String,
+    /// Optional type hint: function, class, method, etc.
     pub symbol_type: Option<String>,
+    /// Restrict to this repository path
     pub repo_path: Option<String>,
+    /// Traversal depth (default 2–3; higher can be slow)
     pub depth: Option<usize>,
+    /// Include importers/dependents in the graph
     pub include_importers: Option<bool>,
+    /// Include test files in the graph
     pub include_tests: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct LogicFlowReq {
+    /// Starting symbol (e.g. entry point or caller)
     pub from_symbol: String,
+    /// Ending symbol (e.g. target function or callee)
     pub to_symbol: String,
+    /// Restrict to this repository path
     pub repo_path: Option<String>,
+    /// Maximum number of paths to return
     pub max_paths: Option<usize>,
+    /// Maximum traversal depth per path
     pub max_depth: Option<usize>,
+    /// If true, return partial paths when full path is not found
     pub allow_partial: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SkeletonReq {
+    /// File path (relative to repo or absolute) to get skeleton for
     pub path: String,
+    /// Optional mode (e.g. full, compact); implementation-dependent
     pub mode: Option<String>,
+    /// Repository root when path is relative
     pub repo_path: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IndexStatusReq {
+    /// Repository path to check; omit for all repos
     pub repo_path: Option<String>,
+    /// Include list of background jobs
     pub include_jobs: Option<bool>,
+    /// Include watcher status (watched paths)
     pub include_watcher: Option<bool>,
 }
 
@@ -440,7 +478,7 @@ impl CortexHandler {
 
     // ── indexing ─────────────────────────────────────────────────────────────
 
-    #[tool(description = "Index a directory or file into the Memgraph code graph")]
+    #[tool(description = "Index a directory or file into the code graph (and optionally vector store). Use when the user asks to index a repo, add code to the graph, or (re)build the index. Run before graph/vector tools can return results. Returns graph and optional vector indexing stats.")]
     async fn add_code_to_graph(
         &self,
         Parameters(req): Parameters<IndexPathReq>,
@@ -560,7 +598,7 @@ impl CortexHandler {
 
     // ── watching ─────────────────────────────────────────────────────────────
 
-    #[tool(description = "Watch a directory for file changes and reindex automatically")]
+    #[tool(description = "Watch a directory for file changes and reindex automatically. Use when the user wants to keep the index up to date as they edit. Starts a watcher; combine with list_watched_paths and unwatch_directory to manage.")]
     async fn watch_directory(
         &self,
         Parameters(req): Parameters<PathReq>,
@@ -633,7 +671,7 @@ impl CortexHandler {
 
     // ── search / analysis ─────────────────────────────────────────────────────
 
-    #[tool(description = "Search the code graph by name, pattern, type, or content")]
+    #[tool(description = "Search the code graph by symbol name, pattern, type, or content. Use when the user asks to find a function/class by name, list symbols matching a pattern, or search by code type (e.g. function, class). Returns matching symbols with file paths and signatures.")]
     async fn find_code(
         &self,
         Parameters(req): Parameters<FindCodeReq>,
@@ -653,7 +691,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Analyze code relationships: callers, callees, hierarchy, dead code …")]
+    #[tool(description = "Analyze code relationships: callers, callees, class hierarchy, dead code, overrides, module deps, call chains. Use when the user asks for 'who calls X', 'what does Y call', 'class hierarchy', 'dead code', or 'call chain from A to B'. Pass query_type (e.g. find_callers, find_callees, dead_code) and target symbol(s).")]
     async fn analyze_code_relationships(
         &self,
         Parameters(req): Parameters<RelationshipReq>,
@@ -689,7 +727,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Execute a raw Cypher query against Memgraph")]
+    #[tool(description = "Execute a raw Cypher query against the code graph. Use only when the user needs a custom graph query (e.g. custom traversal, aggregation). Prefer get_impact_graph, find_code, or analyze_code_relationships for common tasks. Returns query result rows.")]
     async fn execute_cypher_query(
         &self,
         Parameters(req): Parameters<CypherReq>,
@@ -705,7 +743,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Find functions that are never called (dead code)")]
+    #[tool(description = "Find functions or symbols that are never called (dead code). Use when the user asks to find unused code, dead code, or candidates for removal. Returns symbols with no callers.")]
     async fn find_dead_code(&self) -> Result<CallToolResult, McpError> {
         let rows = Analyzer::new(self.graph_client().await?)
             .dead_code()
@@ -716,7 +754,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Calculate cyclomatic complexity ranked by highest complexity")]
+    #[tool(description = "Calculate cyclomatic complexity of symbols, ranked by highest complexity. Use when the user asks for 'complex code', 'most complex functions', or 'complexity analysis'. Returns symbols with complexity scores; high values suggest refactoring targets.")]
     async fn calculate_cyclomatic_complexity(
         &self,
         Parameters(req): Parameters<ComplexityReq>,
@@ -730,7 +768,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Index all code files in a repository into vector storage")]
+    #[tool(description = "Index all code files in a repository into vector storage for semantic search. Use when the user wants to enable natural-language code search (vector_search) or before asking 'code related to X'. Returns indexed_documents, scanned_files, skipped_files.")]
     async fn vector_index_repository(
         &self,
         Parameters(req): Parameters<VectorIndexRepositoryReq>,
@@ -804,7 +842,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Index a single file into vector storage")]
+    #[tool(description = "Index a single file into vector storage. Use when the user wants to add one file to the semantic index without re-indexing the whole repo. Returns indexed_documents for that file.")]
     async fn vector_index_file(
         &self,
         Parameters(req): Parameters<VectorIndexFileReq>,
@@ -865,7 +903,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Search indexed vectors for semantic code matches")]
+    #[tool(description = "Semantic search over indexed code. Use when the user asks in natural language for 'code that does X', 'where is Y handled', or 'code related to Z'. Requires vector_index_repository first. Returns relevant code snippets with paths and scores.")]
     async fn vector_search(
         &self,
         Parameters(req): Parameters<VectorSearchReq>,
@@ -935,7 +973,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Search indexed vectors using hybrid graph-aware mode")]
+    #[tool(description = "Hybrid search over indexed code: combines semantic (vector) and structural (graph) signals. Use when the user wants 'code like X' with better precision than vector_search alone, or when filtering by path/repo/kind. Returns snippets with hybrid scores.")]
     async fn vector_search_hybrid(
         &self,
         Parameters(req): Parameters<VectorSearchReq>,
@@ -947,7 +985,7 @@ impl CortexHandler {
         self.vector_search(Parameters(req)).await
     }
 
-    #[tool(description = "Return vector index health and document counts")]
+    #[tool(description = "Return vector index health and document counts per repository. Use when the user asks if semantic search is ready, how much is indexed, or to debug vector_search returning no results. Returns status and document counts.")]
     async fn vector_index_status(
         &self,
         Parameters(req): Parameters<VectorIndexStatusReq>,
@@ -1032,7 +1070,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Build a token-budgeted context capsule with ranking explanations")]
+    #[tool(description = "Get a token-budgeted set of relevant code items for a task. Use when the user describes a coding task (e.g. 'refactor auth', 'find bug in login') and you need ranked, bounded context. Combines graph and optional vector search; returns snippets with ranking explanations.")]
     async fn get_context_capsule(
         &self,
         Parameters(req): Parameters<ContextCapsuleReq>,
@@ -1248,7 +1286,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Return callers/importers/dependents blast-radius graph for a symbol")]
+    #[tool(description = "Get the impact graph for a symbol: who calls it, what it calls, and dependents. Use when the user asks 'what calls X?', 'what does X affect?', or 'show callers/callees of X'. Returns nodes and edges with file paths and relationship types.")]
     async fn get_impact_graph(
         &self,
         Parameters(req): Parameters<ImpactGraphReq>,
@@ -1318,7 +1356,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Search logic flow paths between two symbols")]
+    #[tool(description = "Find control/data flow paths between two symbols (e.g. from entry to a function). Use when the user asks 'how does A reach B?', 'path from X to Y', or 'logic flow between two functions'. Pass from_symbol and to_symbol; returns paths with intermediate nodes.")]
     async fn search_logic_flow(
         &self,
         Parameters(req): Parameters<LogicFlowReq>,
@@ -1365,7 +1403,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Get precomputed or on-demand file skeleton")]
+    #[tool(description = "Get a file skeleton: high-level structure (functions, classes, exports) without full body. Use when the user wants an overview of a file, 'what's in this file', or to navigate structure. Pass path; returns outline with names and locations.")]
     async fn get_skeleton(
         &self,
         Parameters(req): Parameters<SkeletonReq>,
@@ -1397,7 +1435,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Unified health/status endpoint for indexing, watcher, and jobs")]
+    #[tool(description = "Unified health and status for indexing, watcher, and jobs. Use when the user asks 'is indexing done?', 'what's the index status?', or 'are there running jobs?'. Returns repo index status, watcher state, and job list.")]
     async fn index_status(
         &self,
         Parameters(req): Parameters<IndexStatusReq>,
@@ -1633,7 +1671,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Save a session observation with symbol links and security checks")]
+    #[tool(description = "Save a session observation (fact or decision) with optional symbol links. Use when the user or agent wants to persist something for later (e.g. 'remember we decided to use approach X'). Observations are searchable via search_memory.")]
     async fn save_observation(
         &self,
         Parameters(req): Parameters<SaveObservationReq>,
@@ -1781,7 +1819,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Search memory with explainable score decomposition")]
+    #[tool(description = "Search saved session observations/memory by query. Use when the user asks 'what did we decide about X?', 'recall earlier context', or to find past observations. Returns matching observations with scores.")]
     async fn search_memory(
         &self,
         Parameters(req): Parameters<SearchMemoryReq>,
@@ -1888,7 +1926,7 @@ impl CortexHandler {
 
     // ── repository management ─────────────────────────────────────────────────
 
-    #[tool(description = "List all indexed repositories in Memgraph")]
+    #[tool(description = "List all repositories currently indexed in the graph. Use when the user asks 'what repos are indexed?', 'which projects are in the graph?', or to verify indexing before running graph tools.")]
     async fn list_indexed_repositories(&self) -> Result<CallToolResult, McpError> {
         let repos = self
             .graph_client()
@@ -1901,7 +1939,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Delete a repository and all its nodes from the graph")]
+    #[tool(description = "Delete a repository and all its nodes from the graph. Use when the user wants to remove a repo from the index (e.g. after deleting the repo or to free space). Destructive; graph data for that repo is removed.")]
     async fn delete_repository(
         &self,
         Parameters(req): Parameters<PathReq>,
@@ -3292,7 +3330,7 @@ impl CortexHandler {
 
     // ── health ────────────────────────────────────────────────────────────────
 
-    #[tool(description = "Check Memgraph connectivity and report server health")]
+    #[tool(description = "Check Memgraph (graph DB) connectivity and report server health. Use when the user sees graph-related errors, or asks 'is the database up?'. Returns connection status and basic server info.")]
     async fn check_health(&self) -> Result<CallToolResult, McpError> {
         let ok = self.graph_client().await.is_ok();
         Ok(Self::ok(
@@ -3417,7 +3455,7 @@ impl CortexHandler {
         }
     }
 
-    #[tool(description = "Get the current project context (path, branch, Git status)")]
+    #[tool(description = "Get the current project context: path, branch, Git status. Use when the user asks 'what project am I in?', 'current branch', or to confirm scope for indexing and search.")]
     async fn get_current_project(&self) -> Result<CallToolResult, McpError> {
         let current = self.projects.get_current_project();
 
@@ -3874,7 +3912,16 @@ impl ServerHandler for CortexHandler {
 // ── public entry point ────────────────────────────────────────────────────────
 
 pub async fn start_stdio(config: CortexConfig) -> anyhow::Result<()> {
-    let service = CortexHandler::new(config).serve(stdio()).await?;
+    let service = match CortexHandler::new(config).serve(stdio()).await {
+        Ok(s) => s,
+        Err(e) => {
+            if matches!(e, ServerInitializeError::ConnectionClosed(_)) {
+                tracing::debug!("MCP client disconnected during initialization: {}", e);
+                return Ok(());
+            }
+            return Err(e.into());
+        }
+    };
     service.waiting().await?;
     Ok(())
 }

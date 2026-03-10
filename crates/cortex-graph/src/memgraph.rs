@@ -53,8 +53,8 @@ impl MemgraphClient {
 
         let (host, port) = Self::parse_uri(&config.memgraph_uri)?;
 
-        let username = Some(config.memgraph_user.clone());
-        let password = Some(config.memgraph_password.clone());
+        let username = normalize_auth_field(config.memgraph_user.as_str());
+        let password = normalize_auth_field(config.memgraph_password.as_str());
 
         let (command_tx, command_rx) = mpsc::channel();
         let (status_tx, status_rx) = mpsc::channel();
@@ -509,6 +509,15 @@ impl Drop for MemgraphClient {
     }
 }
 
+fn normalize_auth_field(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -547,5 +556,13 @@ mod tests {
         let (host, port) = MemgraphClient::parse_uri("bolt://[::1]:17687").unwrap();
         assert_eq!(host, "::1");
         assert_eq!(port, 17687);
+    }
+
+    #[test]
+    fn test_normalize_auth_field() {
+        assert_eq!(normalize_auth_field(""), None);
+        assert_eq!(normalize_auth_field("   "), None);
+        assert_eq!(normalize_auth_field("memgraph"), Some("memgraph".to_string()));
+        assert_eq!(normalize_auth_field("  user  "), Some("user".to_string()));
     }
 }

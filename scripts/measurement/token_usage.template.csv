@@ -1,0 +1,3 @@
+task_key,model,prompt_tokens,completion_tokens,total_tokens
+TASK-001,gpt-5,12000,1800,13800
+TASK-002,gpt-5,8400,1300,9700

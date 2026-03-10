@@ -119,13 +119,12 @@ source ~/.bashrc
 ```bash
 mkdir -p ~/.cortex
 
-cat > ~/.cortex/config.json << 'EOF'
-{
-  "memgraph_uri": "bolt://localhost:7687",
-  "memgraph_user": "",
-  "memgraph_password": "",
-  "max_batch_size": 1000
-}
+cat > ~/.cortex/config.toml << 'EOF'
+memgraph_uri = "memgraph://127.0.0.1:7687"
+memgraph_user = ""
+memgraph_password = ""
+backend_type = "memgraph"
+max_batch_size = 500
 EOF
 ```
 
@@ -144,7 +143,7 @@ docker run -d \
   -p 7687:7687 \
   -p 7444:7444 \
   -v memgraph_data:/var/lib/memgraph \
-  memgraph/memgraph:3.8.1 \
+  memgraph/memgraph-mage:3.8.1 \
   --also-log-to-stderr=true
 
 # Verify it's running
@@ -193,8 +192,8 @@ sudo systemctl enable memgraph
 # Using cortex doctor
 cortex doctor
 
-# Using docker
-docker exec -it memgraph mgm_client 1
+# Using docker (container name from docker-compose: codecortex-memgraph)
+docker exec -it codecortex-memgraph mgm_client 1
 ```
 
 ---
@@ -329,7 +328,7 @@ sudo systemctl disable cortex-mcp
 
 For full editor and AI CLI integration patterns (Cursor, Neovim, Zed, Claude Code, Codex CLI, Gemini CLI), see:
 
-- [AI_AGENT_INTEGRATIONS.md](AI_AGENT_INTEGRATIONS.md)
+- [INTEGRATION.md](INTEGRATION.md)
 
 ### Cursor
 
@@ -491,11 +490,11 @@ export PATH="$HOME/.local/bin:$PATH"
 # Check Docker container
 docker ps | grep memgraph
 
-# Start if stopped
-docker start memgraph
+# Start if stopped (container name from docker-compose: codecortex-memgraph)
+docker start codecortex-memgraph
 
 # Or start fresh
-docker run -d --name memgraph -p 7687:7687 memgraph/memgraph:3.8.1
+docker run -d --name codecortex-memgraph -p 7687:7687 memgraph/memgraph-mage:3.8.1
 ```
 
 #### "Permission denied" on Linux
@@ -548,7 +547,7 @@ RUST_LOG=debug cortex mcp start
 cortex debug cache --clear
 
 # Reset configuration
-rm ~/.cortex/config.json
+rm -f ~/.cortex/config.toml
 cortex config reset
 
 # Full reset (WARNING: deletes all data)
@@ -615,9 +614,9 @@ sudo systemctl daemon-reload
 **Docker:**
 
 ```bash
-docker stop memgraph
-docker rm memgraph
-docker volume rm memgraph_data
+docker stop codecortex-memgraph
+docker rm codecortex-memgraph
+docker volume ls  # then: docker volume rm <volume_name>
 ```
 
 **Native (macOS):**
@@ -640,7 +639,7 @@ sudo apt remove memgraph
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CORTEX_CONFIG_PATH` | Custom config file path | `~/.cortex/config.json` |
+| `CORTEX_CONFIG_PATH` | Custom config file path | `~/.cortex/config.toml` |
 | `CORTEX_SKELETON_CACHE_PATH` | Skeleton cache directory | `~/.cortex/skeletons.db` |
 | `RUST_LOG` | Logging level | `info` |
 | `RUST_BACKTRACE` | Show backtraces on panic | `0` |

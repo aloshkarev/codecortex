@@ -404,14 +404,14 @@ install_memgraph_docker() {
 
         # Now pull and create container
         log_info "Pulling Memgraph Docker image..."
-        docker pull memgraph/memgraph:3.8.1
+        docker pull memgraph/memgraph-mage:3.8.1
 
         log_info "Creating Memgraph container on port ${port}..."
         docker run -d \
             --name "${CONTAINER_NAME}" \
             -p "${port}:7687" \
             -v codecortex-memgraph:/var/lib/memgraph \
-            memgraph/memgraph:3.8.1 \
+            memgraph/memgraph-mage:3.8.1 \
             --also-log-to-stderr=true
 
         sleep 3

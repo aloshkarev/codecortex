@@ -84,7 +84,7 @@ fn start_memgraph_docker(port: u16) -> Result<()> {
                 &format!("{}:7687", port),
                 "-v",
                 "codecortex-memgraph:/var/lib/memgraph",
-                "memgraph/memgraph:3.8.1",
+                "memgraph/memgraph-mage:3.8.1",
                 "--also-log-to-stderr=true",
             ])
             .status()
@@ -499,7 +499,7 @@ pub fn run_setup_wizard(config: &mut CortexConfig) -> Result<()> {
         let compose = format!(
             r#"services:
   memgraph:
-    image: memgraph/memgraph:3.8.1
+    image: memgraph/memgraph-mage:3.8.1
     container_name: codecortex-memgraph
     ports:
       - "{}:7687"
