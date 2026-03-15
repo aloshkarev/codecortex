@@ -1435,7 +1435,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortex-analyzer"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cortex-core",
  "cortex-graph",
@@ -1446,7 +1446,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-benches"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cortex-core",
  "cortex-indexer",
@@ -1456,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1487,7 +1487,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "chrono",
  "serde",
@@ -1499,7 +1499,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-graph"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1521,7 +1521,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-indexer"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "blake3",
  "cortex-core",
@@ -1540,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-mcp"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1572,7 +1572,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-parser"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "cortex-core",
  "criterion",
@@ -1596,7 +1596,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-pipeline"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1613,7 +1613,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-vector"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "arrow-array",
@@ -1633,7 +1633,7 @@ dependencies = [
 
 [[package]]
 name = "cortex-watcher"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "chrono",
  "cortex-core",
