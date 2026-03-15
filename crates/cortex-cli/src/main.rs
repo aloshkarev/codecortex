@@ -1899,27 +1899,112 @@ fn record_project_branch_index(repo_root: &Path, report: &cortex_indexer::IndexR
     let _ = registry.cleanup_old_branches(repo_root);
 }
 
+fn normalize_scope_path_str(value: &str) -> String {
+    value
+        .replace('\\', "/")
+        .trim()
+        .trim_end_matches('/')
+        .to_string()
+}
+
+fn default_project_scope_root() -> Option<PathBuf> {
+    let registry = cortex_watcher::ProjectRegistry::new();
+    if let Some(project) = registry.get_current_project() {
+        return Some(project.path);
+    }
+
+    let cwd = std::env::current_dir().ok()?;
+    find_git_repository_root(&cwd).or(Some(cwd))
+}
+
+fn merge_filters_with_project_scope(mut filters: AnalyzePathFilters) -> AnalyzePathFilters {
+    let Some(scope_root) = default_project_scope_root() else {
+        return filters;
+    };
+    let scope_path = normalize_scope_path_str(scope_root.to_string_lossy().as_ref());
+    if scope_path.is_empty() {
+        return filters;
+    }
+    let has_scope = filters
+        .include_paths
+        .iter()
+        .any(|p| normalize_scope_path_str(p.as_str()) == scope_path);
+    if !has_scope {
+        filters.include_paths.push(scope_path);
+    }
+    filters
+}
+
+fn default_project_scope_root_str() -> Option<String> {
+    default_project_scope_root().map(|p| normalize_scope_path_str(p.to_string_lossy().as_ref()))
+}
+
+fn effective_search_repo_scope(repo: Option<&str>) -> Option<String> {
+    repo.map(std::borrow::ToOwned::to_owned)
+        .or_else(default_project_scope_root_str)
+}
+
+fn filter_repository_stats_to_scope(rows: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let Some(scope) = default_project_scope_root_str() else {
+        return rows;
+    };
+    rows.into_iter()
+        .filter(|row| {
+            row.get("repository")
+                .and_then(|v| v.as_str())
+                .map(|repo| normalize_scope_path_str(repo) == scope)
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
 async fn run_find(
     config: &CortexConfig,
     command: FindCommand,
     format: OutputFormat,
 ) -> anyhow::Result<()> {
     let analyzer = Analyzer::new(GraphClient::connect(config).await?);
+    let scoped_path = default_project_scope_root()
+        .map(|p| normalize_scope_path_str(p.to_string_lossy().as_ref()));
+    let scoped_filters = scoped_path.as_ref().map(|path| AnalyzePathFilters {
+        include_paths: vec![path.clone()],
+        include_files: Vec::new(),
+        include_globs: Vec::new(),
+        exclude_paths: Vec::new(),
+        exclude_files: Vec::new(),
+        exclude_globs: Vec::new(),
+    });
     let out = match command {
-        FindCommand::Name { name } => analyzer.find_code(&name, SearchKind::Name, None).await?,
+        FindCommand::Name { name } => {
+            analyzer
+                .find_code(&name, SearchKind::Name, scoped_path.as_deref())
+                .await?
+        }
         FindCommand::Pattern { pattern } => {
             analyzer
-                .find_code(&pattern, SearchKind::Pattern, None)
+                .find_code(&pattern, SearchKind::Pattern, scoped_path.as_deref())
                 .await?
         }
-        FindCommand::Type { kind } => analyzer.find_code(&kind, SearchKind::Type, None).await?,
+        FindCommand::Type { kind } => {
+            analyzer
+                .find_code(&kind, SearchKind::Type, scoped_path.as_deref())
+                .await?
+        }
         FindCommand::Content { query } => {
             analyzer
-                .find_code(&query, SearchKind::Content, None)
+                .find_code(&query, SearchKind::Content, scoped_path.as_deref())
                 .await?
         }
-        FindCommand::Decorator { name } => analyzer.find_by_decorator(&name).await?,
-        FindCommand::Argument { name } => analyzer.find_by_argument(&name).await?,
+        FindCommand::Decorator { name } => {
+            analyzer
+                .find_by_decorator_with_filters(&name, scoped_filters.as_ref())
+                .await?
+        }
+        FindCommand::Argument { name } => {
+            analyzer
+                .find_by_argument_with_filters(&name, scoped_filters.as_ref())
+                .await?
+        }
     };
     print_formatted(format, &serde_json::to_value(out)?)?;
     Ok(())
@@ -2018,13 +2103,13 @@ async fn run_analyze(
     let analyzer = Analyzer::new(GraphClient::connect(config).await?);
     let out = match command {
         AnalyzeCommand::Callers(TargetArg { target, filters }) => {
-            let filter_obj = filters.to_filters();
+            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
             analyzer
                 .callers_with_filters(&target, Some(&filter_obj))
                 .await?
         }
         AnalyzeCommand::Callees(TargetArg { target, filters }) => {
-            let filter_obj = filters.to_filters();
+            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
             analyzer
                 .callees_with_filters(&target, Some(&filter_obj))
                 .await?
@@ -2035,35 +2120,35 @@ async fn run_analyze(
             depth,
             filters,
         } => {
-            let filter_obj = filters.to_filters();
+            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
             analyzer
                 .call_chain_with_filters(&from, &to, depth, Some(&filter_obj))
                 .await?
         }
         AnalyzeCommand::Hierarchy { class, filters } => {
-            let filter_obj = filters.to_filters();
+            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
             analyzer
                 .class_hierarchy_with_filters(&class, Some(&filter_obj))
                 .await?
         }
         AnalyzeCommand::Deps { module, filters } => {
-            let filter_obj = filters.to_filters();
+            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
             analyzer
                 .module_dependencies_with_filters(&module, Some(&filter_obj))
                 .await?
         }
         AnalyzeCommand::DeadCode { filters } => {
-            let filter_obj = filters.to_filters();
+            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
             analyzer.dead_code_with_filters(Some(&filter_obj)).await?
         }
         AnalyzeCommand::Complexity { top, filters } => {
-            let filter_obj = filters.to_filters();
+            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
             analyzer
                 .complexity_with_filters(top, Some(&filter_obj))
                 .await?
         }
         AnalyzeCommand::Overrides { method, filters } => {
-            let filter_obj = filters.to_filters();
+            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
             analyzer
                 .overrides_with_filters(&method, Some(&filter_obj))
                 .await?
@@ -2956,7 +3041,7 @@ async fn run_delete(config: &CortexConfig, path: &str) -> anyhow::Result<()> {
 
 async fn run_stats(config: &CortexConfig, format: OutputFormat) -> anyhow::Result<()> {
     let analyzer = Analyzer::new(GraphClient::connect(config).await?);
-    let stats = analyzer.repository_stats().await?;
+    let stats = filter_repository_stats_to_scope(analyzer.repository_stats().await?);
     print_formatted(format, &serde_json::to_value(stats)?)?;
     Ok(())
 }
@@ -5533,9 +5618,10 @@ async fn run_search(
 
     // Parse search type
     let st = SearchType::from_str(search_type).unwrap_or(SearchType::Semantic);
+    let repo_scope = effective_search_repo_scope(repo);
 
     // Execute search
-    let results = match (repo, path, kind, language) {
+    let results = match (repo_scope.as_deref(), path, kind, language) {
         (Some(r), _, _, _) => hybrid.search_in_repository(query, r, limit).await?,
         (_, Some(p), _, _) => hybrid.search_in_file(query, p, limit).await?,
         (_, _, Some(k), _) => hybrid.search_by_kind(query, k, limit).await?,
@@ -5562,6 +5648,7 @@ async fn run_search(
         &serde_json::json!({
             "query": query,
             "search_type": search_type,
+            "repository_scope": repo_scope,
             "results_count": formatted.len(),
             "results": formatted,
         }),
@@ -6704,6 +6791,60 @@ mod tests {
                 assert_eq!(parsed.include_files, vec!["src/auth/token.rs", "main.rs"]);
             }
             _ => panic!("expected analyze dead-code command"),
+        }
+    }
+
+    #[test]
+    fn test_normalize_scope_path_str_normalizes_common_variants() {
+        assert_eq!(
+            normalize_scope_path_str("./repo\\src/"),
+            "./repo/src".to_string()
+        );
+        assert_eq!(
+            normalize_scope_path_str("/tmp/project///"),
+            "/tmp/project".to_string()
+        );
+    }
+
+    #[test]
+    fn test_merge_filters_with_project_scope_keeps_existing_scope() {
+        let mut filters = AnalyzePathFilters::default();
+        if let Some(scope_root) = default_project_scope_root() {
+            filters
+                .include_paths
+                .push(scope_root.to_string_lossy().to_string());
+            let merged = merge_filters_with_project_scope(filters);
+            assert_eq!(merged.include_paths.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_effective_search_repo_scope_prefers_explicit_repo() {
+        let explicit = "/tmp/explicit-repo";
+        let selected = effective_search_repo_scope(Some(explicit));
+        assert_eq!(selected.as_deref(), Some(explicit));
+    }
+
+    #[test]
+    fn test_filter_repository_stats_to_scope_no_scope_or_no_match() {
+        if let Some(scope) = default_project_scope_root_str() {
+            let rows = vec![
+                serde_json::json!({ "repository": scope.clone(), "node_count": 10 }),
+                serde_json::json!({ "repository": "/tmp/other", "node_count": 5 }),
+            ];
+            let filtered = filter_repository_stats_to_scope(rows);
+            assert_eq!(filtered.len(), 1);
+            assert_eq!(
+                filtered[0].get("repository").and_then(|v| v.as_str()),
+                Some(scope.as_str())
+            );
+        } else {
+            let rows = vec![serde_json::json!({
+                "repository": "/tmp/other",
+                "node_count": 10
+            })];
+            let filtered = filter_repository_stats_to_scope(rows.clone());
+            assert_eq!(filtered, rows);
         }
     }
 
