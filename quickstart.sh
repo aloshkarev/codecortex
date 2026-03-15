@@ -10,7 +10,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/aloshkarev/codecortex/main/quickstart.sh | bash -s -- --non-interactive
 #
 
-set -e
+set -euo pipefail
 
 REPO_URL="https://github.com/aloshkarev/codecortex"
 INSTALL_DIR="${HOME}/.cortex"
@@ -31,6 +31,134 @@ log_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERR]${NC} $1"; }
 
 command_exists() { command -v "$1" &>/dev/null; }
+
+run_with_retry() {
+    local retries=${1:-3}
+    shift
+    local attempt=1
+    local delay=2
+    while true; do
+        if "$@"; then
+            return 0
+        fi
+        if [ "$attempt" -ge "$retries" ]; then
+            return 1
+        fi
+        log_warning "Command failed (attempt ${attempt}/${retries}), retrying in ${delay}s: $*"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}
+
+detect_package_manager() {
+    if command_exists brew; then
+        echo "brew"
+    elif command_exists apt-get; then
+        echo "apt"
+    elif command_exists dnf; then
+        echo "dnf"
+    elif command_exists yum; then
+        echo "yum"
+    else
+        echo "unknown"
+    fi
+}
+
+install_build_dependencies() {
+    local pm
+    pm=$(detect_package_manager)
+    case "$pm" in
+        brew)
+            run_with_retry 3 brew update
+            run_with_retry 3 brew install protobuf openssl@3 pkg-config cmake llvm
+            ;;
+        apt)
+            run_with_retry 3 sudo apt-get update
+            run_with_retry 3 sudo apt-get install -y \
+                protobuf-compiler libssl-dev pkg-config build-essential cmake clang libclang-dev
+            ;;
+        dnf)
+            run_with_retry 3 sudo dnf install -y \
+                protobuf-compiler openssl-devel pkgconf-pkg-config gcc gcc-c++ make cmake clang clang-devel
+            ;;
+        yum)
+            run_with_retry 3 sudo yum install -y \
+                protobuf-compiler openssl-devel pkgconfig gcc gcc-c++ make cmake clang
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+confirm_or_default_yes() {
+    local prompt="$1"
+    if [ "$NON_INTERACTIVE" = true ] || [ ! -t 0 ]; then
+        return 0
+    fi
+    read -rp "$prompt [Y/n]: " response
+    response=${response:-Y}
+    [[ "$response" =~ ^[Yy]$ ]]
+}
+
+verify_build_prereqs() {
+    local missing=()
+    for dep in git curl tar cargo rustc protoc pkg-config cmake make; do
+        if ! command_exists "$dep"; then
+            missing+=("$dep")
+        fi
+    done
+    if ! command_exists cc && ! command_exists gcc && ! command_exists clang; then
+        missing+=("cc")
+    fi
+    if ! command_exists c++ && ! command_exists g++ && ! command_exists clang++; then
+        missing+=("c++")
+    fi
+    if ! command_exists clang; then
+        missing+=("clang")
+    fi
+    if command_exists pkg-config && ! pkg-config --exists openssl 2>/dev/null; then
+        missing+=("openssl")
+    fi
+
+    if [ ${#missing[@]} -eq 0 ]; then
+        log_success "Build preflight passed (toolchain + native deps)"
+        return 0
+    fi
+
+    log_warning "Missing build dependencies: ${missing[*]}"
+    local pm
+    pm=$(detect_package_manager)
+    if [ "$pm" = "unknown" ]; then
+        log_error "Unsupported package manager; install missing deps manually and re-run."
+        return 1
+    fi
+
+    if confirm_or_default_yes "Install missing build dependencies automatically?"; then
+        install_build_dependencies
+    else
+        log_error "Cannot continue without required build dependencies"
+        return 1
+    fi
+
+    # Re-verify
+    verify_build_prereqs_final
+}
+
+verify_build_prereqs_final() {
+    for dep in cargo rustc protoc pkg-config cmake make; do
+        if ! command_exists "$dep"; then
+            log_error "Missing dependency after attempted installation: ${dep}"
+            return 1
+        fi
+    done
+    if command_exists pkg-config && ! pkg-config --exists openssl 2>/dev/null; then
+        log_error "OpenSSL development package not detected via pkg-config"
+        return 1
+    fi
+    return 0
+}
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -95,10 +223,10 @@ if [ ! -f "Cargo.toml" ]; then
     if [ -d "$REPO_DIR" ]; then
         log_info "Updating existing repository..."
         cd "$REPO_DIR"
-        git pull
+        run_with_retry 3 git pull --ff-only
     else
         log_info "Cloning fresh repository..."
-        git clone "$REPO_URL" "$REPO_DIR"
+        run_with_retry 3 git clone "$REPO_URL" "$REPO_DIR"
         cd "$REPO_DIR"
     fi
 else
@@ -114,8 +242,11 @@ if ! command_exists cargo; then
     log_info "Installing Rust..."
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     source "${HOME}/.cargo/env" 2>/dev/null || true
+    export PATH="${HOME}/.cargo/bin:${PATH}"
 fi
 log_success "Rust: $(rustc --version)"
+
+verify_build_prereqs
 
 # Check Docker (optional but recommended)
 if command_exists docker; then
@@ -141,15 +272,29 @@ fi
 
 # Step 3: Build
 log_info "Building CodeCortex (this may take a few minutes)..."
-cargo build --release
+if ! run_with_retry 2 cargo build --release --locked; then
+    log_warning "Locked build failed; retrying without --locked"
+    run_with_retry 2 cargo build --release
+fi
 log_success "Build complete"
 
 # Step 4: Install binary
 BIN_DIR="${HOME}/.local/bin"
 mkdir -p "$BIN_DIR"
 
+if [ ! -f target/release/cortex-cli ]; then
+    log_error "Build completed but target/release/cortex-cli is missing"
+    exit 1
+fi
 cp target/release/cortex-cli "${BIN_DIR}/cortex"
 chmod +x "${BIN_DIR}/cortex"
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+    log_info "Applying macOS ad-hoc code signature to cortex binary..."
+    codesign --force --sign - "${BIN_DIR}/cortex"
+    codesign --verify --verbose=4 "${BIN_DIR}/cortex"
+    PATH="${BIN_DIR}:${PATH}" cortex --version
+fi
 
 # Add to PATH
 ORIGINAL_PATH="${PATH}"
@@ -204,7 +349,8 @@ if command_exists docker; then
                 MEMGRAPH_PORT=$(find_available_port 7688 10)
             fi
 
-            docker run -d \
+            run_with_retry 3 docker pull memgraph/memgraph:3.8.1
+            run_with_retry 2 docker run -d \
                 --name "${CONTAINER_NAME}" \
                 -p "${MEMGRAPH_PORT}:7687" \
                 -v codecortex-memgraph:/var/lib/memgraph \

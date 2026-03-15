@@ -10,3 +10,4 @@ cortex-core = { path = "../cortex-core" }
 cortex-graph = { path = "../cortex-graph" }
 serde.workspace = true
 serde_json.workspace = true
+glob.workspace = true

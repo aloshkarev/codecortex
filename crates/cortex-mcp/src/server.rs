@@ -1,6 +1,6 @@
 use crate::jobs::{JobInfo, JobRegistry, JobState};
-use crate::tools::tool_names;
-use cortex_analyzer::Analyzer;
+use crate::tool_names;
+use cortex_analyzer::{AnalyzePathFilters, Analyzer};
 use cortex_core::{CortexConfig, Result, SearchKind};
 use cortex_graph::{BundleStore, GraphClient};
 use cortex_indexer::Indexer;
@@ -9,6 +9,54 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use tokio::runtime::Runtime;
+
+fn parse_string_list(value: Option<&Value>) -> Vec<String> {
+    match value {
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(Value::as_str)
+            .map(ToString::to_string)
+            .collect(),
+        Some(Value::String(s)) if !s.trim().is_empty() => vec![s.to_string()],
+        _ => Vec::new(),
+    }
+}
+
+fn parse_analyze_filters(params: &Value) -> Result<AnalyzePathFilters> {
+    let filters = AnalyzePathFilters {
+        include_paths: parse_string_list(params.get("include_paths")),
+        include_files: parse_string_list(params.get("include_files")),
+        include_globs: parse_string_list(params.get("include_globs")),
+        exclude_paths: parse_string_list(params.get("exclude_paths")),
+        exclude_files: parse_string_list(params.get("exclude_files")),
+        exclude_globs: parse_string_list(params.get("exclude_globs")),
+    };
+    filters.validate()?;
+    Ok(filters)
+}
+
+fn analyzer_capabilities_json() -> Value {
+    json!({
+        "path_filters": {
+            "supported": true,
+            "fields": [
+                "include_paths",
+                "include_files",
+                "include_globs",
+                "exclude_paths",
+                "exclude_files",
+                "exclude_globs"
+            ]
+        },
+        "language_aware_smells": {
+            "supported": true,
+            "extensions": [
+                "rs","py","rb","js","jsx","ts","tsx","go","java","c","cc","cpp","h","hpp",
+                "cs","php","swift","kt","kts","m","mm","scala"
+            ]
+        }
+    })
+}
 
 #[derive(Clone)]
 #[deprecated(note = "Use rmcp-based handler::start_stdio instead")]
@@ -101,12 +149,16 @@ impl McpServer {
                     "content" => SearchKind::Content,
                     _ => SearchKind::Pattern,
                 };
-                let path_filter = params.get("path").and_then(Value::as_str);
+                let path_filter = params
+                    .get("path_filter")
+                    .and_then(Value::as_str)
+                    .or_else(|| params.get("path").and_then(Value::as_str));
                 Ok(json!(analyzer.find_code(query, kind, path_filter).await?))
             }
             "analyze_code_relationships" => {
                 let client = GraphClient::connect(&self.config).await?;
                 let analyzer = Analyzer::new(client);
+                let filters = parse_analyze_filters(&params)?;
                 let query_type = params
                     .get("query_type")
                     .and_then(Value::as_str)
@@ -115,16 +167,28 @@ impl McpServer {
                     .get("target")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
+                let target2 = params
+                    .get("target2")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let depth = params.get("depth").and_then(Value::as_u64).map(|d| d as usize);
                 let output = match query_type {
-                    "find_callers" => analyzer.callers(target).await?,
-                    "find_callees" => analyzer.callees(target).await?,
-                    "find_all_callers" => analyzer.all_callers(target).await?,
-                    "find_all_callees" => analyzer.all_callees(target).await?,
-                    "class_hierarchy" => analyzer.class_hierarchy(target).await?,
-                    "dead_code" => analyzer.dead_code().await?,
-                    "overrides" => analyzer.overrides(target).await?,
-                    "module_deps" => analyzer.module_dependencies(target).await?,
-                    "variable_scope" => analyzer.variable_scope(target).await?,
+                    "find_callers" => analyzer.callers_with_filters(target, Some(&filters)).await?,
+                    "find_callees" => analyzer.callees_with_filters(target, Some(&filters)).await?,
+                    "find_all_callers" => analyzer.all_callers_with_filters(target, Some(&filters)).await?,
+                    "find_all_callees" => analyzer.all_callees_with_filters(target, Some(&filters)).await?,
+                    "call_chain" => analyzer
+                        .call_chain_with_filters(target, target2, depth, Some(&filters))
+                        .await?,
+                    "class_hierarchy" => analyzer.class_hierarchy_with_filters(target, Some(&filters)).await?,
+                    "dead_code" => analyzer.dead_code_with_filters(Some(&filters)).await?,
+                    "overrides" => analyzer.overrides_with_filters(target, Some(&filters)).await?,
+                    "module_deps" => analyzer.module_dependencies_with_filters(target, Some(&filters)).await?,
+                    "variable_scope" => analyzer.variable_scope_with_filters(target, Some(&filters)).await?,
+                    "find_importers" => analyzer.find_importers_with_filters(target, Some(&filters)).await?,
+                    "find_by_decorator" => analyzer.find_by_decorator_with_filters(target, Some(&filters)).await?,
+                    "find_by_argument" => analyzer.find_by_argument_with_filters(target, Some(&filters)).await?,
+                    "find_complexity" => analyzer.find_complexity_with_filters(target, Some(&filters)).await?,
                     _ => Vec::new(),
                 };
                 Ok(json!(output))
@@ -140,13 +204,19 @@ impl McpServer {
             "find_dead_code" => {
                 let client = GraphClient::connect(&self.config).await?;
                 let analyzer = Analyzer::new(client);
-                Ok(json!(analyzer.dead_code().await?))
+                let filters = parse_analyze_filters(&params)?;
+                Ok(json!(analyzer.dead_code_with_filters(Some(&filters)).await?))
             }
             "calculate_cyclomatic_complexity" | "find_most_complex_functions" => {
                 let client = GraphClient::connect(&self.config).await?;
                 let analyzer = Analyzer::new(client);
                 let top_n = params.get("top_n").and_then(Value::as_u64).unwrap_or(20) as usize;
-                Ok(json!(analyzer.complexity(top_n).await?))
+                let filters = parse_analyze_filters(&params)?;
+                Ok(json!(
+                    analyzer
+                        .complexity_with_filters(top_n, Some(&filters))
+                        .await?
+                ))
             }
             "list_indexed_repositories" => {
                 let client = GraphClient::connect(&self.config).await?;
@@ -173,7 +243,10 @@ impl McpServer {
                 let analyzer = Analyzer::new(client);
                 Ok(json!(analyzer.repository_stats().await?))
             }
-            "check_health" => Ok(json!({"status":"ok"})),
+            "check_health" => Ok(json!({
+                "status":"ok",
+                "analyzer": analyzer_capabilities_json()
+            })),
             "add_package_to_graph" | "visualize_graph_query" => Ok(json!({"status":"not_implemented"})),
             _ => Ok(json!({"error":"unknown_method"})),
         }

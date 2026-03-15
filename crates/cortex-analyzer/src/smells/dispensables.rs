@@ -11,6 +11,10 @@
 //! - Lazy Class
 //! - Speculative Generality
 
+use super::language::{
+    SourceLanguage, extract_function_name as shared_extract_function_name,
+    is_comment_line as shared_is_comment_line, is_function_signature,
+};
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
 use std::collections::{HashMap, HashSet};
 
@@ -18,6 +22,7 @@ use std::collections::{HashMap, HashSet};
 pub fn detect_comments(source: &str, file_path: &str, config: &SmellConfig) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     let _total_lines = lines.len();
     let mut comment_lines = 0;
@@ -30,7 +35,7 @@ pub fn detect_comments(source: &str, file_path: &str, config: &SmellConfig) -> V
         let trimmed = line.trim();
 
         // Count different comment types
-        if is_comment_line(trimmed) {
+        if is_comment_line(trimmed, lang) {
             comment_lines += 1;
 
             // Check for TODO/FIXME accumulation
@@ -121,9 +126,10 @@ pub fn detect_duplicate_code(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Build token sequences for each function/method
-    let functions = extract_functions_with_tokens(&lines);
+    let functions = extract_functions_with_tokens(&lines, lang);
 
     // Compare functions for similarity
     let func_names: Vec<&String> = functions.keys().collect();
@@ -169,7 +175,7 @@ pub fn detect_duplicate_code(
     }
 
     // Also check for repeated code blocks (not just functions)
-    let duplicate_blocks = find_duplicate_blocks(&lines, config.min_duplicate_lines);
+    let duplicate_blocks = find_duplicate_blocks(&lines, config.min_duplicate_lines, lang);
 
     for block in duplicate_blocks {
         smells.push(CodeSmell {
@@ -250,10 +256,11 @@ pub fn detect_data_classes(source: &str, file_path: &str, config: &SmellConfig) 
 pub fn detect_dead_code(source: &str, file_path: &str, _config: &SmellConfig) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Extract all defined functions and their usages
-    let defined_functions = extract_defined_functions(&lines);
-    let called_functions = extract_all_function_calls(&lines);
+    let defined_functions = extract_defined_functions(&lines, lang);
+    let called_functions = extract_all_function_calls(&lines, lang);
 
     // Find unused functions
     for (func_name, line_number) in &defined_functions {
@@ -282,7 +289,7 @@ pub fn detect_dead_code(source: &str, file_path: &str, _config: &SmellConfig) ->
         if i > 0 {
             let prev_line = lines[i - 1].trim();
             if is_exit_statement(prev_line)
-                && !is_comment_line(trimmed)
+                && !is_comment_line(trimmed, lang)
                 && !trimmed.is_empty()
                 && trimmed != "}"
                 && trimmed != "{"
@@ -370,6 +377,7 @@ pub fn detect_speculative_generality(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Find abstract classes/traits with only one implementation
     let abstract_types = find_abstract_types(&lines);
@@ -397,7 +405,7 @@ pub fn detect_speculative_generality(
     }
 
     // Find unused generic parameters
-    let generic_types = find_generic_types(&lines);
+    let generic_types = find_generic_types(&lines, lang);
 
     for (type_name, info) in &generic_types {
         if info.unused_params > 0 {
@@ -421,8 +429,8 @@ pub fn detect_speculative_generality(
     }
 
     // Find methods with only one caller (over-abstraction)
-    let defined_functions = extract_defined_functions(&lines);
-    let call_counts = count_function_calls(&lines);
+    let defined_functions = extract_defined_functions(&lines, lang);
+    let call_counts = count_function_calls(&lines, lang);
 
     for (func_name, line_number) in &defined_functions {
         let calls = call_counts.get(func_name).unwrap_or(&0);
@@ -479,12 +487,8 @@ struct GenericTypeInfo {
 
 // Helper functions
 
-fn is_comment_line(trimmed: &str) -> bool {
-    trimmed.starts_with("//")
-        || trimmed.starts_with("#")
-        || trimmed.starts_with("/*")
-        || trimmed.starts_with("*")
-        || trimmed.starts_with("<!--")
+fn is_comment_line(trimmed: &str, lang: SourceLanguage) -> bool {
+    shared_is_comment_line(trimmed, lang)
 }
 
 fn looks_like_code(trimmed: &str) -> bool {
@@ -515,7 +519,10 @@ fn looks_like_code(trimmed: &str) -> bool {
         || code.ends_with('}')
 }
 
-fn extract_functions_with_tokens(lines: &[&str]) -> HashMap<String, FunctionInfo> {
+fn extract_functions_with_tokens(
+    lines: &[&str],
+    lang: SourceLanguage,
+) -> HashMap<String, FunctionInfo> {
     let mut functions: HashMap<String, FunctionInfo> = HashMap::new();
     let mut current_func: Option<String> = None;
     let mut func_tokens: Vec<String> = Vec::new();
@@ -525,7 +532,7 @@ fn extract_functions_with_tokens(lines: &[&str]) -> HashMap<String, FunctionInfo
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        if is_function_definition(trimmed) {
+        if is_function_definition(trimmed, lang) {
             let func_name = extract_function_name(trimmed);
             current_func = Some(func_name.clone());
             func_tokens = Vec::new();
@@ -563,7 +570,7 @@ fn extract_functions_with_tokens(lines: &[&str]) -> HashMap<String, FunctionInfo
 
 fn tokenize_line(line: &str) -> Vec<String> {
     // Remove string literals and comments
-    let cleaned = remove_strings_and_comments(line);
+    let cleaned = remove_strings_and_comments(line, SourceLanguage::Unknown);
 
     // Split on non-alphanumeric characters
     cleaned
@@ -573,7 +580,7 @@ fn tokenize_line(line: &str) -> Vec<String> {
         .collect()
 }
 
-fn remove_strings_and_comments(line: &str) -> String {
+fn remove_strings_and_comments(line: &str, lang: SourceLanguage) -> String {
     let mut result = String::new();
     let mut in_string = false;
     let mut string_char = ' ';
@@ -600,11 +607,13 @@ fn remove_strings_and_comments(line: &str) -> String {
             continue;
         }
 
-        if c == '/' && i + 1 < chars.len() {
-            if chars[i + 1] == '/' {
-                in_comment = true;
-                continue;
-            }
+        if c == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+            in_comment = true;
+            continue;
+        }
+        if matches!(lang, SourceLanguage::Python) && c == '#' {
+            in_comment = true;
+            continue;
         }
 
         result.push(c);
@@ -631,7 +640,7 @@ fn calculate_token_similarity(tokens1: &[String], tokens2: &[String]) -> f64 {
     intersection as f64 / union as f64
 }
 
-fn find_duplicate_blocks(lines: &[&str], min_lines: usize) -> Vec<BlockInfo> {
+fn find_duplicate_blocks(lines: &[&str], min_lines: usize, lang: SourceLanguage) -> Vec<BlockInfo> {
     let mut blocks: Vec<BlockInfo> = Vec::new();
     let mut seen_blocks: HashMap<Vec<&str>, usize> = HashMap::new();
 
@@ -641,7 +650,7 @@ fn find_duplicate_blocks(lines: &[&str], min_lines: usize) -> Vec<BlockInfo> {
             let block: Vec<&str> = lines[i..i + window_size]
                 .iter()
                 .map(|l| l.trim())
-                .filter(|l| !l.is_empty() && !is_comment_line(l))
+                .filter(|l| !l.is_empty() && !is_comment_line(l, lang))
                 .collect();
 
             if block.len() >= min_lines {
@@ -731,11 +740,11 @@ fn is_getter_or_setter(method: &str) -> bool {
         || lower.starts_with("has")
 }
 
-fn extract_defined_functions(lines: &[&str]) -> HashMap<String, u32> {
+fn extract_defined_functions(lines: &[&str], lang: SourceLanguage) -> HashMap<String, u32> {
     let mut functions: HashMap<String, u32> = HashMap::new();
 
     for (i, line) in lines.iter().enumerate() {
-        if is_function_definition(line.trim()) {
+        if is_function_definition(line.trim(), lang) {
             let name = extract_function_name(line.trim());
             functions.insert(name, (i + 1) as u32);
         }
@@ -744,20 +753,20 @@ fn extract_defined_functions(lines: &[&str]) -> HashMap<String, u32> {
     functions
 }
 
-fn extract_all_function_calls(lines: &[&str]) -> HashSet<String> {
+fn extract_all_function_calls(lines: &[&str], lang: SourceLanguage) -> HashSet<String> {
     let mut calls = HashSet::new();
 
     for line in lines {
-        let call_names = extract_function_calls(line.trim());
+        let call_names = extract_function_calls(line.trim(), lang);
         calls.extend(call_names);
     }
 
     calls
 }
 
-fn extract_function_calls(line: &str) -> Vec<String> {
+fn extract_function_calls(line: &str, lang: SourceLanguage) -> Vec<String> {
     let mut calls = Vec::new();
-    let cleaned = remove_strings_and_comments(line);
+    let cleaned = remove_strings_and_comments(line, lang);
     let chars: Vec<char> = cleaned.chars().collect();
     let mut current_ident = String::new();
 
@@ -921,7 +930,7 @@ fn find_abstract_types(lines: &[&str]) -> HashMap<String, AbstractTypeInfo> {
     types
 }
 
-fn find_generic_types(lines: &[&str]) -> HashMap<String, GenericTypeInfo> {
+fn find_generic_types(lines: &[&str], lang: SourceLanguage) -> HashMap<String, GenericTypeInfo> {
     let mut types: HashMap<String, GenericTypeInfo> = HashMap::new();
 
     // This is simplified - would need proper parsing for full implementation
@@ -930,7 +939,7 @@ fn find_generic_types(lines: &[&str]) -> HashMap<String, GenericTypeInfo> {
 
         // Look for generic definitions
         if trimmed.contains('<') && trimmed.contains('>') {
-            if is_class_definition(trimmed) || is_function_definition(trimmed) {
+            if is_class_definition(trimmed) || is_function_definition(trimmed, lang) {
                 let name = if is_class_definition(trimmed) {
                     extract_class_name(trimmed)
                 } else {
@@ -966,11 +975,11 @@ fn count_type_parameters(line: &str) -> usize {
     0
 }
 
-fn count_function_calls(lines: &[&str]) -> HashMap<String, usize> {
+fn count_function_calls(lines: &[&str], lang: SourceLanguage) -> HashMap<String, usize> {
     let mut counts: HashMap<String, usize> = HashMap::new();
 
     for line in lines {
-        let calls = extract_function_calls(line.trim());
+        let calls = extract_function_calls(line.trim(), lang);
         for call in calls {
             *counts.entry(call).or_default() += 1;
         }
@@ -992,18 +1001,12 @@ fn is_class_definition(trimmed: &str) -> bool {
         || trimmed.starts_with("pub struct ")
 }
 
-fn is_function_definition(trimmed: &str) -> bool {
-    (trimmed.starts_with("fn ")
-        || trimmed.starts_with("def ")
-        || trimmed.starts_with("function ")
-        || trimmed.starts_with("pub fn ")
-        || trimmed.starts_with("public ")
-        || trimmed.starts_with("private "))
-        && trimmed.contains('(')
+fn is_function_definition(trimmed: &str, lang: SourceLanguage) -> bool {
+    is_function_signature(trimmed, lang)
 }
 
 fn is_method_definition(trimmed: &str) -> bool {
-    is_function_definition(trimmed)
+    is_function_definition(trimmed, SourceLanguage::Unknown)
 }
 
 fn is_field_definition(trimmed: &str) -> bool {
@@ -1041,37 +1044,7 @@ fn extract_trait_name(line: &str) -> String {
 }
 
 fn extract_function_name(line: &str) -> String {
-    let mut line = line.trim();
-
-    for prefix in [
-        "pub ",
-        "pub(crate) ",
-        "pub(super) ",
-        "private ",
-        "protected ",
-        "async ",
-        "static ",
-    ] {
-        if line.starts_with(prefix) {
-            line = &line[prefix.len()..];
-        }
-    }
-
-    for keyword in ["fn ", "def ", "function "] {
-        if line.starts_with(keyword) {
-            line = &line[keyword.len()..];
-            break;
-        }
-    }
-
-    if let Some(paren_pos) = line.find('(') {
-        line[..paren_pos].trim().to_string()
-    } else {
-        line.split_whitespace()
-            .next()
-            .unwrap_or("unknown")
-            .to_string()
-    }
+    shared_extract_function_name(line)
 }
 
 fn extract_method_name(line: &str) -> String {

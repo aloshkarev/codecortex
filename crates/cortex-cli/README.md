@@ -1,229 +1,92 @@
 # cortex-cli
 
-Command-line interface for CodeCortex code intelligence system.
+`cortex-cli` is the main command-line interface for CodeCortex.
 
-## Overview
+It runs indexing, queries, analysis, project operations, vector workflows, and MCP server startup.
 
-This crate provides the CLI for interacting with CodeCortex, supporting indexing, search, analysis, and more.
+## Command areas
 
-## Installation
+- repository: `index`, `list`, `delete`, `stats`
+- search/query: `find`, `query`, `skeleton`, `signature`
+- analyze: callers/callees/chain/hierarchy/deps/dead-code/complexity/overrides/smells/refactoring/branch-diff/review
+- vector: `vector-index`, `search`
+- project: `project ...`
+- mcp: `mcp start`, `mcp tools`
+- ops: `doctor`, `config`, `jobs`, `debug`, `daemon`, `interactive`
 
-```bash
-cargo install cortex-cli
-```
+## MCP serve modes
 
-## Commands
+`cortex mcp start` keeps backward-compatible stdio defaults.
+Network transports and stdio share the same underlying `CortexHandler` tool routing path.
 
-### Repository Management
+Network serve flags:
 
-```bash
-# Index a repository
-cortex index /path/to/repo
+- `--transport stdio|http-sse|websocket|multi`
+- `--listen 127.0.0.1:3001` (default loopback)
+- `--allow-remote` (required for non-loopback bind)
+- `--token <value>` or `--token-env <ENV_NAME>`
+- `--max-clients <N>`
+- `--idle-timeout-secs <N>`
 
-# List indexed repositories
-cortex list
-
-# Delete a repository
-cortex delete /path/to/repo
-
-# Show statistics
-cortex stats
-```
-
-### Code Search
+Examples:
 
 ```bash
-# Find by name
-cortex find name "UserRepository"
-
-# Find by pattern (regex)
-cortex find pattern "impl.*Handler"
-
-# Find by type
-cortex find type Function
-
-# Search in source code
-cortex find content "SELECT * FROM"
-```
-
-### Analysis
-
-```bash
-# Find callers of a function
-cortex analyze callers "process_request"
-
-# Find callees
-cortex analyze callees "main"
-
-# Find call chain between symbols
-cortex analyze chain --from "main" --to "db_query"
-
-# Show class hierarchy
-cortex analyze hierarchy "BaseHandler"
-
-# Find dead code
-cortex analyze dead-code
-
-# Show complexity analysis
-cortex analyze complexity --top 20
-```
-
-### Context Capsule
-
-```bash
-# Get context capsule for a symbol
-cortex capsule "auth_handler"
-
-# Get impact graph
-cortex impact "UserService"
-
-# Analyze refactoring
-cortex refactor "process_payment"
-```
-
-### Pattern Detection
-
-```bash
-# Find design patterns
-cortex patterns
-
-# Find tests for a symbol
-cortex test "UserService"
-```
-
-### Diagnostics
-
-```bash
-# Run diagnostics
-cortex diagnose
-
-# Check health
-cortex doctor
-```
-
-### Bundle Operations
-
-```bash
-# Export graph data
-cortex bundle export output.ccx --repo /path/to/repo
-
-# Import graph data
-cortex bundle import input.ccx
-```
-
-### Memory Operations
-
-```bash
-# Save an observation
-cortex memory save "Important note about authentication"
-
-# Search memory
-cortex memory search "auth"
-
-# Get session context
-cortex memory session
-```
-
-### Configuration
-
-```bash
-# Show current config
-cortex config show
-
-# Set a config value
-cortex config set key value
-
-# Reset to defaults
-cortex config reset
-```
-
-### Interactive Mode
-
-```bash
-cortex interactive
-> find name Handler
-Found 3 matches:
-  1. Struct Handler at handler.rs:307
-  2. Function Handler::new at handler.rs:315
-  3. Function Handler::handle at handler.rs:340
-> analyze callers 1
-Callers of Handler:
-  - main::run (main.rs:45)
-  - server::handle_request (server.rs:120)
-> stats
-Repository: codecortex
-Files: 156
-Functions: 892
-Classes: 45
-> help
-> exit
-```
-
-### Shell Completion
-
-```bash
-# Generate completion for bash
-cortex completion bash > ~/.local/share/bash-completion/completions/cortex
-
-# Generate completion for zsh
-cortex completion zsh > "${fpath[1]}/_cortex"
-
-# Generate completion for fish
-cortex completion fish > ~/.config/fish/completions/cortex.fish
-
-# Generate completion for PowerShell
-cortex completion powershell > cortex.ps1
-
-# Generate completion for Elvish
-cortex completion elvish > cortex.elv
-```
-
-## Output Formats
-
-All commands support multiple output formats:
-
-```bash
-cortex find name Handler --format json    # JSON (default)
-cortex find name Handler --format yaml    # YAML
-cortex find name Handler --format table   # Table
-cortex find name Handler --format csv     # CSV
-```
-
-## Global Options
-
-```bash
---json              Output as compact JSON
--v, --verbose       Increase verbosity (-v, -vv, -vvv)
---help              Show help
---version           Show version
-```
-
-## MCP Mode
-
-Start the MCP server for AI assistant integration:
-
-```bash
-# Start MCP server
+# Existing stdio behavior
 cortex mcp start
 
-# List available tools
+# HTTP+SSE on localhost
+cortex mcp start --transport http-sse --listen 127.0.0.1:3001
+
+# WebSocket + HTTP+SSE with bearer token
+cortex mcp start --transport multi --listen 0.0.0.0:3001 --allow-remote --token "$CORTEX_MCP_TOKEN"
+```
+
+## Examples
+
+```bash
+cortex index /path/to/repo --force
+cortex find name GraphClient
+cortex analyze callers authenticate
+cortex analyze complexity --top 20
 cortex mcp tools
 ```
 
-## Dependencies
+## Analyze filter flags
 
-- `clap` - CLI framework with derive macros
-- `clap-complete` - Shell completion generation
-- `dialoguer` - Interactive prompts
-- `indicatif` - Progress bars
-- `owo-colors` - Colored output
-- `rustyline` - Interactive mode (REPL)
-- `serde_yaml` - YAML output format
-- `comfy-table` - Table output format
+- `--file` (alias to `--include-file`)
+- `--folder` (aliases: `--dir`, `--directory`; alias to `--include-path`)
+- `--include-path`
+- `--include-file`
+- `--include-glob`
+- `--exclude-path`
+- `--exclude-file`
+- `--exclude-glob`
 
-## Tests
+## Integration tests
 
-Run tests with:
+Per-language integration tests:
+
+- `crates/cortex-cli/tests/language_matrix_integration.rs`
+- `crates/cortex-cli/tests/integration/`
+
+Real remote-fixture matrix currently runs 12 languages (10 baseline + Kotlin + Swift). JSON and Shell runtime support is covered via parser/vector/analyzer unit and contract tests.
+
+Run one language:
+
+```bash
+CORTEX_INTEGRATION_ENABLE=1 CORTEX_REAL_INTEGRATION=1 \
+cargo test -p cortex-cli --test language_matrix_integration integration_rust -- --ignored --nocapture --test-threads=1
+```
+
+Run all languages in order:
+
+```bash
+CORTEX_INTEGRATION_ENABLE=1 CORTEX_REAL_INTEGRATION=1 \
+cargo test -p cortex-cli --test language_matrix_integration integration_all_languages_ordered_one_by_one -- --ignored --nocapture --test-threads=1
+```
+
+## Test
+
 ```bash
 cargo test -p cortex-cli -- --test-threads=1
 ```

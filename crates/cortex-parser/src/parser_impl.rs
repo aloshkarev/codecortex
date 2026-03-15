@@ -39,6 +39,10 @@ impl TreeSitterParser {
             Language::Java => tree_sitter_java::LANGUAGE.into(),
             Language::Php => tree_sitter_php::LANGUAGE_PHP.into(),
             Language::Ruby => tree_sitter_ruby::LANGUAGE.into(),
+            Language::Kotlin => tree_sitter_kotlin_ng::LANGUAGE.into(),
+            Language::Swift => tree_sitter_swift::LANGUAGE.into(),
+            Language::Json => tree_sitter_json::LANGUAGE.into(),
+            Language::Shell => tree_sitter_bash::LANGUAGE.into(),
         }
     }
 }
@@ -71,6 +75,10 @@ impl Parser for TreeSitterParser {
             Language::Java => languages::java::extract(source, path, &tree),
             Language::Php => languages::php::extract(source, path, &tree),
             Language::Ruby => languages::ruby::extract(source, path, &tree),
+            Language::Kotlin => languages::kotlin::extract(source, path, &tree),
+            Language::Swift => languages::swift::extract(source, path, &tree),
+            Language::Json => languages::json::extract(source, path, &tree),
+            Language::Shell => languages::shell::extract(source, path, &tree),
         };
 
         Ok(result)

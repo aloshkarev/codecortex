@@ -63,7 +63,8 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use comfy_table::{Cell, Color, ContentArrangement, Table, presets::UTF8_FULL};
 use cortex_analyzer::{
-    Analyzer, CodeSmell, RefactoringEngine, RefactoringRecommendation, Severity, SmellDetector,
+    AnalyzePathFilters, Analyzer, CodeSmell, RefactoringEngine, RefactoringRecommendation,
+    ReviewAnalyzer, ReviewFileInput, ReviewInput, ReviewLineRange, Severity, SmellDetector,
 };
 use cortex_core::{CortexConfig, FileChangeType, GitOperations, SearchKind};
 use cortex_graph::{BundleStore, GraphClient};
@@ -73,11 +74,14 @@ use cortex_vector::{JsonStore, LanceStore, VectorStore};
 use cortex_watcher::WatchSession;
 use indicatif::{ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
+use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use std::collections::{BTreeMap, HashMap};
 use std::io;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing_subscriber::EnvFilter;
 
@@ -99,6 +103,14 @@ enum OutputFormat {
 enum IndexModeArg {
     Full,
     IncrementalDiff,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum McpTransportArg {
+    Stdio,
+    HttpSse,
+    Websocket,
+    Multi,
 }
 
 #[derive(Debug, Parser)]
@@ -287,7 +299,29 @@ enum Commands {
 
 #[derive(Debug, Subcommand)]
 enum McpCommand {
-    Start,
+    Start {
+        /// MCP transport mode.
+        #[arg(long, value_enum, default_value_t = McpTransportArg::Stdio)]
+        transport: McpTransportArg,
+        /// Listen address for network transports.
+        #[arg(long, default_value = "127.0.0.1:3001")]
+        listen: SocketAddr,
+        /// Optional bearer token for HTTP/WS auth.
+        #[arg(long)]
+        token: Option<String>,
+        /// Read bearer token from an environment variable.
+        #[arg(long = "token-env")]
+        token_env: Option<String>,
+        /// Allow non-loopback listen addresses.
+        #[arg(long, default_value_t = false)]
+        allow_remote: bool,
+        /// Maximum concurrent network clients.
+        #[arg(long, default_value_t = 64)]
+        max_clients: usize,
+        /// Idle timeout for websocket clients.
+        #[arg(long = "idle-timeout-secs", default_value_t = 600)]
+        idle_timeout_secs: u64,
+    },
     Tools,
 }
 
@@ -323,20 +357,33 @@ enum AnalyzeCommand {
         to: String,
         #[arg(long)]
         depth: Option<usize>,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
     },
     Hierarchy {
         class: String,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
     },
     Deps {
         module: String,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
     },
-    DeadCode,
+    DeadCode {
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
+    },
     Complexity {
         #[arg(long, default_value_t = 20)]
         top: usize,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
     },
     Overrides {
         method: String,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
     },
     /// Detect code smells from source files
     Smells {
@@ -352,6 +399,8 @@ enum AnalyzeCommand {
         /// Maximum number of findings to return
         #[arg(long, default_value_t = 500)]
         limit: usize,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
     },
     /// Recommend refactoring techniques based on detected smells
     Refactoring {
@@ -367,6 +416,8 @@ enum AnalyzeCommand {
         /// Maximum number of recommendations to return
         #[arg(long, default_value_t = 500)]
         limit: usize,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
     },
     /// Compare two git branches for a project/repository
     BranchDiff {
@@ -380,6 +431,43 @@ enum AnalyzeCommand {
         /// Maximum number of ahead/behind commits returned per side
         #[arg(long, default_value_t = 50)]
         commit_limit: usize,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
+    },
+    /// Run diff-aware code review automation (local or GitLab MR)
+    Review {
+        /// Base ref for local mode (for example main)
+        #[arg(long)]
+        base: Option<String>,
+        /// Head ref for local mode (for example HEAD or feature branch)
+        #[arg(long)]
+        head: Option<String>,
+        /// Repository path (optional, uses current project or cwd)
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// GitLab project ID or URL-encoded path (for example group%2Frepo)
+        #[arg(long = "gitlab-project")]
+        gitlab_project: Option<String>,
+        /// GitLab merge request IID
+        #[arg(long = "mr-iid")]
+        mr_iid: Option<u64>,
+        /// GitLab API token (defaults to GITLAB_TOKEN env)
+        #[arg(long = "gitlab-token")]
+        gitlab_token: Option<String>,
+        /// GitLab API base URL
+        #[arg(long = "api-base", default_value = "https://gitlab.com/api/v4")]
+        api_base: String,
+        /// Minimum severity to report (info, warning, error, critical)
+        #[arg(long, default_value = "warning")]
+        min_severity: String,
+        /// Maximum findings in each section
+        #[arg(long, default_value_t = 200)]
+        max_findings: usize,
+        /// Exit non-zero if finding severity >= threshold
+        #[arg(long = "fail-on")]
+        fail_on: Option<String>,
+        #[command(flatten)]
+        filters: AnalyzeFilterArgs,
     },
 }
 
@@ -449,6 +537,69 @@ enum DebugCommand {
 #[derive(Debug, Args)]
 struct TargetArg {
     target: String,
+    #[command(flatten)]
+    filters: AnalyzeFilterArgs,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+struct AnalyzeFilterArgs {
+    /// Scope analysis to these file paths or file names (repeatable)
+    #[arg(long = "file", value_delimiter = ',', action = clap::ArgAction::Append)]
+    scope_files: Vec<String>,
+    /// Scope analysis to these folder/path prefixes (repeatable)
+    #[arg(
+        long = "folder",
+        value_delimiter = ',',
+        action = clap::ArgAction::Append,
+        visible_alias = "dir",
+        visible_alias = "directory"
+    )]
+    scope_folders: Vec<String>,
+    /// Include only paths with this prefix (repeatable)
+    #[arg(long = "include-path", value_delimiter = ',', action = clap::ArgAction::Append)]
+    include_paths: Vec<String>,
+    /// Include only these file paths or file names (repeatable)
+    #[arg(long = "include-file", value_delimiter = ',', action = clap::ArgAction::Append)]
+    include_files: Vec<String>,
+    /// Include only paths matching these glob patterns (repeatable)
+    #[arg(long = "include-glob", value_delimiter = ',', action = clap::ArgAction::Append)]
+    include_globs: Vec<String>,
+    /// Exclude paths with this prefix (repeatable)
+    #[arg(long = "exclude-path", value_delimiter = ',', action = clap::ArgAction::Append)]
+    exclude_paths: Vec<String>,
+    /// Exclude these file paths or file names (repeatable)
+    #[arg(long = "exclude-file", value_delimiter = ',', action = clap::ArgAction::Append)]
+    exclude_files: Vec<String>,
+    /// Exclude paths matching these glob patterns (repeatable)
+    #[arg(long = "exclude-glob", value_delimiter = ',', action = clap::ArgAction::Append)]
+    exclude_globs: Vec<String>,
+}
+
+impl AnalyzeFilterArgs {
+    fn to_filters(&self) -> AnalyzePathFilters {
+        let mut include_paths = self.scope_folders.clone();
+        for value in &self.include_paths {
+            if !include_paths.iter().any(|existing| existing == value) {
+                include_paths.push(value.clone());
+            }
+        }
+
+        let mut include_files = self.scope_files.clone();
+        for value in &self.include_files {
+            if !include_files.iter().any(|existing| existing == value) {
+                include_files.push(value.clone());
+            }
+        }
+
+        AnalyzePathFilters {
+            include_paths,
+            include_files,
+            include_globs: self.include_globs.clone(),
+            exclude_paths: self.exclude_paths.clone(),
+            exclude_files: self.exclude_files.clone(),
+            exclude_globs: self.exclude_globs.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -1159,8 +1310,55 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
 
 async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
     match cmd {
-        McpCommand::Start => {
-            cortex_mcp::handler::start_stdio(config.clone()).await?;
+        McpCommand::Start {
+            transport,
+            listen,
+            token,
+            token_env,
+            allow_remote,
+            max_clients,
+            idle_timeout_secs,
+        } => {
+            let effective_token = if let Some(value) = token {
+                Some(value)
+            } else if let Some(env_name) = token_env {
+                std::env::var(env_name).ok().filter(|v| !v.trim().is_empty())
+            } else {
+                None
+            };
+
+            let transport = match transport {
+                McpTransportArg::Stdio => cortex_mcp::McpTransport::Stdio,
+                McpTransportArg::HttpSse => cortex_mcp::McpTransport::HttpSse,
+                McpTransportArg::Websocket => cortex_mcp::McpTransport::WebSocket,
+                McpTransportArg::Multi => cortex_mcp::McpTransport::Multi,
+            };
+
+            if !allow_remote
+                && !listen.ip().is_loopback()
+                && !matches!(transport, cortex_mcp::McpTransport::Stdio)
+            {
+                anyhow::bail!(
+                    "Refusing non-loopback MCP bind without --allow-remote (listen: {})",
+                    listen
+                );
+            }
+            if allow_remote && effective_token.is_none() {
+                eprintln!(
+                    "{} Remote mode enabled without bearer token; consider --token or --token-env",
+                    "Warning:".yellow()
+                );
+            }
+
+            let options = cortex_mcp::McpServeOptions {
+                transport,
+                listen,
+                token: effective_token,
+                allow_remote,
+                max_clients,
+                idle_timeout_secs,
+            };
+            cortex_mcp::start_with_options(config.clone(), options).await?;
         }
         McpCommand::Tools => {
             for tool in tool_names() {
@@ -1737,9 +1935,17 @@ async fn run_analyze(
         min_severity,
         max_files,
         limit,
+        filters,
     } = &command
     {
-        return run_analyze_smells(path, min_severity, *max_files, *limit, format);
+        return run_analyze_smells(
+            path,
+            min_severity,
+            *max_files,
+            *limit,
+            &filters.to_filters(),
+            format,
+        );
     }
 
     if let AnalyzeCommand::Refactoring {
@@ -1747,9 +1953,17 @@ async fn run_analyze(
         min_severity,
         max_files,
         limit,
+        filters,
     } = &command
     {
-        return run_analyze_refactoring(path, min_severity, *max_files, *limit, format);
+        return run_analyze_refactoring(
+            path,
+            min_severity,
+            *max_files,
+            *limit,
+            &filters.to_filters(),
+            format,
+        );
     }
 
     if let AnalyzeCommand::BranchDiff {
@@ -1757,24 +1971,107 @@ async fn run_analyze(
         target,
         path,
         commit_limit,
+        filters,
     } = &command
     {
-        return run_analyze_branch_diff(source, target, path.as_deref(), *commit_limit, format);
+        return run_analyze_branch_diff(
+            source,
+            target,
+            path.as_deref(),
+            *commit_limit,
+            &filters.to_filters(),
+            format,
+        );
+    }
+
+    if let AnalyzeCommand::Review {
+        base,
+        head,
+        path,
+        gitlab_project,
+        mr_iid,
+        gitlab_token,
+        api_base,
+        min_severity,
+        max_findings,
+        fail_on,
+        filters,
+    } = &command
+    {
+        return run_analyze_review(
+            base.as_deref(),
+            head.as_deref(),
+            path.as_deref(),
+            gitlab_project.as_deref(),
+            *mr_iid,
+            gitlab_token.as_deref(),
+            api_base.as_str(),
+            min_severity.as_str(),
+            *max_findings,
+            fail_on.as_deref(),
+            &filters.to_filters(),
+            format,
+        )
+        .await;
     }
 
     let analyzer = Analyzer::new(GraphClient::connect(config).await?);
     let out = match command {
-        AnalyzeCommand::Callers(TargetArg { target }) => analyzer.callers(&target).await?,
-        AnalyzeCommand::Callees(TargetArg { target }) => analyzer.callees(&target).await?,
-        AnalyzeCommand::Chain { from, to, depth } => analyzer.call_chain(&from, &to, depth).await?,
-        AnalyzeCommand::Hierarchy { class } => analyzer.class_hierarchy(&class).await?,
-        AnalyzeCommand::Deps { module } => analyzer.module_dependencies(&module).await?,
-        AnalyzeCommand::DeadCode => analyzer.dead_code().await?,
-        AnalyzeCommand::Complexity { top } => analyzer.complexity(top).await?,
-        AnalyzeCommand::Overrides { method } => analyzer.overrides(&method).await?,
+        AnalyzeCommand::Callers(TargetArg { target, filters }) => {
+            let filter_obj = filters.to_filters();
+            analyzer
+                .callers_with_filters(&target, Some(&filter_obj))
+                .await?
+        }
+        AnalyzeCommand::Callees(TargetArg { target, filters }) => {
+            let filter_obj = filters.to_filters();
+            analyzer
+                .callees_with_filters(&target, Some(&filter_obj))
+                .await?
+        }
+        AnalyzeCommand::Chain {
+            from,
+            to,
+            depth,
+            filters,
+        } => {
+            let filter_obj = filters.to_filters();
+            analyzer
+                .call_chain_with_filters(&from, &to, depth, Some(&filter_obj))
+                .await?
+        }
+        AnalyzeCommand::Hierarchy { class, filters } => {
+            let filter_obj = filters.to_filters();
+            analyzer
+                .class_hierarchy_with_filters(&class, Some(&filter_obj))
+                .await?
+        }
+        AnalyzeCommand::Deps { module, filters } => {
+            let filter_obj = filters.to_filters();
+            analyzer
+                .module_dependencies_with_filters(&module, Some(&filter_obj))
+                .await?
+        }
+        AnalyzeCommand::DeadCode { filters } => {
+            let filter_obj = filters.to_filters();
+            analyzer.dead_code_with_filters(Some(&filter_obj)).await?
+        }
+        AnalyzeCommand::Complexity { top, filters } => {
+            let filter_obj = filters.to_filters();
+            analyzer
+                .complexity_with_filters(top, Some(&filter_obj))
+                .await?
+        }
+        AnalyzeCommand::Overrides { method, filters } => {
+            let filter_obj = filters.to_filters();
+            analyzer
+                .overrides_with_filters(&method, Some(&filter_obj))
+                .await?
+        }
         AnalyzeCommand::Smells { .. }
         | AnalyzeCommand::Refactoring { .. }
-        | AnalyzeCommand::BranchDiff { .. } => unreachable!(),
+        | AnalyzeCommand::BranchDiff { .. }
+        | AnalyzeCommand::Review { .. } => unreachable!(),
     };
     print_formatted(format, &serde_json::to_value(out)?)?;
     Ok(())
@@ -1812,10 +2109,12 @@ fn run_analyze_smells(
     min_severity: &str,
     max_files: usize,
     limit: usize,
+    filters: &AnalyzePathFilters,
     format: OutputFormat,
 ) -> anyhow::Result<()> {
     let severity = parse_severity(min_severity)?;
-    let mut scan = detect_smells_in_path(path, max_files)?;
+    filters.validate()?;
+    let mut scan = detect_smells_in_path(path, max_files, filters)?;
     scan.smells.retain(|smell| smell.severity >= severity);
     scan.smells.sort_by(|a, b| {
         b.severity
@@ -1860,10 +2159,12 @@ fn run_analyze_refactoring(
     min_severity: &str,
     max_files: usize,
     limit: usize,
+    filters: &AnalyzePathFilters,
     format: OutputFormat,
 ) -> anyhow::Result<()> {
     let severity = parse_severity(min_severity)?;
-    let mut scan = detect_smells_in_path(path, max_files)?;
+    filters.validate()?;
+    let mut scan = detect_smells_in_path(path, max_files, filters)?;
     scan.smells.retain(|smell| smell.severity >= severity);
 
     let mut engine = RefactoringEngine::new();
@@ -1909,8 +2210,10 @@ fn run_analyze_branch_diff(
     target: &str,
     path: Option<&Path>,
     commit_limit: usize,
+    filters: &AnalyzePathFilters,
     format: OutputFormat,
 ) -> anyhow::Result<()> {
+    filters.validate()?;
     let input_path = resolve_analysis_repo_path(path)?;
     let repo_path = find_git_repository_root(&input_path).unwrap_or(input_path.clone());
     let git = GitOperations::new(&repo_path);
@@ -1926,6 +2229,8 @@ fn run_analyze_branch_diff(
         diff.ahead_commits.truncate(commit_limit);
         diff.behind_commits.truncate(commit_limit);
     }
+
+    diff.changed_files.retain(|f| filters.matches_path(&f.path));
 
     diff.changed_files
         .sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
@@ -1979,6 +2284,322 @@ fn run_analyze_branch_diff(
 
     print_formatted(format, &output)?;
     Ok(())
+}
+
+async fn run_analyze_review(
+    base: Option<&str>,
+    head: Option<&str>,
+    path: Option<&Path>,
+    gitlab_project: Option<&str>,
+    mr_iid: Option<u64>,
+    gitlab_token: Option<&str>,
+    api_base: &str,
+    min_severity: &str,
+    max_findings: usize,
+    fail_on: Option<&str>,
+    filters: &AnalyzePathFilters,
+    format: OutputFormat,
+) -> anyhow::Result<()> {
+    filters.validate()?;
+    let min_severity = parse_severity(min_severity)?;
+    let max_findings = if max_findings == 0 {
+        None
+    } else {
+        Some(max_findings)
+    };
+
+    let (base_ref, head_ref, files) = if gitlab_project.is_some() || mr_iid.is_some() {
+        let project = gitlab_project
+            .ok_or_else(|| anyhow::anyhow!("--gitlab-project is required in GitLab review mode"))?;
+        let iid =
+            mr_iid.ok_or_else(|| anyhow::anyhow!("--mr-iid is required in GitLab review mode"))?;
+        let token = gitlab_token
+            .map(str::to_string)
+            .or_else(|| std::env::var("GITLAB_TOKEN").ok())
+            .ok_or_else(|| anyhow::anyhow!("--gitlab-token or GITLAB_TOKEN is required"))?;
+        load_gitlab_review_inputs(api_base, &token, project, iid, filters).await?
+    } else {
+        let repo_input_path = resolve_analysis_repo_path(path)?;
+        let repo_path = find_git_repository_root(&repo_input_path).unwrap_or(repo_input_path);
+        let local_base = base.unwrap_or("main");
+        let local_head = head.unwrap_or("HEAD");
+        let files = load_local_review_inputs(&repo_path, local_base, local_head, filters)?;
+        (
+            Some(local_base.to_string()),
+            Some(local_head.to_string()),
+            files,
+        )
+    };
+
+    let review_input = ReviewInput {
+        base_ref,
+        head_ref,
+        filters: filters.clone(),
+        min_severity,
+        max_findings,
+        files,
+    };
+
+    let report = ReviewAnalyzer::new().analyze(&review_input);
+    let output = serde_json::json!({
+        "mode": if gitlab_project.is_some() || mr_iid.is_some() { "gitlab_mr" } else { "local_diff" },
+        "base_ref": report.base_ref,
+        "head_ref": report.head_ref,
+        "summary": report.summary,
+        "smells": report.smells,
+        "refactorings": report.refactorings,
+    });
+
+    print_formatted(format, &output)?;
+
+    if let Some(threshold) = fail_on {
+        let threshold = parse_severity(threshold)?;
+        let should_fail = report.smells.iter().any(|f| f.severity >= threshold);
+        if should_fail {
+            anyhow::bail!("review failed: finding severity is >= {}", threshold);
+        }
+    }
+
+    Ok(())
+}
+
+fn load_local_review_inputs(
+    repo_path: &Path,
+    base: &str,
+    head: &str,
+    filters: &AnalyzePathFilters,
+) -> anyhow::Result<Vec<ReviewFileInput>> {
+    let range = format!("{base}...{head}");
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["diff", "--unified=0", "--no-color", range.as_str()])
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        anyhow::bail!("failed to compute local diff: {}", stderr.trim());
+    }
+
+    let patch = String::from_utf8_lossy(&output.stdout);
+    let changed = parse_unified_diff_changed_ranges(&patch);
+    let mut files = Vec::new();
+
+    for (path, ranges) in changed {
+        if !filters.matches_path(&path) {
+            continue;
+        }
+        if let Some(source) = read_file_at_ref(repo_path, head, &path)? {
+            files.push(ReviewFileInput {
+                path,
+                source,
+                changed_ranges: ranges,
+            });
+        }
+    }
+
+    Ok(files)
+}
+
+async fn load_gitlab_review_inputs(
+    api_base: &str,
+    token: &str,
+    project: &str,
+    mr_iid: u64,
+    filters: &AnalyzePathFilters,
+) -> anyhow::Result<(Option<String>, Option<String>, Vec<ReviewFileInput>)> {
+    let mut headers = HeaderMap::new();
+    headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    headers.insert(
+        AUTHORIZATION,
+        HeaderValue::from_str(format!("Bearer {token}").as_str())?,
+    );
+    let client = reqwest::Client::builder()
+        .default_headers(headers)
+        .build()?;
+
+    let project_encoded = encode_path_component(project);
+    let api_base = api_base.trim_end_matches('/');
+    let mr_url = format!("{api_base}/projects/{project_encoded}/merge_requests/{mr_iid}");
+    let mr_value: serde_json::Value = client
+        .get(&mr_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let source_branch = mr_value
+        .get("source_branch")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let target_branch = mr_value
+        .get("target_branch")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
+    let changes_url = format!("{mr_url}/changes");
+    let changes_value: serde_json::Value = client
+        .get(&changes_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+
+    let mut files = Vec::new();
+    let source_ref = source_branch
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("GitLab MR response missing source_branch"))?;
+
+    for change in changes_value
+        .get("changes")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
+        let deleted = change
+            .get("deleted_file")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if deleted {
+            continue;
+        }
+
+        let path = change
+            .get("new_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        if path.is_empty() || !filters.matches_path(&path) {
+            continue;
+        }
+
+        let diff = change
+            .get("diff")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let changed_ranges = parse_hunk_ranges(diff);
+        if changed_ranges.is_empty() {
+            continue;
+        }
+
+        if let Some(source) =
+            fetch_gitlab_file_raw(&client, api_base, &project_encoded, &path, &source_ref).await?
+        {
+            files.push(ReviewFileInput {
+                path,
+                source,
+                changed_ranges,
+            });
+        }
+    }
+
+    Ok((target_branch, source_branch, files))
+}
+
+async fn fetch_gitlab_file_raw(
+    client: &reqwest::Client,
+    api_base: &str,
+    project_encoded: &str,
+    path: &str,
+    source_ref: &str,
+) -> anyhow::Result<Option<String>> {
+    let path_encoded = encode_path_component(path);
+    let ref_encoded = encode_path_component(source_ref);
+    let url = format!(
+        "{}/projects/{}/repository/files/{}/raw?ref={}",
+        api_base.trim_end_matches('/'),
+        project_encoded,
+        path_encoded,
+        ref_encoded
+    );
+
+    let response = client.get(url).send().await?;
+    if response.status().is_success() {
+        return Ok(Some(response.text().await?));
+    }
+    if response.status().as_u16() == 404 {
+        return Ok(None);
+    }
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    anyhow::bail!("failed to fetch GitLab file content ({status}): {body}");
+}
+
+fn read_file_at_ref(
+    repo_path: &Path,
+    reference: &str,
+    file_path: &str,
+) -> anyhow::Result<Option<String>> {
+    let show_spec = format!("{reference}:{file_path}");
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["show", show_spec.as_str()])
+        .output()?;
+    if output.status.success() {
+        return Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()));
+    }
+    Ok(None)
+}
+
+fn parse_unified_diff_changed_ranges(patch: &str) -> HashMap<String, Vec<ReviewLineRange>> {
+    let mut out: HashMap<String, Vec<ReviewLineRange>> = HashMap::new();
+    let mut current_path: Option<String> = None;
+    for line in patch.lines() {
+        if let Some(stripped) = line.strip_prefix("+++ b/") {
+            current_path = Some(stripped.to_string());
+            continue;
+        }
+        if line.starts_with("+++ /dev/null") {
+            current_path = None;
+            continue;
+        }
+        if line.starts_with("@@") {
+            if let (Some(path), Some(range)) = (current_path.as_ref(), parse_hunk_range(line)) {
+                out.entry(path.clone()).or_default().push(range);
+            }
+        }
+    }
+    out
+}
+
+fn parse_hunk_ranges(patch: &str) -> Vec<ReviewLineRange> {
+    patch.lines().filter_map(parse_hunk_range).collect()
+}
+
+fn parse_hunk_range(line: &str) -> Option<ReviewLineRange> {
+    if !line.starts_with("@@") {
+        return None;
+    }
+    let plus_index = line.find('+')?;
+    let after_plus = &line[plus_index + 1..];
+    let end_index = after_plus.find(' ').unwrap_or(after_plus.len());
+    let range_part = &after_plus[..end_index];
+
+    let (start, count) = if let Some((start, count)) = range_part.split_once(',') {
+        (start.parse::<u32>().ok()?, count.parse::<u32>().ok()?)
+    } else {
+        (range_part.parse::<u32>().ok()?, 1)
+    };
+
+    if count == 0 || start == 0 {
+        return None;
+    }
+    Some(ReviewLineRange {
+        start_line: start,
+        end_line: start + count.saturating_sub(1),
+    })
+}
+
+fn encode_path_component(input: &str) -> String {
+    input
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect::<String>()
 }
 
 fn resolve_analysis_repo_path(path: Option<&Path>) -> anyhow::Result<PathBuf> {
@@ -2184,13 +2805,17 @@ fn parse_severity(value: &str) -> anyhow::Result<Severity> {
     }
 }
 
-fn detect_smells_in_path(path: &str, max_files: usize) -> anyhow::Result<SmellScanResult> {
+fn detect_smells_in_path(
+    path: &str,
+    max_files: usize,
+    filters: &AnalyzePathFilters,
+) -> anyhow::Result<SmellScanResult> {
     let root = PathBuf::from(path);
     if !root.exists() {
         anyhow::bail!("Path does not exist: {}", path);
     }
 
-    let files = collect_analyzable_files(&root, max_files.max(1))?;
+    let files = collect_analyzable_files(&root, max_files.max(1), filters)?;
     let detector = SmellDetector::new();
 
     let mut files_scanned = 0usize;
@@ -2231,9 +2856,13 @@ fn detect_smells_in_path(path: &str, max_files: usize) -> anyhow::Result<SmellSc
     })
 }
 
-fn collect_analyzable_files(root: &Path, max_files: usize) -> anyhow::Result<Vec<PathBuf>> {
+fn collect_analyzable_files(
+    root: &Path,
+    max_files: usize,
+    filters: &AnalyzePathFilters,
+) -> anyhow::Result<Vec<PathBuf>> {
     if root.is_file() {
-        if is_analyzable_file(root) {
+        if is_analyzable_file(root) && filters.matches_path(&root.display().to_string()) {
             return Ok(vec![root.to_path_buf()]);
         }
         return Ok(Vec::new());
@@ -2257,7 +2886,8 @@ fn collect_analyzable_files(root: &Path, max_files: usize) -> anyhow::Result<Vec
         }
 
         if metadata.is_file() {
-            if is_analyzable_file(&current) {
+            if is_analyzable_file(&current) && filters.matches_path(&current.display().to_string())
+            {
                 files.push(current);
             }
             continue;
@@ -2276,7 +2906,7 @@ fn collect_analyzable_files(root: &Path, max_files: usize) -> anyhow::Result<Vec
                 Err(_) => continue,
             };
             let path = entry.path();
-            if path.is_dir() && should_skip_dir(&path) {
+            if path.is_dir() && should_skip_dir(&path, filters) {
                 continue;
             }
             stack.push(path);
@@ -2287,11 +2917,13 @@ fn collect_analyzable_files(root: &Path, max_files: usize) -> anyhow::Result<Vec
     Ok(files)
 }
 
-fn should_skip_dir(path: &Path) -> bool {
-    path.file_name()
+fn should_skip_dir(path: &Path, filters: &AnalyzePathFilters) -> bool {
+    let built_in_skip = path
+        .file_name()
         .and_then(|name| name.to_str())
         .map(|name| ANALYZE_SKIP_DIRS.contains(&name))
-        .unwrap_or(false)
+        .unwrap_or(false);
+    built_in_skip || filters.is_excluded_path(&path.display().to_string())
 }
 
 fn is_analyzable_file(path: &Path) -> bool {
@@ -5054,6 +5686,8 @@ async fn run_vector_index(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::Method::GET;
+    use httpmock::MockServer;
 
     #[test]
     fn test_parse_interactive_command_help() {
@@ -5849,6 +6483,7 @@ mod tests {
         assert!(subcommands.contains(&"smells"));
         assert!(subcommands.contains(&"refactoring"));
         assert!(subcommands.contains(&"branch-diff"));
+        assert!(subcommands.contains(&"review"));
     }
 
     #[test]
@@ -5864,12 +6499,14 @@ mod tests {
                         min_severity,
                         max_files,
                         limit,
+                        filters,
                     },
             } => {
                 assert_eq!(path, "./crates/cortex-cli");
                 assert_eq!(min_severity, "info");
                 assert_eq!(max_files, 1000);
                 assert_eq!(limit, 500);
+                assert!(filters.to_filters().is_empty());
             }
             _ => panic!("expected analyze smells command"),
         }
@@ -5888,12 +6525,14 @@ mod tests {
                         min_severity,
                         max_files,
                         limit,
+                        filters,
                     },
             } => {
                 assert_eq!(path, ".");
                 assert_eq!(min_severity, "warning");
                 assert_eq!(max_files, 1000);
                 assert_eq!(limit, 500);
+                assert!(filters.to_filters().is_empty());
             }
             _ => panic!("expected analyze refactoring command"),
         }
@@ -5920,14 +6559,65 @@ mod tests {
                         target,
                         path,
                         commit_limit,
+                        filters,
                     },
             } => {
                 assert_eq!(source, "feature/auth");
                 assert_eq!(target, "main");
                 assert!(path.is_none());
                 assert_eq!(commit_limit, 25);
+                assert!(filters.to_filters().is_empty());
             }
             _ => panic!("expected analyze branch-diff command"),
+        }
+    }
+
+    #[test]
+    fn test_analyze_review_command_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "analyze",
+            "review",
+            "--base",
+            "main",
+            "--head",
+            "feature/auth",
+            "--min-severity",
+            "error",
+            "--max-findings",
+            "42",
+            "--fail-on",
+            "critical",
+        ]);
+        match cli.command {
+            Commands::Analyze {
+                command:
+                    AnalyzeCommand::Review {
+                        base,
+                        head,
+                        path,
+                        gitlab_project,
+                        mr_iid,
+                        min_severity,
+                        max_findings,
+                        fail_on,
+                        filters,
+                        ..
+                    },
+            } => {
+                assert_eq!(base, Some("main".to_string()));
+                assert_eq!(head, Some("feature/auth".to_string()));
+                assert!(path.is_none());
+                assert!(gitlab_project.is_none());
+                assert!(mr_iid.is_none());
+                assert_eq!(min_severity, "error");
+                assert_eq!(max_findings, 42);
+                assert_eq!(fail_on, Some("critical".to_string()));
+                assert!(filters.to_filters().is_empty());
+            }
+            _ => panic!("expected analyze review command"),
         }
     }
 
@@ -5953,8 +6643,68 @@ mod tests {
     fn test_target_arg() {
         let arg = TargetArg {
             target: "UserRepository::find".to_string(),
+            filters: AnalyzeFilterArgs::default(),
         };
         assert_eq!(arg.target, "UserRepository::find");
+    }
+
+    #[test]
+    fn test_analyze_filters_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "analyze",
+            "callers",
+            "authenticate",
+            "--include-path",
+            "src/auth",
+            "--include-glob",
+            "**/*.rs",
+            "--exclude-file",
+            "src/auth/legacy.rs",
+        ]);
+        match cli.command {
+            Commands::Analyze {
+                command: AnalyzeCommand::Callers(TargetArg { target, filters }),
+            } => {
+                assert_eq!(target, "authenticate");
+                let parsed = filters.to_filters();
+                assert_eq!(parsed.include_paths, vec!["src/auth"]);
+                assert_eq!(parsed.include_globs, vec!["**/*.rs"]);
+                assert_eq!(parsed.exclude_files, vec!["src/auth/legacy.rs"]);
+            }
+            _ => panic!("expected analyze callers command"),
+        }
+    }
+
+    #[test]
+    fn test_analyze_scope_file_and_folder_parse() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "analyze",
+            "dead-code",
+            "--folder",
+            "src/auth",
+            "--dir",
+            "src/core",
+            "--file",
+            "src/auth/token.rs",
+            "--file",
+            "main.rs",
+        ]);
+        match cli.command {
+            Commands::Analyze {
+                command: AnalyzeCommand::DeadCode { filters },
+            } => {
+                let parsed = filters.to_filters();
+                assert_eq!(parsed.include_paths, vec!["src/auth", "src/core"]);
+                assert_eq!(parsed.include_files, vec!["src/auth/token.rs", "main.rs"]);
+            }
+            _ => panic!("expected analyze dead-code command"),
+        }
     }
 
     #[test]
@@ -6007,5 +6757,264 @@ mod tests {
             Path::new("/repo/src/other/foo.rs"),
             "src/generated/**"
         ));
+    }
+
+    #[test]
+    fn test_parse_hunk_range_basic() {
+        let range = parse_hunk_range("@@ -10,2 +42,5 @@ fn sample()").expect("range");
+        assert_eq!(range.start_line, 42);
+        assert_eq!(range.end_line, 46);
+    }
+
+    #[test]
+    fn test_parse_unified_diff_changed_ranges() {
+        let patch = r#"
+diff --git a/src/lib.rs b/src/lib.rs
+index 123..456 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,2 +3,4 @@
+-old
++new
++more
+"#;
+        let parsed = parse_unified_diff_changed_ranges(patch);
+        let ranges = parsed.get("src/lib.rs").expect("path exists");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start_line, 3);
+        assert_eq!(ranges[0].end_line, 6);
+    }
+
+    #[test]
+    fn test_parse_hunk_ranges_gitlab_style_diff() {
+        let diff = r#"
+@@ -8,0 +9,2 @@ fn a() {
++let x = 1;
++let y = 2;
+@@ -21,1 +25,1 @@ fn b() {
+-return old;
++return new;
+"#;
+        let ranges = parse_hunk_ranges(diff);
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].start_line, 9);
+        assert_eq!(ranges[0].end_line, 10);
+        assert_eq!(ranges[1].start_line, 25);
+        assert_eq!(ranges[1].end_line, 25);
+    }
+
+    #[test]
+    fn test_encode_path_component() {
+        assert_eq!(encode_path_component("group/repo"), "group%2Frepo");
+        assert_eq!(encode_path_component("src/lib.rs"), "src%2Flib.rs");
+        assert_eq!(encode_path_component("space file.rs"), "space%20file.rs");
+    }
+
+    #[tokio::test]
+    async fn test_load_gitlab_review_inputs_happy_path() {
+        let server = MockServer::start_async().await;
+        let mr_path = "/projects/42/merge_requests/7";
+
+        let mr_mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path(mr_path);
+                then.status(200).json_body(serde_json::json!({
+                    "source_branch": "feature/review",
+                    "target_branch": "main"
+                }));
+            })
+            .await;
+
+        let changes_mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path(format!("{mr_path}/changes"));
+                then.status(200).json_body(serde_json::json!({
+                    "changes": [
+                        {
+                            "new_path": "app.rs",
+                            "deleted_file": false,
+                            "diff": "@@ -1,0 +3,2 @@\n+let a = 1;\n+let b = 2;\n"
+                        }
+                    ]
+                }));
+            })
+            .await;
+
+        let file_mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/projects/42/repository/files/app.rs/raw")
+                    .query_param("ref", "feature/review");
+                then.status(200).body("fn main() {}\n");
+            })
+            .await;
+
+        let (base_ref, head_ref, files) = load_gitlab_review_inputs(
+            &server.url(""),
+            "test-token",
+            "42",
+            7,
+            &AnalyzePathFilters::default(),
+        )
+        .await
+        .expect("GitLab review input loading should succeed");
+
+        assert_eq!(base_ref.as_deref(), Some("main"));
+        assert_eq!(head_ref.as_deref(), Some("feature/review"));
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "app.rs");
+        assert_eq!(files[0].changed_ranges.len(), 1);
+        assert_eq!(files[0].changed_ranges[0].start_line, 3);
+        assert_eq!(files[0].changed_ranges[0].end_line, 4);
+        assert_eq!(files[0].source, "fn main() {}\n");
+
+        mr_mock.assert_async().await;
+        changes_mock.assert_async().await;
+        file_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_load_gitlab_review_inputs_applies_filters_and_skips_deleted() {
+        let server = MockServer::start_async().await;
+        let mr_path = "/projects/42/merge_requests/9";
+
+        server
+            .mock_async(|when, then| {
+                when.method(GET).path(mr_path);
+                then.status(200).json_body(serde_json::json!({
+                    "source_branch": "feature/filtering",
+                    "target_branch": "main"
+                }));
+            })
+            .await;
+
+        let changes_mock = server
+            .mock_async(|when, then| {
+                when.method(GET).path(format!("{mr_path}/changes"));
+                then.status(200).json_body(serde_json::json!({
+                    "changes": [
+                        {
+                            "new_path": "keep.rs",
+                            "deleted_file": false,
+                            "diff": "@@ -1,1 +1,1 @@\n-let x = 0;\n+let x = 1;\n"
+                        },
+                        {
+                            "new_path": "skip.rs",
+                            "deleted_file": false,
+                            "diff": "@@ -1,1 +1,1 @@\n-a\n+b\n"
+                        },
+                        {
+                            "new_path": "deleted.rs",
+                            "deleted_file": true,
+                            "diff": "@@ -1,1 +0,0 @@\n-a\n"
+                        }
+                    ]
+                }));
+            })
+            .await;
+
+        let keep_file_mock = server
+            .mock_async(|when, then| {
+                when.method(GET)
+                    .path("/projects/42/repository/files/keep.rs/raw")
+                    .query_param("ref", "feature/filtering");
+                then.status(200).body("fn keep() {}\n");
+            })
+            .await;
+
+        let filters = AnalyzePathFilters {
+            include_paths: Vec::new(),
+            include_files: vec!["keep.rs".to_string()],
+            include_globs: Vec::new(),
+            exclude_paths: Vec::new(),
+            exclude_files: Vec::new(),
+            exclude_globs: Vec::new(),
+        };
+
+        let (_, _, files) = load_gitlab_review_inputs(&server.url(""), "token", "42", 9, &filters)
+            .await
+            .expect("GitLab review input loading should succeed");
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "keep.rs");
+        assert_eq!(files[0].source, "fn keep() {}\n");
+
+        changes_mock.assert_async().await;
+        keep_file_mock.assert_async().await;
+    }
+
+    #[test]
+    fn test_mcp_start_defaults_to_stdio() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from(["cortex", "mcp", "start"]);
+        match cli.command {
+            Commands::Mcp {
+                command:
+                    McpCommand::Start {
+                        transport,
+                        listen,
+                        token,
+                        token_env,
+                        allow_remote,
+                        max_clients,
+                        idle_timeout_secs,
+                    },
+            } => {
+                assert_eq!(transport, McpTransportArg::Stdio);
+                assert_eq!(listen, "127.0.0.1:3001".parse().unwrap());
+                assert!(token.is_none());
+                assert!(token_env.is_none());
+                assert!(!allow_remote);
+                assert_eq!(max_clients, 64);
+                assert_eq!(idle_timeout_secs, 600);
+            }
+            _ => panic!("expected mcp start defaults"),
+        }
+    }
+
+    #[test]
+    fn test_mcp_start_parses_network_flags() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "mcp",
+            "start",
+            "--transport",
+            "multi",
+            "--listen",
+            "0.0.0.0:9090",
+            "--token-env",
+            "CORTEX_MCP_TOKEN",
+            "--allow-remote",
+            "--max-clients",
+            "20",
+            "--idle-timeout-secs",
+            "120",
+        ]);
+        match cli.command {
+            Commands::Mcp {
+                command:
+                    McpCommand::Start {
+                        transport,
+                        listen,
+                        token,
+                        token_env,
+                        allow_remote,
+                        max_clients,
+                        idle_timeout_secs,
+                    },
+            } => {
+                assert_eq!(transport, McpTransportArg::Multi);
+                assert_eq!(listen, "0.0.0.0:9090".parse().unwrap());
+                assert!(token.is_none());
+                assert_eq!(token_env.as_deref(), Some("CORTEX_MCP_TOKEN"));
+                assert!(allow_remote);
+                assert_eq!(max_clients, 20);
+                assert_eq!(idle_timeout_secs, 120);
+            }
+            _ => panic!("expected mcp start network flags"),
+        }
     }
 }

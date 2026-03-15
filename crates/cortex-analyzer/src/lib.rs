@@ -67,9 +67,10 @@ pub mod code_smells;
 pub mod coupling;
 pub mod duplication;
 pub mod refactoring;
+pub mod review;
 pub mod smells;
 
-pub use analyzer::Analyzer;
+pub use analyzer::{AnalyzePathFilters, Analyzer};
 pub use code_smells::{
     CodeSmell, FunctionMetrics, Severity, SmellCategory, SmellConfig, SmellDetector, SmellType,
 };
@@ -80,6 +81,10 @@ pub use coupling::{
 pub use duplication::{CodeLocation, DuplicateBlock, DuplicationConfig, DuplicationDetector};
 pub use refactoring::{
     Priority, RefactoringEngine, RefactoringRecommendation, RefactoringTechnique,
+};
+pub use review::{
+    ReviewAnalyzer, ReviewFileInput, ReviewInput, ReviewLineRange, ReviewRefactorFinding,
+    ReviewReport, ReviewSmellFinding, ReviewSummary,
 };
 pub use smells::{
     SmellCategory as SmellsCategory, detect_alternative_classes, detect_comments,

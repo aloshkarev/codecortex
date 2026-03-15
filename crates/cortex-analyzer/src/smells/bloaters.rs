@@ -11,6 +11,11 @@
 //! - Data Clumps
 //! - Switch Statements
 
+use super::language::{
+    SourceLanguage, extract_function_name as shared_extract_function_name,
+    is_comment_line as shared_is_comment_line, is_function_signature, is_method_signature,
+    is_python_function_end, is_python_style_function, is_ruby_style_function, ruby_block_delta,
+};
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
 
 /// Detect functions that are too long
@@ -21,41 +26,48 @@ pub fn detect_long_functions(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     let mut in_function = false;
     let mut function_start = 0;
     let mut brace_count = 0;
     let mut function_name = String::new();
     let mut function_is_python_style = false;
+    let mut function_is_ruby_style = false;
+    let mut saw_open_brace = false;
+    let mut ruby_block_depth = 0i32;
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Detect function start (works for Rust, Python, JS, Java, C#, etc.)
-        if !in_function
-            && (trimmed.starts_with("fn ")
-                || trimmed.starts_with("def ")
-                || trimmed.starts_with("function ")
-                || trimmed.starts_with("public ")
-                || trimmed.starts_with("private ")
-                || trimmed.starts_with("protected ")
-                || trimmed.starts_with("internal ")
-                || trimmed.starts_with("static ")
-                || (trimmed.contains("fn ") && trimmed.contains('(')))
-        {
+        if !in_function && is_function_signature(trimmed, lang) {
             in_function = true;
             function_start = i;
             brace_count = 0;
-            function_name = extract_function_name(trimmed);
-            function_is_python_style = trimmed.starts_with("def ") && !source.contains('{');
+            function_name = shared_extract_function_name(trimmed);
+            function_is_python_style = is_python_style_function(trimmed, lang);
+            function_is_ruby_style = is_ruby_style_function(trimmed, lang);
+            saw_open_brace = false;
+            ruby_block_depth = 0;
         }
 
         if in_function {
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
+            if function_is_ruby_style {
+                ruby_block_depth += ruby_block_delta(trimmed);
+            }
+            if trimmed.contains('{') {
+                saw_open_brace = true;
+            }
 
-            if (brace_count == 0 && i > function_start && !function_is_python_style)
+            if (brace_count == 0
+                && i > function_start
+                && !function_is_python_style
+                && !function_is_ruby_style
+                && saw_open_brace)
                 || (function_is_python_style && is_python_function_end(&lines, i, function_start))
+                || (function_is_ruby_style && ruby_block_depth <= 0 && i >= function_start)
             {
                 let function_lines = i - function_start + 1;
 
@@ -84,6 +96,7 @@ pub fn detect_long_functions(
 
                 in_function = false;
                 function_is_python_style = false;
+                function_is_ruby_style = false;
             }
         }
     }
@@ -95,6 +108,7 @@ pub fn detect_long_functions(
 pub fn detect_large_classes(source: &str, file_path: &str, config: &SmellConfig) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     let mut in_class = false;
     let mut class_start = 0;
@@ -127,7 +141,7 @@ pub fn detect_large_classes(source: &str, file_path: &str, config: &SmellConfig)
             brace_count -= trimmed.matches('}').count() as i32;
 
             // Count methods
-            if is_method_definition(trimmed) {
+            if is_method_definition(trimmed, lang) {
                 method_count += 1;
             }
 
@@ -195,6 +209,7 @@ pub fn detect_primitive_obsession(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Track primitive parameter patterns
     let mut primitive_params: std::collections::HashMap<String, usize> =
@@ -204,19 +219,19 @@ pub fn detect_primitive_obsession(
         let trimmed = line.trim();
 
         // Skip comments
-        if trimmed.starts_with("//") || trimmed.starts_with("#") || trimmed.starts_with("/*") {
+        if shared_is_comment_line(trimmed, lang) {
             continue;
         }
 
         // Look for function definitions with primitive parameters
-        if is_function_definition(trimmed) {
+        if is_function_definition(trimmed, lang) {
             if let Some(paren_start) = trimmed.find('(') {
                 if let Some(paren_end) = trimmed.rfind(')') {
                     let params_str = &trimmed[paren_start + 1..paren_end];
                     let primitives = count_primitive_params(params_str);
 
                     if primitives > config.max_primitive_params {
-                        let function_name = extract_function_name(trimmed);
+                        let function_name = shared_extract_function_name(trimmed);
                         smells.push(CodeSmell {
                             smell_type: SmellType::PrimitiveObsession,
                             severity: Severity::Warning,
@@ -258,11 +273,12 @@ pub fn detect_long_parameter_lists(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        if is_function_definition(trimmed) {
+        if is_function_definition(trimmed, lang) {
             if let Some(paren_start) = trimmed.find('(') {
                 if let Some(paren_end) = find_matching_paren(trimmed, paren_start) {
                     let params_str = &trimmed[paren_start + 1..paren_end];
@@ -271,7 +287,7 @@ pub fn detect_long_parameter_lists(
                         let param_count = count_parameters(params_str);
 
                         if param_count > config.max_parameters {
-                            let function_name = extract_function_name(trimmed);
+                            let function_name = shared_extract_function_name(trimmed);
                             let severity =
                                 calculate_count_severity(param_count, config.max_parameters);
 
@@ -306,6 +322,7 @@ pub fn detect_long_parameter_lists(
 pub fn detect_data_clumps(source: &str, file_path: &str, config: &SmellConfig) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Collect all parameter groups
     let mut param_groups: Vec<(String, Vec<String>, usize)> = Vec::new();
@@ -313,14 +330,14 @@ pub fn detect_data_clumps(source: &str, file_path: &str, config: &SmellConfig) -
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        if is_function_definition(trimmed) {
+        if is_function_definition(trimmed, lang) {
             if let Some(paren_start) = trimmed.find('(') {
                 if let Some(paren_end) = find_matching_paren(trimmed, paren_start) {
                     let params_str = &trimmed[paren_start + 1..paren_end];
                     let param_names: Vec<String> = extract_param_names(params_str);
 
                     if param_names.len() >= 3 {
-                        let function_name = extract_function_name(trimmed);
+                        let function_name = shared_extract_function_name(trimmed);
                         param_groups.push((function_name, param_names, i));
                     }
                 }
@@ -374,6 +391,7 @@ pub fn detect_switch_statements(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     let mut in_switch = false;
     let mut switch_start = 0;
@@ -404,7 +422,7 @@ pub fn detect_switch_statements(
                 case_count += 1;
             }
             // Rust match patterns
-            if trimmed.contains(" => ") && !trimmed.starts_with("//") {
+            if trimmed.contains(" => ") && !shared_is_comment_line(trimmed, lang) {
                 case_count += 1;
             }
 
@@ -440,65 +458,9 @@ pub fn detect_switch_statements(
 
 // Helper functions
 
+#[allow(dead_code)]
 fn extract_function_name(line: &str) -> String {
-    let mut line = line.trim();
-
-    // Strip visibility modifiers and other prefixes
-    let prefixes = [
-        "pub(crate) ",
-        "pub(super) ",
-        "pub ",
-        "private ",
-        "protected ",
-        "internal ",
-        "static ",
-        "async ",
-        "extern ",
-        "unsafe ",
-        "virtual ",
-        "override ",
-        "final ",
-        "abstract ",
-    ];
-
-    loop {
-        let mut stripped = false;
-        for prefix in prefixes {
-            if line.starts_with(prefix) {
-                line = &line[prefix.len()..];
-                stripped = true;
-                break;
-            }
-        }
-        if !stripped {
-            break;
-        }
-    }
-
-    // Strip function keywords
-    let keywords = ["fn ", "def ", "function ", "void ", "async fn "];
-    for keyword in keywords {
-        if line.starts_with(keyword) {
-            line = &line[keyword.len()..];
-            break;
-        }
-    }
-
-    // Handle return types (e.g., "fn name() -> Type")
-    if let Some(paren_pos) = line.find('(') {
-        line = &line[..paren_pos];
-    }
-
-    // Get the first word that looks like a function name
-    line.split(|c: char| !c.is_alphanumeric() && c != '_')
-        .find(|s| {
-            !s.is_empty()
-                && s.chars()
-                    .next()
-                    .is_some_and(|c| c.is_alphabetic() || c == '_')
-        })
-        .unwrap_or("unknown")
-        .to_string()
+    shared_extract_function_name(line)
 }
 
 fn extract_class_name(line: &str) -> String {
@@ -530,26 +492,12 @@ fn extract_class_name(line: &str) -> String {
     "unknown".to_string()
 }
 
-fn is_function_definition(trimmed: &str) -> bool {
-    trimmed.starts_with("fn ")
-        || trimmed.starts_with("def ")
-        || trimmed.starts_with("function ")
-        || trimmed.starts_with("public ")
-        || trimmed.starts_with("private ")
-        || trimmed.starts_with("protected ")
-        || trimmed.starts_with("internal ")
-        || trimmed.starts_with("static ")
-        || (trimmed.contains("fn ") && trimmed.contains('('))
+fn is_function_definition(trimmed: &str, lang: SourceLanguage) -> bool {
+    is_function_signature(trimmed, lang)
 }
 
-fn is_method_definition(trimmed: &str) -> bool {
-    // Methods in classes
-    (trimmed.starts_with("fn ")
-        || trimmed.starts_with("def ")
-        || trimmed.starts_with("function ")
-        || trimmed.starts_with("public ")
-        || trimmed.starts_with("private "))
-        && trimmed.contains('(')
+fn is_method_definition(trimmed: &str, lang: SourceLanguage) -> bool {
+    is_method_signature(trimmed, lang)
 }
 
 fn is_field_definition(trimmed: &str) -> bool {
@@ -681,30 +629,6 @@ fn extract_switch_variable(line: &str) -> String {
     "unknown".to_string()
 }
 
-fn is_python_function_end(lines: &[&str], current_idx: usize, function_start: usize) -> bool {
-    if current_idx <= function_start {
-        return false;
-    }
-
-    let function_indent = get_indent_level(lines[function_start]);
-
-    for next_line in lines.iter().skip(current_idx + 1) {
-        let trimmed = next_line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        let next_indent = get_indent_level(next_line);
-        return next_indent <= function_indent;
-    }
-
-    true
-}
-
-fn get_indent_level(line: &str) -> usize {
-    line.len() - line.trim_start_matches(|c| c == ' ' || c == '\t').len()
-}
-
 fn calculate_length_severity(actual: usize, max: usize) -> Severity {
     if actual > max * 2 {
         Severity::Critical
@@ -761,6 +685,27 @@ def long_function():
 "#;
 
         let smells = detect_long_functions(source, "test.py", &config);
+        assert!(!smells.is_empty());
+        assert_eq!(smells[0].smell_type, SmellType::LongFunction);
+        assert_eq!(smells[0].symbol_name, "long_function");
+    }
+
+    #[test]
+    fn test_detect_long_ruby_function() {
+        let config = SmellConfig {
+            max_function_lines: 4,
+            ..Default::default()
+        };
+        let source = r#"
+def long_function(x)
+  if x > 0
+    work
+  end
+  finish
+  x
+end
+"#;
+        let smells = detect_long_functions(source, "test.rb", &config);
         assert!(!smells.is_empty());
         assert_eq!(smells[0].smell_type, SmellType::LongFunction);
         assert_eq!(smells[0].symbol_name, "long_function");

@@ -22,8 +22,14 @@ dotenvy.workspace = true
 glob = "0.3"
 indicatif.workspace = true
 owo-colors.workspace = true
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"] }
 rustyline = "17"
 serde_json.workspace = true
 serde_yaml = "0.9"
 tokio.workspace = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+futures-util = "0.3"
+httpmock = "0.7"
+tokio-tungstenite = "0.28"

@@ -37,6 +37,15 @@ const CALL_QUERY: &str = r#"
 (call_expression
   function: (field_expression
     field: (field_identifier) @call))
+
+(call_expression
+  function: (parenthesized_expression
+    (pointer_expression
+      argument: (identifier) @call)))
+
+(call_expression
+  function: (template_function
+    (identifier) @call))
 "#;
 
 const IMPORT_QUERY: &str = r#"
@@ -57,6 +66,14 @@ const INHERIT_QUERY: &str = r#"
 const PARAM_QUERY: &str = r#"
 (parameter_declaration
   declarator: (identifier) @param)
+
+(parameter_declaration
+  declarator: (pointer_declarator
+    declarator: (identifier) @param))
+
+(parameter_declaration
+  declarator: (reference_declarator
+    (identifier) @param))
 "#;
 
 pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResult {
@@ -126,4 +143,70 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         None,
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    fn parse_cpp(source: &str) -> tree_sitter::Tree {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_cpp::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    #[test]
+    fn extracts_cpp_reference_and_pointer_parameters() {
+        let source = r#"
+            class Writer {};
+            void update(Writer& writer, int* count) {
+                (void)writer;
+                (void)count;
+            }
+        "#;
+        let tree = parse_cpp(source);
+        let result = extract(source, Path::new("writer.cpp"), &tree);
+
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.kind == EntityKind::Parameter && n.name == "writer")
+        );
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| n.kind == EntityKind::Parameter && n.name == "count")
+        );
+    }
+
+    #[test]
+    fn extracts_cpp_dereferenced_function_pointer_calls() {
+        let source = r#"
+            void run(void (*cb)(int)) {
+                (*cb)(1);
+            }
+        "#;
+        let tree = parse_cpp(source);
+        let result = extract(source, Path::new("callbacks.cpp"), &tree);
+
+        assert!(result.calls.iter().any(|call| call == "cb"));
+    }
+
+    #[test]
+    fn extracts_cpp_template_function_calls() {
+        let source = r#"
+            template <typename T> T make() { return T{}; }
+            void run() { auto v = make<int>(); }
+        "#;
+        let tree = parse_cpp(source);
+        let result = extract(source, Path::new("template.cpp"), &tree);
+
+        assert!(result.calls.iter().any(|call| call == "make"));
+    }
+
 }

@@ -9,6 +9,9 @@
 //! - Temporary Field
 //! - Divergent Change
 
+use super::language::{
+    SourceLanguage, extract_function_name as shared_extract_function_name, is_method_signature,
+};
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
 use std::collections::{HashMap, HashSet};
 
@@ -21,9 +24,10 @@ pub fn detect_alternative_classes(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Extract all classes and their method signatures
-    let classes = extract_class_signatures(&lines);
+    let classes = extract_class_signatures(&lines, lang);
 
     // Compare each pair of classes for similarity
     let class_names: Vec<&String> = classes.keys().collect();
@@ -75,14 +79,15 @@ pub fn detect_refused_bequest(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Find inheritance relationships
-    let inheritances = find_inheritance_relationships(&lines);
+    let inheritances = find_inheritance_relationships(&lines, lang);
 
     for inheritance in inheritances {
         // Check if subclass overrides most parent methods
-        let subclass_methods = extract_class_methods(&lines, &inheritance.subclass);
-        let parent_methods = extract_class_methods(&lines, &inheritance.parent);
+        let subclass_methods = extract_class_methods(&lines, &inheritance.subclass, lang);
+        let parent_methods = extract_class_methods(&lines, &inheritance.parent, lang);
 
         if parent_methods.is_empty() {
             continue;
@@ -135,9 +140,10 @@ pub fn detect_temporary_fields(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Find all classes and their fields
-    let classes = extract_class_signatures(&lines);
+    let classes = extract_class_signatures(&lines, lang);
 
     for (class_name, class_info) in &classes {
         // Find field usages across methods
@@ -188,8 +194,9 @@ pub fn detect_divergent_change(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
-    let classes = extract_class_signatures(&lines);
+    let classes = extract_class_signatures(&lines, lang);
 
     for (class_name, class_info) in &classes {
         // Analyze method cohesion
@@ -259,7 +266,7 @@ fn group_methods_by_prefix(methods: &HashSet<String>) -> Vec<HashSet<String>> {
     groups_map.into_values().filter(|g| g.len() > 1).collect()
 }
 
-fn extract_class_signatures(lines: &[&str]) -> HashMap<String, ClassInfo> {
+fn extract_class_signatures(lines: &[&str], lang: SourceLanguage) -> HashMap<String, ClassInfo> {
     let mut classes: HashMap<String, ClassInfo> = HashMap::new();
     let mut current_class: Option<String> = None;
     let mut brace_count = 0;
@@ -298,7 +305,7 @@ fn extract_class_signatures(lines: &[&str]) -> HashMap<String, ClassInfo> {
             let info = classes.get_mut(class_name).unwrap();
 
             // Extract method names
-            if is_method_line(trimmed) {
+            if is_method_line(trimmed, lang) {
                 let method_name = extract_method_name(trimmed);
                 info.methods.insert(method_name);
             }
@@ -357,7 +364,11 @@ fn extract_class_name_from_line(line: &str) -> String {
     "unknown".to_string()
 }
 
-fn extract_class_methods(lines: &[&str], class_name: &str) -> HashSet<String> {
+fn extract_class_methods(
+    lines: &[&str],
+    class_name: &str,
+    lang: SourceLanguage,
+) -> HashSet<String> {
     let mut methods = HashSet::new();
     let mut in_class = false;
     let mut _target_class = String::new();
@@ -378,7 +389,7 @@ fn extract_class_methods(lines: &[&str], class_name: &str) -> HashSet<String> {
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            if is_method_line(trimmed) {
+            if is_method_line(trimmed, lang) {
                 methods.insert(extract_method_name(trimmed));
             }
 
@@ -391,7 +402,10 @@ fn extract_class_methods(lines: &[&str], class_name: &str) -> HashSet<String> {
     methods
 }
 
-fn find_inheritance_relationships(lines: &[&str]) -> Vec<InheritanceRelation> {
+fn find_inheritance_relationships(
+    lines: &[&str],
+    _lang: SourceLanguage,
+) -> Vec<InheritanceRelation> {
     let mut relations = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
@@ -501,14 +515,8 @@ fn extract_csharp_inheritance(line: &str) -> Option<(String, String)> {
     Some((child, parent))
 }
 
-fn is_method_line(trimmed: &str) -> bool {
-    (trimmed.starts_with("fn ")
-        || trimmed.starts_with("def ")
-        || trimmed.starts_with("function ")
-        || trimmed.starts_with("public ")
-        || trimmed.starts_with("private ")
-        || trimmed.starts_with("protected "))
-        && trimmed.contains('(')
+fn is_method_line(trimmed: &str, lang: SourceLanguage) -> bool {
+    is_method_signature(trimmed, lang)
 }
 
 fn is_field_line(trimmed: &str) -> bool {
@@ -524,41 +532,7 @@ fn is_field_line(trimmed: &str) -> bool {
 }
 
 fn extract_method_name(line: &str) -> String {
-    let mut line = line.trim();
-
-    // Strip prefixes
-    let prefixes = [
-        "pub ",
-        "pub(crate) ",
-        "pub(super) ",
-        "private ",
-        "protected ",
-        "async ",
-        "static ",
-    ];
-    for prefix in prefixes {
-        if line.starts_with(prefix) {
-            line = &line[prefix.len()..];
-        }
-    }
-
-    // Strip fn/def keywords
-    for keyword in ["fn ", "def ", "function "] {
-        if line.starts_with(keyword) {
-            line = &line[keyword.len()..];
-            break;
-        }
-    }
-
-    // Get name before (
-    if let Some(paren_pos) = line.find('(') {
-        line[..paren_pos].trim().to_string()
-    } else {
-        line.split_whitespace()
-            .next()
-            .unwrap_or("unknown")
-            .to_string()
-    }
+    shared_extract_function_name(line)
 }
 
 fn extract_field_name(line: &str) -> String {

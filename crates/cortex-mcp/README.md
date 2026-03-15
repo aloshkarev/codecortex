@@ -1,138 +1,67 @@
 # cortex-mcp
 
-Model Context Protocol server implementation with 40 production-ready tools.
+`cortex-mcp` exposes CodeCortex functionality as MCP tools.
 
-## Overview
+It receives MCP JSON-RPC requests and routes them into graph, analyzer, vector, project, and memory operations.
 
-This crate implements the MCP server for CodeCortex, providing AI assistants with powerful code intelligence capabilities.
+Language coverage follows runtime parser/indexer support (including Kotlin, Swift, JSON, and Shell).
 
-## Tool Categories (40 Tools)
+## Tool coverage areas
 
-### Code Retrieval (4 tools)
-| Tool | Description | p95 Latency |
-|------|-------------|-------------|
-| `get_context_capsule` | Context-aware code retrieval | 2500ms |
-| `find_code` | Search by name/pattern/type | 500ms |
-| `get_skeleton` | Compressed code view | 200ms |
-| `get_signature` | Function signature lookup | 100ms |
+- repository/index
+- search/analysis
+- context/impact
+- vector
+- project
+- watch/jobs
+- memory
+- bundle/LSP
+- advanced queries
 
-### Impact Analysis (3 tools)
-| Tool | Description | p95 Latency |
-|------|-------------|-------------|
-| `get_impact_graph` | Blast radius analysis | 2200ms |
-| `search_logic_flow` | Multi-path finding | 3000ms |
-| `find_dead_code` | Unreachable code detection | 1000ms |
+## Serve transports
 
-### Code Quality (4 tools)
-| Tool | Description |
-|------|-------------|
-| `calculate_cyclomatic_complexity` | Complexity metrics |
-| `find_tests` | Test discovery |
-| `analyze_refactoring` | Refactoring suggestions |
-| `find_patterns` | 15 design patterns |
+`cortex-mcp` now supports:
 
-### Diagnostics (4 tools)
-| Tool | Description |
-|------|-------------|
-| `diagnose` | System diagnostics |
-| `check_health` | Health check |
-| `index_status` | Indexing status |
-| `explain_result` | Result explanation |
+- `stdio` (default, backward-compatible)
+- `http-sse` via `POST /mcp` (SSE-framed MCP responses)
+- `websocket` via `GET /ws`
+- `multi` to expose both network endpoints together
 
-### Memory System (3 tools)
-| Tool | Description |
-|------|-------------|
-| `save_observation` | Persist observations |
-| `get_session_context` | Session context |
-| `search_memory` | Search stored memories |
+All transports route through the same `CortexHandler` RMCP tool path (stdio, HTTP+SSE, and WebSocket), so tool behavior and schemas stay consistent across clients.
 
-### Project Management (7 tools)
-| Tool | Description |
-|------|-------------|
-| `list_projects` | List all projects |
-| `add_project` | Add new project |
-| `remove_project` | Remove project |
-| `set_current_project` | Set active project |
-| `get_current_project` | Get active project |
-| `list_branches` | List Git branches |
-| `refresh_project` | Refresh Git state |
+Security baseline:
 
-### Other Tools (15 tools)
-- LSP Integration: `submit_lsp_edges`, `workspace_setup`
-- Repository: `add_code_to_graph`, `list_indexed_repositories`, `delete_repository`, `get_repository_stats`
-- Bundle: `load_bundle`, `export_bundle`
-- Watch: `watch_directory`, `unwatch_directory`, `list_watched_paths`
-- Advanced: `execute_cypher_query`, `analyze_code_relationships`, `check_job_status`, `list_jobs`
+- default bind is loopback (`127.0.0.1`)
+- non-loopback requires explicit `--allow-remote`
+- optional bearer token auth (`Authorization: Bearer <token>`) for HTTP and WebSocket
 
-## Quality Metrics
+## Filter support
 
-```rust
-use cortex_mcp::{QualityRegistry, QualityTimer, QualityHealthStatus};
+Analyzer tools support:
 
-let registry = QualityRegistry::with_defaults();
+- `include_paths`
+- `include_files`
+- `include_globs`
+- `exclude_paths`
+- `exclude_files`
+- `exclude_globs`
 
-// Time a tool invocation
-let timer = QualityTimer::new(&registry, "get_context_capsule");
-// ... execute tool ...
-// Timer automatically records on drop
+CLI shorthand parity:
 
-// Get metrics
-let metrics = registry.get_metrics("get_context_capsule");
-println!("Error rate: {:.2}%", metrics.unwrap().error_rate * 100.0);
+- CLI `--folder` (also `--dir`, `--directory`) maps to MCP `include_paths`
+- CLI `--file` maps to MCP `include_files`
 
-// Get system health
-let health = registry.health_status();
-assert!(matches!(health, QualityHealthStatus::Excellent | QualityHealthStatus::Good));
-```
+This keeps MCP payload filters and CLI analyze scope guidance 1:1.
 
-## Usage
+## Development checks
 
-```rust
-use cortex_core::config::CortexConfig;
-use cortex_mcp::CortexHandler;
-
-// Create handler with configuration
-let _handler = CortexHandler::new(CortexConfig::default());
-
-// Get all tool names
-let tools = cortex_mcp::tool_names();
-assert_eq!(tools.len(), 40);
-```
-
-## Feature Flags
-
-Tools can be enabled/disabled via environment variables:
-
-```bash
-# Disable specific tools
-CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=0
-
-# Enable all tools (default)
-# All tools enabled by default
-```
-
-## Performance SLOs
-
-| Metric | Target |
-|--------|--------|
-| p50 latency (capsule) | 600ms |
-| p95 latency (capsule) | 2500ms |
-| Cache hit rate | > 80% |
-| Quality: Recall@20 | >= 0.85 |
-| Quality: nDCG@20 | >= 0.78 |
-
-## Dependencies
-
-- `rmcp` - MCP protocol
-- `cortex-core`, `cortex-graph`, `cortex-indexer`, etc.
-- `dashmap` - Concurrent cache
-- `tokio` - Async runtime
-
-## Tests
-
-Run tests with:
 ```bash
 cargo test -p cortex-mcp -- --test-threads=1
+cargo test -p cortex-mcp --test tool_surface_matrix -- --nocapture
 ```
 
-Current test count: **143 tests**
+## Related docs
+
+- root usage: `README.md`
+- client integrations: `docs/INTEGRATION.md`
+- test runbook: `docs/INTEGRATION_TEST_MATRIX.md`

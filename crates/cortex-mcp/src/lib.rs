@@ -91,8 +91,11 @@ mod logic_flow;
 mod lsp_ingest;
 mod memory;
 mod metrics;
+mod network_server;
 mod project_tools;
 pub mod quality;
+#[allow(deprecated, dead_code)]
+mod server;
 mod telemetry;
 mod tfidf;
 mod vector_service;
@@ -105,7 +108,7 @@ pub use capsule::{
 pub use centrality::{CentralityGraph, CentralityScorer, CombinedCentrality, Edge};
 pub use contracts::{CacheHit, EnvelopeBuilder, EnvelopeMeta, EnvelopeStatus, ErrorBody};
 pub use flags::FeatureFlags;
-pub use handler::CortexHandler;
+pub use handler::{CortexHandler, McpServeOptions, McpTransport, start_with_options};
 pub use impact::{
     BlastRadius, ImpactGraph, ImpactGraphBuilder, ImpactNode, ImpactNodeType, Provenance,
     RawRelation,

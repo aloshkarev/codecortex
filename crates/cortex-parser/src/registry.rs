@@ -23,6 +23,10 @@ impl ParserRegistry {
             Language::Java,
             Language::Php,
             Language::Ruby,
+            Language::Kotlin,
+            Language::Swift,
+            Language::Json,
+            Language::Shell,
         ] {
             parsers.insert(lang, Arc::new(TreeSitterParser::new(lang)));
         }

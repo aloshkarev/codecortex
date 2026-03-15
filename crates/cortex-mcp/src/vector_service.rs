@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "rb", "c", "cpp", "h", "hpp", "cs", "php",
-    "swift", "kt",
+    "swift", "kt", "kts", "json", "sh", "bash", "zsh",
 ];
 
 pub struct VectorService {
@@ -84,7 +84,10 @@ impl VectorService {
             .map_err(|e| format!("vector count failed: {e}"))
     }
 
-    pub async fn search(&self, request: VectorSearchRequest<'_>) -> Result<Vec<HybridResult>, String> {
+    pub async fn search(
+        &self,
+        request: VectorSearchRequest<'_>,
+    ) -> Result<Vec<HybridResult>, String> {
         let hybrid = HybridSearch::new(self.store.clone(), self.embedder.clone());
         let filter = build_metadata_filter(request.filters);
 
@@ -247,9 +250,11 @@ fn metadata_matches_filter(
     metadata: &HashMap<String, MetadataValue>,
     filter: &HashMap<String, MetadataValue>,
 ) -> bool {
-    filter
-        .iter()
-        .all(|(key, value)| metadata.get(key).is_some_and(|candidate| candidate == value))
+    filter.iter().all(|(key, value)| {
+        metadata
+            .get(key)
+            .is_some_and(|candidate| candidate == value)
+    })
 }
 
 fn collect_code_files(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -307,7 +312,9 @@ fn language_from_path(path: &Path) -> &'static str {
         "cs" => "csharp",
         "php" => "php",
         "swift" => "swift",
-        "kt" => "kotlin",
+        "kt" | "kts" => "kotlin",
+        "json" => "json",
+        "sh" | "bash" | "zsh" => "shell",
         _ => "unknown",
     }
 }
@@ -329,6 +336,9 @@ mod tests {
     fn recognizes_code_files() {
         assert!(is_code_file(Path::new("src/main.rs")));
         assert!(is_code_file(Path::new("app.ts")));
+        assert!(is_code_file(Path::new("scripts/build.sh")));
+        assert!(is_code_file(Path::new("build.gradle.kts")));
+        assert!(is_code_file(Path::new("package.json")));
         assert!(!is_code_file(Path::new("README.md")));
     }
 
@@ -336,5 +346,9 @@ mod tests {
     fn detects_language_from_extension() {
         assert_eq!(language_from_path(Path::new("src/lib.rs")), "rust");
         assert_eq!(language_from_path(Path::new("src/app.py")), "python");
+        assert_eq!(language_from_path(Path::new("src/main.kt")), "kotlin");
+        assert_eq!(language_from_path(Path::new("Package.swift")), "swift");
+        assert_eq!(language_from_path(Path::new("package.json")), "json");
+        assert_eq!(language_from_path(Path::new("scripts/build.sh")), "shell");
     }
 }

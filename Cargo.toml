@@ -19,7 +19,7 @@ version = "1.0.0"
 edition = "2024"
 license = "MIT"
 authors = ["Aleksandr Loskarev <mailbox@aloshkarev.com>"]
-description = "CodeCortex is a Rust code-graph service and AI productivity toolkit featuring: - **`cortex` CLI** for indexing, search, and analysis - **MCP server mode** for AI clients (Claude, Cursor, VSCode) - **Memgraph backend** (Bolt protocol) with Neo4j support - **Multi-language parsing** via tree-sitter (Rust, Python, Go, TypeScript, JavaScript, C, C++, Java, PHP, Ruby) - **Hybrid search** with vector embeddings - **Enhanced memory system** for AI context persistence"
+description = "CodeCortex is a Rust code-graph service and AI productivity toolkit featuring: - **`cortex` CLI** for indexing, search, and analysis - **MCP server mode** for AI clients (Claude, Cursor, VSCode) - **Memgraph backend** (Bolt protocol) with Neo4j support - **Multi-language parsing** via tree-sitter (Rust, Python, Go, Kotlin, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Swift) - **Hybrid search** with vector embeddings - **Enhanced memory system** for AI context persistence"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -38,6 +38,7 @@ rayon = "1"
 rmp-serde = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+glob = "0.3"
 sled = "0.34"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
@@ -52,7 +53,7 @@ tree-sitter-javascript = "0.25"
 tree-sitter-python = "0.25"
 tree-sitter-rust = "0.24"
 tree-sitter-typescript = "0.23"
-rmcp = { version = "1.1.0", features = ["server", "transport-io", "schemars"] }
+rmcp = { version = "1.1.0", features = ["server", "transport-io", "transport-streamable-http-server-session", "transport-streamable-http-server", "schemars"] }
 schemars = "1.0"
 tempfile = "3"
 testcontainers = "0.27.1"

@@ -38,6 +38,19 @@ const CALL_QUERY: &str = r#"
   function: (identifier) @call)
 
 (call_expression
+  function: (scoped_identifier
+    name: (identifier) @call))
+
+(call_expression
+  function: (generic_function
+    function: (identifier) @call))
+
+(call_expression
+  function: (generic_function
+    function: (scoped_identifier
+      name: (identifier) @call)))
+
+(call_expression
   function: (field_expression
     field: (field_identifier) @call))
 
@@ -46,12 +59,7 @@ const CALL_QUERY: &str = r#"
 "#;
 
 const IMPORT_QUERY: &str = r#"
-(use_declaration
-  argument: (scoped_identifier
-    name: _ @module))
-
-(use_declaration
-  argument: (identifier) @module)
+(use_declaration) @module
 "#;
 
 const INHERIT_QUERY: &str = r#"
@@ -399,5 +407,38 @@ mod tests {
             .expect("function snippet should be present");
         assert!(snippet.len() <= 4096);
         assert!(snippet.contains("fn unicode()"));
+    }
+
+    #[test]
+    fn test_parse_scoped_and_generic_calls() {
+        let source = r#"
+            fn run() {
+                std::mem::drop::<i32>(1);
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("calls.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(result.calls.iter().any(|call| call == "drop"));
+    }
+
+    #[test]
+    fn test_parse_grouped_use_imports() {
+        let source = r#"
+            use std::{io, fs};
+            use crate::module::{TypeA, TypeB};
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("imports.rs");
+        let result = extract(source, path, &tree);
+
+        assert!(result.imports.iter().any(|m| m == "std::{io, fs}"));
+        assert!(
+            result
+                .imports
+                .iter()
+                .any(|m| m == "crate::module::{TypeA, TypeB}")
+        );
     }
 }

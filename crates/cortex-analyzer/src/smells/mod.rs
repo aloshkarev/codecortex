@@ -13,6 +13,7 @@ mod bloaters;
 mod change_preventers;
 mod couplers;
 mod dispensables;
+mod language;
 mod oo_abusers;
 
 pub use bloaters::{

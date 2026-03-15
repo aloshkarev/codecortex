@@ -326,6 +326,19 @@ impl BuildDetector {
             self.enrich_pnpm_config(&mut config);
         }
 
+        // Additional language-aware hints for projects that may not use
+        // currently-modeled build systems in this enum.
+        if self.has_gradle_kotlin() {
+            config.source_dirs.push(self.root.join("src/main/kotlin"));
+            config.source_dirs.push(self.root.join("src/test/kotlin"));
+            config.source_dirs.push(self.root.join("src/main/java"));
+            config.source_dirs.push(self.root.join("src/test/java"));
+        }
+        if self.has_swift_package() {
+            config.source_dirs.push(self.root.join("Sources"));
+            config.source_dirs.push(self.root.join("Tests"));
+        }
+
         // Load compile_commands.json if present (for C/C++ projects)
         if detected.contains(&BuildSystem::CMake) || detected.contains(&BuildSystem::Make) {
             self.load_compile_commands(&mut config);
@@ -397,6 +410,18 @@ impl BuildDetector {
     /// Check for pnpm-lock.yaml
     fn has_pnpm(&self) -> bool {
         self.root.join("package.json").exists() && self.root.join("pnpm-lock.yaml").exists()
+    }
+
+    /// Check for Kotlin Gradle build files
+    fn has_gradle_kotlin(&self) -> bool {
+        ["build.gradle.kts", "settings.gradle.kts", "gradle.properties"]
+            .iter()
+            .any(|name| self.root.join(name).exists())
+    }
+
+    /// Check for Swift Package Manager manifests
+    fn has_swift_package(&self) -> bool {
+        self.root.join("Package.swift").exists()
     }
 
     /// Enrich config with Cargo information
@@ -902,5 +927,33 @@ version = "0.1.0"
                 .primary_languages()
                 .contains(&"javascript")
         );
+    }
+
+    #[test]
+    fn test_detect_kotlin_gradle_hints() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        fs::write(root.join("build.gradle.kts"), "plugins {}").unwrap();
+
+        let detector = BuildDetector::new(root);
+        let config = detector.detect();
+
+        assert!(config.source_dirs.contains(&root.join("src/main/kotlin")));
+        assert!(config.source_dirs.contains(&root.join("src/test/kotlin")));
+    }
+
+    #[test]
+    fn test_detect_swift_package_hints() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        fs::write(root.join("Package.swift"), "// swift-tools-version:5.9").unwrap();
+
+        let detector = BuildDetector::new(root);
+        let config = detector.detect();
+
+        assert!(config.source_dirs.contains(&root.join("Sources")));
+        assert!(config.source_dirs.contains(&root.join("Tests")));
     }
 }

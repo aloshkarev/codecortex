@@ -7,6 +7,51 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceLanguage {
+    Python,
+    Ruby,
+    Php,
+    Shell,
+    Json,
+    Unknown,
+}
+
+impl SourceLanguage {
+    fn from_file_path(path: &str) -> Self {
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        match ext.as_deref() {
+            Some("py") => Self::Python,
+            Some("rb") => Self::Ruby,
+            Some("php") => Self::Php,
+            Some("sh") | Some("bash") | Some("zsh") => Self::Shell,
+            Some("json") => Self::Json,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+fn is_comment_line(trimmed: &str, lang: SourceLanguage) -> bool {
+    if trimmed.starts_with("//")
+        || trimmed.starts_with("/*")
+        || trimmed.starts_with('*')
+        || trimmed.starts_with("<!--")
+    {
+        return true;
+    }
+    matches!(
+        lang,
+        SourceLanguage::Python
+            | SourceLanguage::Ruby
+            | SourceLanguage::Php
+            | SourceLanguage::Shell
+    ) && trimmed.starts_with('#')
+}
 
 /// A detected code duplicate
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +132,8 @@ impl DuplicationDetector {
 
         // Extract code blocks from each source
         for (file_path, source) in sources {
-            let blocks = self.extract_blocks(source);
+            let lang = SourceLanguage::from_file_path(file_path);
+            let blocks = self.extract_blocks(source, lang);
             for (start, end, tokens) in blocks {
                 all_blocks.push((file_path.clone(), start, end, tokens));
             }
@@ -140,7 +186,8 @@ impl DuplicationDetector {
 
     /// Find duplicates within a single source file
     pub fn find_duplicates_in_file(&self, source: &str, file_path: &str) -> Vec<DuplicateBlock> {
-        let blocks = self.extract_blocks(source);
+        let lang = SourceLanguage::from_file_path(file_path);
+        let blocks = self.extract_blocks(source, lang);
         let mut duplicates = Vec::new();
 
         for i in 0..blocks.len() {
@@ -181,7 +228,11 @@ impl DuplicationDetector {
     }
 
     /// Extract code blocks from source code
-    fn extract_blocks(&self, source: &str) -> Vec<(usize, usize, Vec<String>)> {
+    fn extract_blocks(
+        &self,
+        source: &str,
+        lang: SourceLanguage,
+    ) -> Vec<(usize, usize, Vec<String>)> {
         let lines: Vec<&str> = source.lines().collect();
         let mut blocks = Vec::new();
 
@@ -192,8 +243,8 @@ impl DuplicationDetector {
                 let block_lines = &lines[start..end];
 
                 // Skip if block is mostly empty or comments
-                if self.is_significant_block(block_lines) {
-                    let tokens = self.tokenize_block(block_lines);
+                if self.is_significant_block(block_lines, lang) {
+                    let tokens = self.tokenize_block(block_lines, lang);
                     if tokens.len() >= self.config.min_tokens {
                         blocks.push((start + 1, end, tokens)); // 1-indexed
                     }
@@ -205,7 +256,7 @@ impl DuplicationDetector {
     }
 
     /// Check if a block contains significant code
-    fn is_significant_block(&self, lines: &[&str]) -> bool {
+    fn is_significant_block(&self, lines: &[&str], lang: SourceLanguage) -> bool {
         let mut code_line_count = 0;
 
         for line in lines {
@@ -217,11 +268,7 @@ impl DuplicationDetector {
             }
 
             // Skip comment-only lines
-            if trimmed.starts_with("//")
-                || trimmed.starts_with("#")
-                || trimmed.starts_with("/*")
-                || trimmed.starts_with("*")
-            {
+            if is_comment_line(trimmed, lang) {
                 continue;
             }
 
@@ -232,7 +279,7 @@ impl DuplicationDetector {
     }
 
     /// Tokenize a code block for comparison
-    fn tokenize_block(&self, lines: &[&str]) -> Vec<String> {
+    fn tokenize_block(&self, lines: &[&str], lang: SourceLanguage) -> Vec<String> {
         let mut tokens = Vec::new();
 
         for line in lines {
@@ -247,7 +294,7 @@ impl DuplicationDetector {
             }
 
             // Split into tokens
-            for token in self.tokenize_line(trimmed) {
+            for token in self.tokenize_line(trimmed, lang) {
                 let normalized = if self.config.normalize_identifiers {
                     self.normalize_token(&token)
                 } else {
@@ -261,11 +308,18 @@ impl DuplicationDetector {
     }
 
     /// Tokenize a single line
-    fn tokenize_line(&self, line: &str) -> Vec<String> {
+    fn tokenize_line(&self, line: &str, lang: SourceLanguage) -> Vec<String> {
         let mut tokens = Vec::new();
         let mut current_token = String::new();
 
         for c in line.chars() {
+            if matches!(
+                lang,
+                SourceLanguage::Python | SourceLanguage::Ruby | SourceLanguage::Php
+            ) && c == '#'
+            {
+                break;
+            }
             if c.is_whitespace() {
                 if !current_token.is_empty() {
                     tokens.push(current_token.clone());
@@ -303,7 +357,7 @@ impl DuplicationDetector {
                 "fn", "let", "const", "if", "else", "for", "while", "loop", "match", "return",
                 "struct", "enum", "impl", "trait", "pub", "mod", "use", "def", "class", "import",
                 "from", "as", "try", "except", "with", "function", "var", "const", "let", "async",
-                "await", "new", "this",
+                "await", "new", "this", "fun", "val", "end",
             ];
 
             if keywords.contains(&token) {
@@ -366,6 +420,7 @@ impl DuplicationDetector {
         let mut line_occurrences: HashMap<String, Vec<CodeLocation>> = HashMap::new();
 
         for (file_path, source) in sources {
+            let lang = SourceLanguage::from_file_path(file_path);
             for (i, line) in source.lines().enumerate() {
                 let normalized = if self.config.ignore_whitespace {
                     line.trim().to_string()
@@ -374,10 +429,7 @@ impl DuplicationDetector {
                 };
 
                 // Skip empty lines and comments
-                if normalized.is_empty()
-                    || normalized.starts_with("//")
-                    || normalized.starts_with("#")
-                {
+                if normalized.is_empty() || is_comment_line(normalized.as_str(), lang) {
                     continue;
                 }
 
@@ -456,7 +508,7 @@ fn function_two() {
     #[test]
     fn tokenize_line() {
         let detector = DuplicationDetector::new();
-        let tokens = detector.tokenize_line("fn main() {");
+        let tokens = detector.tokenize_line("fn main() {", SourceLanguage::Unknown);
         assert!(tokens.contains(&"fn".to_string()));
         assert!(tokens.contains(&"main".to_string()));
     }
@@ -576,14 +628,23 @@ fn function_two() {
     fn is_significant_block() {
         let detector = DuplicationDetector::new();
         let lines = vec!["fn main() {", "    println!(\"Hi\");", "}"];
-        assert!(detector.is_significant_block(&lines));
+        assert!(detector.is_significant_block(&lines, SourceLanguage::Unknown));
     }
 
     #[test]
     fn is_significant_block_comments_only() {
         let detector = DuplicationDetector::new();
         let lines = vec!["// comment", "// another comment"];
-        assert!(!detector.is_significant_block(&lines));
+        assert!(!detector.is_significant_block(&lines, SourceLanguage::Unknown));
+    }
+
+    #[test]
+    fn is_significant_block_hash_comment_only_for_python_style_languages() {
+        let detector = DuplicationDetector::new();
+        let lines = vec!["# comment", "# another comment"];
+        assert!(!detector.is_significant_block(&lines, SourceLanguage::Python));
+        assert!(is_comment_line("# comment", SourceLanguage::Python));
+        assert!(!is_comment_line("# comment", SourceLanguage::Unknown));
     }
 
     #[test]

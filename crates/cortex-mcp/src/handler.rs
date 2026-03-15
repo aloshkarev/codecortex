@@ -5,7 +5,7 @@ use crate::contracts::{
 use crate::jobs::JobRegistry;
 use crate::metrics::global_metrics;
 use crate::vector_service::{VectorSearchFilters, VectorSearchRequest, VectorService};
-use cortex_analyzer::Analyzer;
+use cortex_analyzer::{AnalyzePathFilters, Analyzer};
 use cortex_core::{CortexConfig, GitOperations, ProjectStatus, SearchKind};
 use cortex_graph::{BundleStore, GraphClient};
 use cortex_indexer::Indexer;
@@ -25,12 +25,44 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum McpTransport {
+    Stdio,
+    HttpSse,
+    WebSocket,
+    Multi,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServeOptions {
+    pub transport: McpTransport,
+    pub listen: SocketAddr,
+    pub token: Option<String>,
+    pub allow_remote: bool,
+    pub max_clients: usize,
+    pub idle_timeout_secs: u64,
+}
+
+impl Default for McpServeOptions {
+    fn default() -> Self {
+        Self {
+            transport: McpTransport::Stdio,
+            listen: SocketAddr::from(([127, 0, 0, 1], 3001)),
+            token: None,
+            allow_remote: false,
+            max_clients: 64,
+            idle_timeout_secs: 600,
+        }
+    }
+}
 
 // ── request structs ───────────────────────────────────────────────────────────
 
@@ -121,6 +153,18 @@ pub struct RelationshipReq {
     pub target: Option<String>,
     pub target2: Option<String>,
     pub depth: Option<usize>,
+    /// Include only paths with these prefixes
+    pub include_paths: Option<Vec<String>>,
+    /// Include only these files (path or file name)
+    pub include_files: Option<Vec<String>>,
+    /// Include only paths matching these glob patterns
+    pub include_globs: Option<Vec<String>>,
+    /// Exclude paths with these prefixes
+    pub exclude_paths: Option<Vec<String>>,
+    /// Exclude these files (path or file name)
+    pub exclude_files: Option<Vec<String>>,
+    /// Exclude paths matching these glob patterns
+    pub exclude_globs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -132,6 +176,18 @@ pub struct CypherReq {
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ComplexityReq {
     pub top_n: Option<u64>,
+    /// Include only paths with these prefixes
+    pub include_paths: Option<Vec<String>>,
+    /// Include only these files (path or file name)
+    pub include_files: Option<Vec<String>>,
+    /// Include only paths matching these glob patterns
+    pub include_globs: Option<Vec<String>>,
+    /// Exclude paths with these prefixes
+    pub exclude_paths: Option<Vec<String>>,
+    /// Exclude these files (path or file name)
+    pub exclude_files: Option<Vec<String>>,
+    /// Exclude paths matching these glob patterns
+    pub exclude_globs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -313,6 +369,18 @@ pub struct AnalyzeRefactoringReq {
     pub repo_path: Option<String>,
     /// Include detailed breakdown
     pub detailed: Option<bool>,
+    /// Include only paths with these prefixes
+    pub include_paths: Option<Vec<String>>,
+    /// Include only these files (path or file name)
+    pub include_files: Option<Vec<String>>,
+    /// Include only paths matching these glob patterns
+    pub include_globs: Option<Vec<String>>,
+    /// Exclude paths with these prefixes
+    pub exclude_paths: Option<Vec<String>>,
+    /// Exclude these files (path or file name)
+    pub exclude_files: Option<Vec<String>>,
+    /// Exclude paths matching these glob patterns
+    pub exclude_globs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -333,6 +401,18 @@ pub struct FindPatternsReq {
     pub min_confidence: Option<f64>,
     /// Maximum results to return
     pub max_results: Option<usize>,
+    /// Include only paths with these prefixes
+    pub include_paths: Option<Vec<String>>,
+    /// Include only these files (path or file name)
+    pub include_files: Option<Vec<String>>,
+    /// Include only paths matching these glob patterns
+    pub include_globs: Option<Vec<String>>,
+    /// Exclude paths with these prefixes
+    pub exclude_paths: Option<Vec<String>>,
+    /// Exclude these files (path or file name)
+    pub exclude_files: Option<Vec<String>>,
+    /// Exclude paths matching these glob patterns
+    pub exclude_globs: Option<Vec<String>>,
 }
 
 // ── project management request types ─────────────────────────────────────────
@@ -478,7 +558,9 @@ impl CortexHandler {
 
     // ── indexing ─────────────────────────────────────────────────────────────
 
-    #[tool(description = "Index a directory or file into the code graph (and optionally vector store). Use when the user asks to index a repo, add code to the graph, or (re)build the index. Run before graph/vector tools can return results. Returns graph and optional vector indexing stats.")]
+    #[tool(
+        description = "Index a directory or file into the code graph (and optionally vector store). Use when the user asks to index a repo, add code to the graph, or (re)build the index. Run before graph/vector tools can return results. Returns graph and optional vector indexing stats."
+    )]
     async fn add_code_to_graph(
         &self,
         Parameters(req): Parameters<IndexPathReq>,
@@ -598,7 +680,9 @@ impl CortexHandler {
 
     // ── watching ─────────────────────────────────────────────────────────────
 
-    #[tool(description = "Watch a directory for file changes and reindex automatically. Use when the user wants to keep the index up to date as they edit. Starts a watcher; combine with list_watched_paths and unwatch_directory to manage.")]
+    #[tool(
+        description = "Watch a directory for file changes and reindex automatically. Use when the user wants to keep the index up to date as they edit. Starts a watcher; combine with list_watched_paths and unwatch_directory to manage."
+    )]
     async fn watch_directory(
         &self,
         Parameters(req): Parameters<PathReq>,
@@ -671,7 +755,9 @@ impl CortexHandler {
 
     // ── search / analysis ─────────────────────────────────────────────────────
 
-    #[tool(description = "Search the code graph by symbol name, pattern, type, or content. Use when the user asks to find a function/class by name, list symbols matching a pattern, or search by code type (e.g. function, class). Returns matching symbols with file paths and signatures.")]
+    #[tool(
+        description = "Search the code graph by symbol name, pattern, type, or content. Use when the user asks to find a function/class by name, list symbols matching a pattern, or search by code type (e.g. function, class). Returns matching symbols with file paths and signatures."
+    )]
     async fn find_code(
         &self,
         Parameters(req): Parameters<FindCodeReq>,
@@ -691,29 +777,43 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Analyze code relationships: callers, callees, class hierarchy, dead code, overrides, module deps, call chains. Use when the user asks for 'who calls X', 'what does Y call', 'class hierarchy', 'dead code', or 'call chain from A to B'. Pass query_type (e.g. find_callers, find_callees, dead_code) and target symbol(s).")]
+    #[tool(
+        description = "Analyze code relationships: callers, callees, class hierarchy, dead code, overrides, module deps, call chains. Use when the user asks for 'who calls X', 'what does Y call', 'class hierarchy', 'dead code', or 'call chain from A to B'. Pass query_type (e.g. find_callers, find_callees, dead_code), target symbol(s), and optional include/exclude path/file/glob filters."
+    )]
     async fn analyze_code_relationships(
         &self,
         Parameters(req): Parameters<RelationshipReq>,
     ) -> Result<CallToolResult, McpError> {
         let a = Analyzer::new(self.graph_client().await?);
+        let filters = build_analyze_filters(
+            req.include_paths.clone(),
+            req.include_files.clone(),
+            req.include_globs.clone(),
+            req.exclude_paths.clone(),
+            req.exclude_files.clone(),
+            req.exclude_globs.clone(),
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         let t = req.target.as_deref().unwrap_or_default();
         let t2 = req.target2.as_deref().unwrap_or_default();
         let rows = match req.query_type.as_str() {
-            "find_callers" => a.callers(t).await,
-            "find_callees" => a.callees(t).await,
-            "find_all_callers" => a.all_callers(t).await,
-            "find_all_callees" => a.all_callees(t).await,
-            "call_chain" => a.call_chain(t, t2, req.depth).await,
-            "class_hierarchy" => a.class_hierarchy(t).await,
-            "dead_code" => a.dead_code().await,
-            "overrides" => a.overrides(t).await,
-            "module_deps" => a.module_dependencies(t).await,
-            "variable_scope" => a.variable_scope(t).await,
-            "find_importers" => a.find_importers(t).await,
-            "find_by_decorator" => a.find_by_decorator(t).await,
-            "find_by_argument" => a.find_by_argument(t).await,
-            "find_complexity" => a.find_complexity(t).await,
+            "find_callers" => a.callers_with_filters(t, Some(&filters)).await,
+            "find_callees" => a.callees_with_filters(t, Some(&filters)).await,
+            "find_all_callers" => a.all_callers_with_filters(t, Some(&filters)).await,
+            "find_all_callees" => a.all_callees_with_filters(t, Some(&filters)).await,
+            "call_chain" => {
+                a.call_chain_with_filters(t, t2, req.depth, Some(&filters))
+                    .await
+            }
+            "class_hierarchy" => a.class_hierarchy_with_filters(t, Some(&filters)).await,
+            "dead_code" => a.dead_code_with_filters(Some(&filters)).await,
+            "overrides" => a.overrides_with_filters(t, Some(&filters)).await,
+            "module_deps" => a.module_dependencies_with_filters(t, Some(&filters)).await,
+            "variable_scope" => a.variable_scope_with_filters(t, Some(&filters)).await,
+            "find_importers" => a.find_importers_with_filters(t, Some(&filters)).await,
+            "find_by_decorator" => a.find_by_decorator_with_filters(t, Some(&filters)).await,
+            "find_by_argument" => a.find_by_argument_with_filters(t, Some(&filters)).await,
+            "find_complexity" => a.find_complexity_with_filters(t, Some(&filters)).await,
             _ => {
                 return Err(McpError::invalid_params(
                     format!("unknown query_type: {}", req.query_type),
@@ -727,7 +827,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Execute a raw Cypher query against the code graph. Use only when the user needs a custom graph query (e.g. custom traversal, aggregation). Prefer get_impact_graph, find_code, or analyze_code_relationships for common tasks. Returns query result rows.")]
+    #[tool(
+        description = "Execute a raw Cypher query against the code graph. Use only when the user needs a custom graph query (e.g. custom traversal, aggregation). Prefer get_impact_graph, find_code, or analyze_code_relationships for common tasks. Returns query result rows."
+    )]
     async fn execute_cypher_query(
         &self,
         Parameters(req): Parameters<CypherReq>,
@@ -743,7 +845,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Find functions or symbols that are never called (dead code). Use when the user asks to find unused code, dead code, or candidates for removal. Returns symbols with no callers.")]
+    #[tool(
+        description = "Find functions or symbols that are never called (dead code). Use when the user asks to find unused code, dead code, or candidates for removal. Returns symbols with no callers."
+    )]
     async fn find_dead_code(&self) -> Result<CallToolResult, McpError> {
         let rows = Analyzer::new(self.graph_client().await?)
             .dead_code()
@@ -754,13 +858,24 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Calculate cyclomatic complexity of symbols, ranked by highest complexity. Use when the user asks for 'complex code', 'most complex functions', or 'complexity analysis'. Returns symbols with complexity scores; high values suggest refactoring targets.")]
+    #[tool(
+        description = "Calculate cyclomatic complexity of symbols, ranked by highest complexity. Use when the user asks for 'complex code', 'most complex functions', or 'complexity analysis'. Supports optional include/exclude path/file/glob filters to scope results."
+    )]
     async fn calculate_cyclomatic_complexity(
         &self,
         Parameters(req): Parameters<ComplexityReq>,
     ) -> Result<CallToolResult, McpError> {
+        let filters = build_analyze_filters(
+            req.include_paths.clone(),
+            req.include_files.clone(),
+            req.include_globs.clone(),
+            req.exclude_paths.clone(),
+            req.exclude_files.clone(),
+            req.exclude_globs.clone(),
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         let rows = Analyzer::new(self.graph_client().await?)
-            .complexity(req.top_n.unwrap_or(20) as usize)
+            .complexity_with_filters(req.top_n.unwrap_or(20) as usize, Some(&filters))
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
         Ok(Self::ok(
@@ -768,7 +883,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Index all code files in a repository into vector storage for semantic search. Use when the user wants to enable natural-language code search (vector_search) or before asking 'code related to X'. Returns indexed_documents, scanned_files, skipped_files.")]
+    #[tool(
+        description = "Index all code files in a repository into vector storage for semantic search. Use when the user wants to enable natural-language code search (vector_search) or before asking 'code related to X'. Returns indexed_documents, scanned_files, skipped_files."
+    )]
     async fn vector_index_repository(
         &self,
         Parameters(req): Parameters<VectorIndexRepositoryReq>,
@@ -842,7 +959,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Index a single file into vector storage. Use when the user wants to add one file to the semantic index without re-indexing the whole repo. Returns indexed_documents for that file.")]
+    #[tool(
+        description = "Index a single file into vector storage. Use when the user wants to add one file to the semantic index without re-indexing the whole repo. Returns indexed_documents for that file."
+    )]
     async fn vector_index_file(
         &self,
         Parameters(req): Parameters<VectorIndexFileReq>,
@@ -903,7 +1022,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Semantic search over indexed code. Use when the user asks in natural language for 'code that does X', 'where is Y handled', or 'code related to Z'. Requires vector_index_repository first. Returns relevant code snippets with paths and scores.")]
+    #[tool(
+        description = "Semantic search over indexed code. Use when the user asks in natural language for 'code that does X', 'where is Y handled', or 'code related to Z'. Requires vector_index_repository first. Returns relevant code snippets with paths and scores."
+    )]
     async fn vector_search(
         &self,
         Parameters(req): Parameters<VectorSearchReq>,
@@ -973,7 +1094,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Hybrid search over indexed code: combines semantic (vector) and structural (graph) signals. Use when the user wants 'code like X' with better precision than vector_search alone, or when filtering by path/repo/kind. Returns snippets with hybrid scores.")]
+    #[tool(
+        description = "Hybrid search over indexed code: combines semantic (vector) and structural (graph) signals. Use when the user wants 'code like X' with better precision than vector_search alone, or when filtering by path/repo/kind. Returns snippets with hybrid scores."
+    )]
     async fn vector_search_hybrid(
         &self,
         Parameters(req): Parameters<VectorSearchReq>,
@@ -985,7 +1108,9 @@ impl CortexHandler {
         self.vector_search(Parameters(req)).await
     }
 
-    #[tool(description = "Return vector index health and document counts per repository. Use when the user asks if semantic search is ready, how much is indexed, or to debug vector_search returning no results. Returns status and document counts.")]
+    #[tool(
+        description = "Return vector index health and document counts per repository. Use when the user asks if semantic search is ready, how much is indexed, or to debug vector_search returning no results. Returns status and document counts."
+    )]
     async fn vector_index_status(
         &self,
         Parameters(req): Parameters<VectorIndexStatusReq>,
@@ -1070,7 +1195,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Get a token-budgeted set of relevant code items for a task. Use when the user describes a coding task (e.g. 'refactor auth', 'find bug in login') and you need ranked, bounded context. Combines graph and optional vector search; returns snippets with ranking explanations.")]
+    #[tool(
+        description = "Get a token-budgeted set of relevant code items for a task. Use when the user describes a coding task (e.g. 'refactor auth', 'find bug in login') and you need ranked, bounded context. Combines graph and optional vector search; returns snippets with ranking explanations."
+    )]
     async fn get_context_capsule(
         &self,
         Parameters(req): Parameters<ContextCapsuleReq>,
@@ -1286,7 +1413,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Get the impact graph for a symbol: who calls it, what it calls, and dependents. Use when the user asks 'what calls X?', 'what does X affect?', or 'show callers/callees of X'. Returns nodes and edges with file paths and relationship types.")]
+    #[tool(
+        description = "Get the impact graph for a symbol: who calls it, what it calls, and dependents. Use when the user asks 'what calls X?', 'what does X affect?', or 'show callers/callees of X'. Returns nodes and edges with file paths and relationship types."
+    )]
     async fn get_impact_graph(
         &self,
         Parameters(req): Parameters<ImpactGraphReq>,
@@ -1356,7 +1485,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Find control/data flow paths between two symbols (e.g. from entry to a function). Use when the user asks 'how does A reach B?', 'path from X to Y', or 'logic flow between two functions'. Pass from_symbol and to_symbol; returns paths with intermediate nodes.")]
+    #[tool(
+        description = "Find control/data flow paths between two symbols (e.g. from entry to a function). Use when the user asks 'how does A reach B?', 'path from X to Y', or 'logic flow between two functions'. Pass from_symbol and to_symbol; returns paths with intermediate nodes."
+    )]
     async fn search_logic_flow(
         &self,
         Parameters(req): Parameters<LogicFlowReq>,
@@ -1403,7 +1534,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Get a file skeleton: high-level structure (functions, classes, exports) without full body. Use when the user wants an overview of a file, 'what's in this file', or to navigate structure. Pass path; returns outline with names and locations.")]
+    #[tool(
+        description = "Get a file skeleton: high-level structure (functions, classes, exports) without full body. Use when the user wants an overview of a file, 'what's in this file', or to navigate structure. Pass path; returns outline with names and locations."
+    )]
     async fn get_skeleton(
         &self,
         Parameters(req): Parameters<SkeletonReq>,
@@ -1435,7 +1568,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Unified health and status for indexing, watcher, and jobs. Use when the user asks 'is indexing done?', 'what's the index status?', or 'are there running jobs?'. Returns repo index status, watcher state, and job list.")]
+    #[tool(
+        description = "Unified health and status for indexing, watcher, and jobs. Use when the user asks 'is indexing done?', 'what's the index status?', or 'are there running jobs?'. Returns repo index status, watcher state, and job list."
+    )]
     async fn index_status(
         &self,
         Parameters(req): Parameters<IndexStatusReq>,
@@ -1671,7 +1806,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Save a session observation (fact or decision) with optional symbol links. Use when the user or agent wants to persist something for later (e.g. 'remember we decided to use approach X'). Observations are searchable via search_memory.")]
+    #[tool(
+        description = "Save a session observation (fact or decision) with optional symbol links. Use when the user or agent wants to persist something for later (e.g. 'remember we decided to use approach X'). Observations are searchable via search_memory."
+    )]
     async fn save_observation(
         &self,
         Parameters(req): Parameters<SaveObservationReq>,
@@ -1819,7 +1956,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Search saved session observations/memory by query. Use when the user asks 'what did we decide about X?', 'recall earlier context', or to find past observations. Returns matching observations with scores.")]
+    #[tool(
+        description = "Search saved session observations/memory by query. Use when the user asks 'what did we decide about X?', 'recall earlier context', or to find past observations. Returns matching observations with scores."
+    )]
     async fn search_memory(
         &self,
         Parameters(req): Parameters<SearchMemoryReq>,
@@ -1926,7 +2065,9 @@ impl CortexHandler {
 
     // ── repository management ─────────────────────────────────────────────────
 
-    #[tool(description = "List all repositories currently indexed in the graph. Use when the user asks 'what repos are indexed?', 'which projects are in the graph?', or to verify indexing before running graph tools.")]
+    #[tool(
+        description = "List all repositories currently indexed in the graph. Use when the user asks 'what repos are indexed?', 'which projects are in the graph?', or to verify indexing before running graph tools."
+    )]
     async fn list_indexed_repositories(&self) -> Result<CallToolResult, McpError> {
         let repos = self
             .graph_client()
@@ -1939,7 +2080,9 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Delete a repository and all its nodes from the graph. Use when the user wants to remove a repo from the index (e.g. after deleting the repo or to free space). Destructive; graph data for that repo is removed.")]
+    #[tool(
+        description = "Delete a repository and all its nodes from the graph. Use when the user wants to remove a repo from the index (e.g. after deleting the repo or to free space). Destructive; graph data for that repo is removed."
+    )]
     async fn delete_repository(
         &self,
         Parameters(req): Parameters<PathReq>,
@@ -2574,6 +2717,15 @@ impl CortexHandler {
         let client = self.graph_client().await?;
         let repo_path = req.repo_path.clone().unwrap_or_else(default_repo_path);
         let detailed = req.detailed.unwrap_or(false);
+        let filters = build_analyze_filters(
+            req.include_paths.clone(),
+            req.include_files.clone(),
+            req.include_globs.clone(),
+            req.exclude_paths.clone(),
+            req.exclude_files.clone(),
+            req.exclude_globs.clone(),
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
         let change_type = req
             .change_type
             .clone()
@@ -2634,6 +2786,9 @@ impl CortexHandler {
                         .await
                 }
             };
+
+        let affected_files = filter_rows_by_paths(affected_files, &filters);
+        let affected_tests = filter_rows_by_paths(affected_tests, &filters);
 
         // Find suggested tests to run
         let suggested_tests = self
@@ -3085,6 +3240,15 @@ impl CortexHandler {
         let repo_path = req.repo_path.clone().unwrap_or_else(default_repo_path);
         let min_confidence = req.min_confidence.unwrap_or(0.5);
         let max_results = req.max_results.unwrap_or(50).min(200);
+        let filters = build_analyze_filters(
+            req.include_paths.clone(),
+            req.include_files.clone(),
+            req.include_globs.clone(),
+            req.exclude_paths.clone(),
+            req.exclude_files.clone(),
+            req.exclude_globs.clone(),
+        )
+        .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
 
         // Define pattern detection rules
         let patterns_to_check = if let Some(ref pattern) = req.pattern {
@@ -3115,7 +3279,7 @@ impl CortexHandler {
             let matches = self
                 .detect_pattern(&client, &pattern, &repo_path, min_confidence, max_results)
                 .await;
-            results.extend(matches);
+            results.extend(filter_rows_by_paths(matches, &filters));
             if results.len() >= max_results {
                 break;
             }
@@ -3330,13 +3494,16 @@ impl CortexHandler {
 
     // ── health ────────────────────────────────────────────────────────────────
 
-    #[tool(description = "Check Memgraph (graph DB) connectivity and report server health. Use when the user sees graph-related errors, or asks 'is the database up?'. Returns connection status and basic server info.")]
+    #[tool(
+        description = "Check Memgraph (graph DB) connectivity and report server health. Use when the user sees graph-related errors, or asks 'is the database up?'. Returns connection status and basic server info."
+    )]
     async fn check_health(&self) -> Result<CallToolResult, McpError> {
         let ok = self.graph_client().await.is_ok();
         Ok(Self::ok(
             serde_json::json!({
                 "status": if ok { "ok" } else { "degraded" },
-                "memgraph": if ok { "connected" } else { "unreachable" }
+                "memgraph": if ok { "connected" } else { "unreachable" },
+                "analyzer": analyzer_capabilities_json()
             })
             .to_string(),
         ))
@@ -3455,7 +3622,9 @@ impl CortexHandler {
         }
     }
 
-    #[tool(description = "Get the current project context: path, branch, Git status. Use when the user asks 'what project am I in?', 'current branch', or to confirm scope for indexing and search.")]
+    #[tool(
+        description = "Get the current project context: path, branch, Git status. Use when the user asks 'what project am I in?', 'current branch', or to confirm scope for indexing and search."
+    )]
     async fn get_current_project(&self) -> Result<CallToolResult, McpError> {
         let current = self.projects.get_current_project();
 
@@ -3924,6 +4093,155 @@ pub async fn start_stdio(config: CortexConfig) -> anyhow::Result<()> {
     };
     service.waiting().await?;
     Ok(())
+}
+
+fn is_loopback(addr: &SocketAddr) -> bool {
+    addr.ip().is_loopback()
+}
+
+fn validate_serve_options(options: &McpServeOptions) -> anyhow::Result<()> {
+    if options.max_clients == 0 {
+        return Err(anyhow::anyhow!("max_clients must be greater than 0"));
+    }
+    if options.idle_timeout_secs == 0 {
+        return Err(anyhow::anyhow!(
+            "idle_timeout_secs must be greater than 0"
+        ));
+    }
+    if !options.allow_remote && !is_loopback(&options.listen) {
+        return Err(anyhow::anyhow!(
+            "non-loopback listen address requires allow_remote=true"
+        ));
+    }
+    Ok(())
+}
+
+pub async fn start_with_options(
+    config: CortexConfig,
+    options: McpServeOptions,
+) -> anyhow::Result<()> {
+    validate_serve_options(&options)?;
+    match options.transport {
+        McpTransport::Stdio => start_stdio(config).await,
+        McpTransport::HttpSse | McpTransport::WebSocket | McpTransport::Multi => {
+            crate::network_server::start_network(config, options).await
+        }
+    }
+}
+
+#[cfg(test)]
+mod serve_options_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_remote_bind_without_allow_remote() {
+        let opts = McpServeOptions {
+            transport: McpTransport::HttpSse,
+            listen: "0.0.0.0:3010".parse().unwrap(),
+            token: None,
+            allow_remote: false,
+            max_clients: 32,
+            idle_timeout_secs: 60,
+        };
+        assert!(validate_serve_options(&opts).is_err());
+    }
+
+    #[test]
+    fn accepts_remote_bind_when_explicitly_allowed() {
+        let opts = McpServeOptions {
+            transport: McpTransport::WebSocket,
+            listen: "0.0.0.0:3010".parse().unwrap(),
+            token: Some("secret".to_string()),
+            allow_remote: true,
+            max_clients: 32,
+            idle_timeout_secs: 60,
+        };
+        assert!(validate_serve_options(&opts).is_ok());
+    }
+
+    #[test]
+    fn default_serve_options_keep_stdio_compatibility() {
+        let opts = McpServeOptions::default();
+        assert_eq!(opts.transport, McpTransport::Stdio);
+        assert!(opts.listen.ip().is_loopback());
+    }
+}
+
+fn build_analyze_filters(
+    include_paths: Option<Vec<String>>,
+    include_files: Option<Vec<String>>,
+    include_globs: Option<Vec<String>>,
+    exclude_paths: Option<Vec<String>>,
+    exclude_files: Option<Vec<String>>,
+    exclude_globs: Option<Vec<String>>,
+) -> anyhow::Result<AnalyzePathFilters> {
+    let filters = AnalyzePathFilters {
+        include_paths: include_paths.unwrap_or_default(),
+        include_files: include_files.unwrap_or_default(),
+        include_globs: include_globs.unwrap_or_default(),
+        exclude_paths: exclude_paths.unwrap_or_default(),
+        exclude_files: exclude_files.unwrap_or_default(),
+        exclude_globs: exclude_globs.unwrap_or_default(),
+    };
+    filters.validate().map_err(anyhow::Error::msg)?;
+    Ok(filters)
+}
+
+fn analyzer_capabilities_json() -> Value {
+    json!({
+        "path_filters": {
+            "supported": true,
+            "fields": [
+                "include_paths",
+                "include_files",
+                "include_globs",
+                "exclude_paths",
+                "exclude_files",
+                "exclude_globs"
+            ]
+        },
+        "language_aware_smells": {
+            "supported": true,
+            "extensions": [
+                "rs","py","rb","js","jsx","ts","tsx","go","java","c","cc","cpp","h","hpp",
+                "cs","php","swift","kt","kts","json","sh","bash","zsh","m","mm","scala"
+            ]
+        }
+    })
+}
+
+fn collect_paths_for_filter(value: &Value, out: &mut Vec<String>) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map {
+                if (k == "path" || k.ends_with(".path")) && v.is_string() {
+                    if let Some(path) = v.as_str() {
+                        out.push(path.to_string());
+                    }
+                }
+                collect_paths_for_filter(v, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_paths_for_filter(item, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn filter_rows_by_paths(rows: Vec<Value>, filters: &AnalyzePathFilters) -> Vec<Value> {
+    if filters.is_empty() {
+        return rows;
+    }
+    rows.into_iter()
+        .filter(|row| {
+            let mut paths = Vec::new();
+            collect_paths_for_filter(row, &mut paths);
+            filters.matches_any_path(paths.iter().map(String::as_str))
+        })
+        .collect()
 }
 
 fn now_millis() -> u128 {

@@ -9,7 +9,7 @@
 #   ./install.sh --help             # Show help
 #
 
-set -e
+set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Configuration
@@ -71,6 +71,25 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
+run_with_retry() {
+    local retries=${1:-3}
+    shift
+    local attempt=1
+    local delay=2
+    while true; do
+        if "$@"; then
+            return 0
+        fi
+        if [ "$attempt" -ge "$retries" ]; then
+            return 1
+        fi
+        log_warning "Command failed (attempt ${attempt}/${retries}), retrying in ${delay}s: $*"
+        sleep "$delay"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}
+
 confirm() {
     if [ "$NON_INTERACTIVE" = true ]; then
         return 0
@@ -110,6 +129,67 @@ is_ubuntu() {
     [ -f /etc/os-release ] && grep -qi "ubuntu\|debian" /etc/os-release
 }
 
+detect_package_manager() {
+    if command_exists brew; then
+        echo "brew"
+    elif command_exists apt-get; then
+        echo "apt"
+    elif command_exists dnf; then
+        echo "dnf"
+    elif command_exists yum; then
+        echo "yum"
+    else
+        echo "unknown"
+    fi
+}
+
+print_dependency_help() {
+    local dep="$1"
+    local pm
+    pm=$(detect_package_manager)
+    case "$pm" in
+        brew)
+            case "$dep" in
+                protoc) echo "brew install protobuf" ;;
+                openssl) echo "brew install openssl@3 pkg-config" ;;
+                clang|libclang) echo "brew install llvm" ;;
+                gcc|cc|c++) echo "xcode-select --install" ;;
+                pkg-config) echo "brew install pkg-config" ;;
+                cmake) echo "brew install cmake" ;;
+                make) echo "xcode-select --install" ;;
+                *) echo "brew install ${dep}" ;;
+            esac
+            ;;
+        apt)
+            case "$dep" in
+                protoc) echo "sudo apt-get install -y protobuf-compiler" ;;
+                openssl) echo "sudo apt-get install -y libssl-dev pkg-config" ;;
+                clang|libclang) echo "sudo apt-get install -y clang libclang-dev" ;;
+                gcc|cc|c++) echo "sudo apt-get install -y build-essential" ;;
+                pkg-config) echo "sudo apt-get install -y pkg-config" ;;
+                cmake) echo "sudo apt-get install -y cmake" ;;
+                make) echo "sudo apt-get install -y build-essential" ;;
+                *) echo "sudo apt-get install -y ${dep}" ;;
+            esac
+            ;;
+        dnf|yum)
+            case "$dep" in
+                protoc) echo "sudo ${pm} install -y protobuf-compiler" ;;
+                openssl) echo "sudo ${pm} install -y openssl-devel pkgconf-pkg-config" ;;
+                clang|libclang) echo "sudo ${pm} install -y clang clang-devel" ;;
+                gcc|cc|c++) echo "sudo ${pm} install -y gcc gcc-c++ make" ;;
+                pkg-config) echo "sudo ${pm} install -y pkgconf-pkg-config" ;;
+                cmake) echo "sudo ${pm} install -y cmake" ;;
+                make) echo "sudo ${pm} install -y make" ;;
+                *) echo "sudo ${pm} install -y ${dep}" ;;
+            esac
+            ;;
+        *)
+            echo "Install '${dep}' using your system package manager"
+            ;;
+    esac
+}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Dependency Checking
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -120,8 +200,8 @@ check_dependencies() {
     local missing_deps=()
     local os=$(get_os)
 
-    # Required dependencies
-    local required=("curl" "git")
+    # Required baseline dependencies
+    local required=("curl" "git" "tar")
 
     for dep in "${required[@]}"; do
         if ! command_exists "$dep"; then
@@ -161,6 +241,43 @@ check_dependencies() {
             INSTALL_MEMGRAPH=false
         fi
     fi
+
+    # Build-time preflight dependencies (source build path)
+    local build_missing=()
+    for dep in pkg-config cmake make protoc; do
+        if ! command_exists "$dep"; then
+            build_missing+=("$dep")
+        fi
+    done
+    if ! command_exists cc && ! command_exists gcc && ! command_exists clang; then
+        build_missing+=("cc")
+    fi
+    if ! command_exists c++ && ! command_exists g++ && ! command_exists clang++; then
+        build_missing+=("c++")
+    fi
+    if ! command_exists clang; then
+        build_missing+=("clang")
+    fi
+    if command_exists pkg-config && ! pkg-config --exists openssl 2>/dev/null; then
+        build_missing+=("openssl")
+    fi
+
+    if [ ${#build_missing[@]} -gt 0 ]; then
+        log_warning "Missing build dependencies: ${build_missing[*]}"
+        log_info "These are required before running cargo build."
+        for dep in "${build_missing[@]}"; do
+            echo "  - ${dep}: $(print_dependency_help "$dep")"
+        done
+
+        if confirm "Try to install missing build dependencies now?"; then
+            install_build_dependencies "${build_missing[@]}"
+        else
+            log_error "Cannot proceed without required build dependencies"
+            exit 1
+        fi
+    else
+        log_success "Build dependency preflight passed"
+    fi
 }
 
 install_dependencies() {
@@ -199,6 +316,55 @@ install_dependencies() {
     esac
 
     log_success "Dependencies installed"
+}
+
+install_build_dependencies() {
+    local os
+    os=$(get_os)
+    local pm
+    pm=$(detect_package_manager)
+
+    log_info "Installing build dependencies for ${os}/${pm}..."
+    case "$pm" in
+        brew)
+            run_with_retry 3 brew update
+            run_with_retry 3 brew install protobuf openssl@3 pkg-config cmake llvm
+            ;;
+        apt)
+            run_with_retry 3 sudo apt-get update
+            run_with_retry 3 sudo apt-get install -y \
+                protobuf-compiler libssl-dev pkg-config build-essential cmake clang libclang-dev
+            ;;
+        dnf)
+            run_with_retry 3 sudo dnf install -y \
+                protobuf-compiler openssl-devel pkgconf-pkg-config gcc gcc-c++ make cmake clang clang-devel
+            ;;
+        yum)
+            run_with_retry 3 sudo yum install -y \
+                protobuf-compiler openssl-devel pkgconfig gcc gcc-c++ make cmake clang
+            ;;
+        *)
+            log_error "Unsupported package manager for automatic build dependency installation"
+            return 1
+            ;;
+    esac
+
+    # Re-verify critical deps
+    local verify_failed=false
+    for dep in protoc pkg-config cmake make; do
+        if ! command_exists "$dep"; then
+            log_error "Still missing dependency after installation: ${dep}"
+            verify_failed=true
+        fi
+    done
+    if command_exists pkg-config && ! pkg-config --exists openssl 2>/dev/null; then
+        log_error "OpenSSL development package not detected via pkg-config"
+        verify_failed=true
+    fi
+    if [ "$verify_failed" = true ]; then
+        return 1
+    fi
+    log_success "Build dependencies installed and verified"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -242,15 +408,29 @@ install_cortex_cargo() {
     log_info "Building CodeCortex from source..."
     cd "$repo_dir"
 
-    # Build release binary
-    cargo build --release
+    # Build release binary after a strict dependency preflight
+    if ! run_with_retry 2 cargo build --release --locked; then
+        log_warning "Locked build failed; retrying without --locked"
+        run_with_retry 2 cargo build --release
+    fi
 
     # Create bin directory if it doesn't exist
     mkdir -p "$CORTEX_BIN_DIR"
 
     # Copy binary
+    if [ ! -f target/release/cortex-cli ]; then
+        log_error "Build finished but target/release/cortex-cli not found"
+        return 1
+    fi
     cp target/release/cortex-cli "${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
     chmod +x "${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
+
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        log_info "Applying macOS ad-hoc code signature to cortex binary..."
+        codesign --force --sign - "${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
+        codesign --verify --verbose=4 "${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
+        PATH="${CORTEX_BIN_DIR}:${PATH}" cortex --version
+    fi
 
     log_success "CodeCortex installed to ${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
 }
@@ -404,10 +584,10 @@ install_memgraph_docker() {
 
         # Now pull and create container
         log_info "Pulling Memgraph Docker image..."
-        docker pull memgraph/memgraph-mage:3.8.1
+        run_with_retry 3 docker pull memgraph/memgraph-mage:3.8.1
 
         log_info "Creating Memgraph container on port ${port}..."
-        docker run -d \
+        run_with_retry 2 docker run -d \
             --name "${CONTAINER_NAME}" \
             -p "${port}:7687" \
             -v codecortex-memgraph:/var/lib/memgraph \

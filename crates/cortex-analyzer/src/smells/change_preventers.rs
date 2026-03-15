@@ -7,6 +7,10 @@
 //! - Parallel Inheritance
 //! - Shotgun Surgery
 
+use super::language::{
+    SourceLanguage, extract_function_name as shared_extract_function_name, is_function_signature,
+    is_method_signature,
+};
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
 use std::collections::HashMap;
 
@@ -20,8 +24,9 @@ pub fn detect_divergent_change(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
-    let classes = extract_classes(&lines);
+    let classes = extract_classes(&lines, lang);
 
     for (class_name, class_info) in &classes {
         if class_info.methods.len() < 5 {
@@ -71,9 +76,10 @@ pub fn detect_parallel_inheritance(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Find all inheritance hierarchies
-    let hierarchies = extract_inheritance_hierarchies(&lines);
+    let hierarchies = extract_inheritance_hierarchies(&lines, lang);
 
     // Look for parallel naming patterns
     for (base1, children1) in &hierarchies {
@@ -124,9 +130,10 @@ pub fn detect_shotgun_surgery(
 ) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
 
     // Find functions/methods and their dependencies
-    let functions = extract_function_info(&lines);
+    let functions = extract_function_info(&lines, lang);
 
     // Track which functions are called from how many different files/contexts
     let mut call_counts: HashMap<String, usize> = HashMap::new();
@@ -185,7 +192,7 @@ struct FunctionInfo {
 
 // Helper functions
 
-fn extract_classes(lines: &[&str]) -> HashMap<String, ClassInfo> {
+fn extract_classes(lines: &[&str], lang: SourceLanguage) -> HashMap<String, ClassInfo> {
     let mut classes: HashMap<String, ClassInfo> = HashMap::new();
     let mut current_class: Option<String> = None;
     let mut brace_count = 0;
@@ -194,7 +201,7 @@ fn extract_classes(lines: &[&str]) -> HashMap<String, ClassInfo> {
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        if is_class_definition(trimmed) {
+        if is_class_definition(trimmed, lang) {
             let class_name = extract_class_name(trimmed);
             current_class = Some(class_name.clone());
             class_start = i;
@@ -216,7 +223,7 @@ fn extract_classes(lines: &[&str]) -> HashMap<String, ClassInfo> {
 
             let info = classes.get_mut(class_name).unwrap();
 
-            if is_method_definition(trimmed) {
+            if is_method_definition(trimmed, lang) {
                 info.methods.push(extract_method_name(trimmed));
             }
 
@@ -233,14 +240,17 @@ fn extract_classes(lines: &[&str]) -> HashMap<String, ClassInfo> {
     classes
 }
 
-fn extract_inheritance_hierarchies(lines: &[&str]) -> HashMap<String, Vec<String>> {
+fn extract_inheritance_hierarchies(
+    lines: &[&str],
+    lang: SourceLanguage,
+) -> HashMap<String, Vec<String>> {
     let mut hierarchies: HashMap<String, Vec<String>> = HashMap::new();
 
     for line in lines {
         let trimmed = line.trim();
 
         // Look for inheritance patterns
-        if let Some((child, parent)) = extract_inheritance_pair(trimmed) {
+        if let Some((child, parent)) = extract_inheritance_pair(trimmed, lang) {
             hierarchies.entry(parent).or_default().push(child);
         }
     }
@@ -248,7 +258,7 @@ fn extract_inheritance_hierarchies(lines: &[&str]) -> HashMap<String, Vec<String
     hierarchies
 }
 
-fn extract_function_info(lines: &[&str]) -> HashMap<String, FunctionInfo> {
+fn extract_function_info(lines: &[&str], lang: SourceLanguage) -> HashMap<String, FunctionInfo> {
     let mut functions: HashMap<String, FunctionInfo> = HashMap::new();
     let mut current_func: Option<String> = None;
     let mut func_start = 0;
@@ -257,7 +267,7 @@ fn extract_function_info(lines: &[&str]) -> HashMap<String, FunctionInfo> {
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        if is_function_definition(trimmed) {
+        if is_function_definition(trimmed, lang) {
             let func_name = extract_function_name(trimmed);
             current_func = Some(func_name.clone());
             func_start = i;
@@ -399,7 +409,7 @@ fn extract_class_suffix(class_name: &str) -> String {
     }
 }
 
-fn is_class_definition(trimmed: &str) -> bool {
+fn is_class_definition(trimmed: &str, _lang: SourceLanguage) -> bool {
     trimmed.starts_with("class ")
         || trimmed.starts_with("struct ")
         || trimmed.starts_with("impl ")
@@ -407,27 +417,16 @@ fn is_class_definition(trimmed: &str) -> bool {
         || trimmed.starts_with("pub struct ")
 }
 
-fn is_method_definition(trimmed: &str) -> bool {
-    (trimmed.starts_with("fn ")
-        || trimmed.starts_with("def ")
-        || trimmed.starts_with("function ")
-        || trimmed.starts_with("public ")
-        || trimmed.starts_with("private "))
-        && trimmed.contains('(')
+fn is_method_definition(trimmed: &str, lang: SourceLanguage) -> bool {
+    is_method_signature(trimmed, lang)
 }
 
 fn is_field_definition(trimmed: &str) -> bool {
     trimmed.contains(':') && !trimmed.contains("::") && !trimmed.contains('(')
 }
 
-fn is_function_definition(trimmed: &str) -> bool {
-    (trimmed.starts_with("fn ")
-        || trimmed.starts_with("def ")
-        || trimmed.starts_with("function ")
-        || trimmed.starts_with("public ")
-        || trimmed.starts_with("private ")
-        || trimmed.starts_with("static "))
-        && trimmed.contains('(')
+fn is_function_definition(trimmed: &str, lang: SourceLanguage) -> bool {
+    is_function_signature(trimmed, lang)
 }
 
 fn extract_class_name(line: &str) -> String {
@@ -448,31 +447,7 @@ fn extract_class_name(line: &str) -> String {
 }
 
 fn extract_method_name(line: &str) -> String {
-    let line = line.trim();
-
-    for prefix in [
-        "pub ",
-        "pub(crate) ",
-        "private ",
-        "protected ",
-        "async ",
-        "static ",
-    ] {
-        if line.starts_with(prefix) {
-            return extract_method_name(&line[prefix.len()..]);
-        }
-    }
-
-    for keyword in ["fn ", "def ", "function "] {
-        if line.starts_with(keyword) {
-            let rest = &line[keyword.len()..];
-            if let Some(paren_pos) = rest.find('(') {
-                return rest[..paren_pos].trim().to_string();
-            }
-        }
-    }
-
-    "unknown".to_string()
+    shared_extract_function_name(line)
 }
 
 fn extract_field_name(line: &str) -> String {
@@ -488,7 +463,7 @@ fn extract_field_name(line: &str) -> String {
 }
 
 fn extract_function_name(line: &str) -> String {
-    extract_method_name(line) // Same logic
+    shared_extract_function_name(line)
 }
 
 fn extract_function_calls(line: &str) -> Vec<String> {
@@ -517,7 +492,7 @@ fn extract_function_calls(line: &str) -> Vec<String> {
     calls
 }
 
-fn extract_inheritance_pair(line: &str) -> Option<(String, String)> {
+fn extract_inheritance_pair(line: &str, _lang: SourceLanguage) -> Option<(String, String)> {
     let trimmed = line.trim();
 
     // "class Child extends Parent"

@@ -92,6 +92,13 @@ impl ExtractStage {
                 "java".to_string(),
                 "php".to_string(),
                 "rb".to_string(),
+                "kt".to_string(),
+                "kts".to_string(),
+                "swift".to_string(),
+                "json".to_string(),
+                "sh".to_string(),
+                "bash".to_string(),
+                "zsh".to_string(),
             ],
             max_file_size: 10 * 1024 * 1024, // 10MB
         }
@@ -560,6 +567,10 @@ mod tests {
         assert!(stage.extensions.contains(&"go".to_string()));
         assert!(stage.extensions.contains(&"ts".to_string()));
         assert!(stage.extensions.contains(&"js".to_string()));
+        assert!(stage.extensions.contains(&"kt".to_string()));
+        assert!(stage.extensions.contains(&"swift".to_string()));
+        assert!(stage.extensions.contains(&"json".to_string()));
+        assert!(stage.extensions.contains(&"sh".to_string()));
     }
 
     #[test]

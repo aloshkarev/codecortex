@@ -92,6 +92,8 @@ impl SignatureExtractor {
             Language::Java => Self::extract_java(node, source),
             Language::Php => Self::extract_php(node, source),
             Language::Ruby => Self::extract_ruby(node, source),
+            Language::Kotlin | Language::Swift => Self::extract_java(node, source),
+            Language::Json | Language::Shell => None,
         }
     }
 

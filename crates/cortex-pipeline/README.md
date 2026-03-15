@@ -8,7 +8,7 @@ This crate provides a flexible pipeline architecture inspired by [cognee](https:
 
 ## Architecture
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                        Pipeline                                    │
 ├────────────────┬────────────────┬────────────────┬───────────────┤
@@ -76,13 +76,15 @@ let ctx = PipelineContext::from_content(
 ### ExtractStage
 
 Parses source files and extracts code entities:
+
 - Detects file language from extension
-- Supports 14 file extensions (rs, py, go, ts, js, etc.)
+- Supports runtime language extensions, including Kotlin/Swift/JSON/Shell in addition to the baseline set
 - Configurable max file size
 
 ### CognifyStage
 
 Analyzes code and enriches entities:
+
 - Extracts relationships between entities
 - Calculates complexity metrics
 - Assigns importance scores
@@ -91,6 +93,7 @@ Analyzes code and enriches entities:
 ### EmbedStage
 
 Generates vector embeddings:
+
 - Creates embeddings from entity summaries
 - Configurable embedding dimension
 - Supports multiple embedding providers
@@ -98,6 +101,7 @@ Generates vector embeddings:
 ### LoadStage
 
 Stores entities in databases:
+
 - Persists to graph database (Memgraph/Neo4j)
 - Stores embeddings in vector store
 - Creates relationships between entities
@@ -106,7 +110,7 @@ Stores entities in databases:
 ## Context Types
 
 | Type | Description |
-|------|-------------|
+| ------ | ----------- |
 | `ExtractedEntity` | Parsed code entity with source |
 | `CognifiedEntity` | Entity with relationships and metrics |
 | `EmbeddedEntity` | Entity with vector embedding |
@@ -143,7 +147,7 @@ impl Stage for MyCustomStage {
 ## Supported Languages
 
 | Language | Extensions |
-|----------|------------|
+| -------- | ---------- |
 | Rust | `.rs` |
 | Python | `.py` |
 | Go | `.go` |
@@ -154,6 +158,10 @@ impl Stage for MyCustomStage {
 | Java | `.java` |
 | PHP | `.php` |
 | Ruby | `.rb` |
+| Kotlin | `.kt`, `.kts` |
+| Swift | `.swift` |
+| JSON | `.json` |
+| Shell | `.sh`, `.bash`, `.zsh` |
 
 ## Tests
 

@@ -10,6 +10,55 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceLanguage {
+    Rust,
+    Python,
+    Ruby,
+    JavaScript,
+    TypeScript,
+    Java,
+    CSharp,
+    Go,
+    Php,
+    Kotlin,
+    Scala,
+    Swift,
+    Json,
+    Shell,
+    ObjectiveC,
+    CLike,
+    Unknown,
+}
+
+impl SourceLanguage {
+    fn from_file_path(path: &str) -> Self {
+        let ext = std::path::Path::new(path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        match ext.as_deref() {
+            Some("rs") => Self::Rust,
+            Some("py") => Self::Python,
+            Some("rb") => Self::Ruby,
+            Some("js") | Some("jsx") => Self::JavaScript,
+            Some("ts") | Some("tsx") => Self::TypeScript,
+            Some("java") => Self::Java,
+            Some("cs") => Self::CSharp,
+            Some("go") => Self::Go,
+            Some("php") => Self::Php,
+            Some("kt") | Some("kts") => Self::Kotlin,
+            Some("scala") => Self::Scala,
+            Some("swift") => Self::Swift,
+            Some("json") => Self::Json,
+            Some("sh") | Some("bash") | Some("zsh") => Self::Shell,
+            Some("m") | Some("mm") => Self::ObjectiveC,
+            Some("c") | Some("cc") | Some("cpp") | Some("h") | Some("hpp") => Self::CLike,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// Severity level for code smells
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -421,6 +470,7 @@ impl SmellDetector {
     pub fn detect_long_functions(&self, source: &str, file_path: &str) -> Vec<CodeSmell> {
         let mut smells = Vec::new();
         let lines: Vec<&str> = source.lines().collect();
+        let lang = SourceLanguage::from_file_path(file_path);
 
         // Simple heuristic: look for function definitions and count lines until closing brace
         let mut in_function = false;
@@ -428,22 +478,21 @@ impl SmellDetector {
         let mut brace_count = 0;
         let mut function_name = String::new();
         let mut function_is_python_style = false;
+        let mut function_is_ruby_style = false;
+        let mut saw_open_brace = false;
+        let mut ruby_block_depth = 0i32;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Detect function start (simplified - works for many languages)
-            if !in_function
-                && (trimmed.starts_with("fn ")
-                    || trimmed.starts_with("def ")
-                    || trimmed.starts_with("function ")
-                    || trimmed.starts_with("public ")
-                    || trimmed.starts_with("private "))
-            {
+            if !in_function && self.is_function_signature(trimmed, lang) {
                 in_function = true;
                 function_start = i;
                 brace_count = 0;
-                function_is_python_style = trimmed.starts_with("def ");
+                function_is_python_style = self.is_python_style_function(trimmed, lang);
+                function_is_ruby_style = self.is_ruby_style_function(trimmed, lang);
+                saw_open_brace = false;
+                ruby_block_depth = 0;
 
                 // Extract function name
                 function_name = self.extract_function_name(trimmed);
@@ -452,10 +501,21 @@ impl SmellDetector {
             if in_function {
                 brace_count += trimmed.matches('{').count() as i32;
                 brace_count -= trimmed.matches('}').count() as i32;
+                if function_is_ruby_style {
+                    ruby_block_depth += self.ruby_block_delta(trimmed);
+                }
+                if trimmed.contains('{') {
+                    saw_open_brace = true;
+                }
 
-                if (brace_count == 0 && i > function_start && !function_is_python_style)
+                if (brace_count == 0
+                    && i > function_start
+                    && !function_is_python_style
+                    && !function_is_ruby_style
+                    && saw_open_brace)
                     || (function_is_python_style
                         && self.is_python_function_end(&lines, i, function_start))
+                    || (function_is_ruby_style && ruby_block_depth <= 0 && i >= function_start)
                 {
                     let function_lines = i - function_start + 1;
 
@@ -489,6 +549,7 @@ impl SmellDetector {
 
                     in_function = false;
                     function_is_python_style = false;
+                    function_is_ruby_style = false;
                 }
             }
         }
@@ -500,6 +561,7 @@ impl SmellDetector {
     pub fn detect_deep_nesting(&self, source: &str, file_path: &str) -> Vec<CodeSmell> {
         let mut smells = Vec::new();
         let lines: Vec<&str> = source.lines().collect();
+        let lang = SourceLanguage::from_file_path(file_path);
 
         let mut max_depth = 0;
         let mut max_depth_line = 0;
@@ -509,11 +571,7 @@ impl SmellDetector {
             let trimmed = line.trim();
 
             // Skip empty lines and comments
-            if trimmed.is_empty()
-                || trimmed.starts_with("//")
-                || trimmed.starts_with("#")
-                || trimmed.starts_with("/*")
-            {
+            if self.is_comment_line(trimmed, lang) {
                 continue;
             }
 
@@ -560,13 +618,14 @@ impl SmellDetector {
     pub fn detect_magic_numbers(&self, source: &str, file_path: &str) -> Vec<CodeSmell> {
         let mut smells = Vec::new();
         let lines: Vec<&str> = source.lines().collect();
+        let lang = SourceLanguage::from_file_path(file_path);
 
         // Regex pattern for detecting numeric literals
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
             // Skip comments and strings
-            if trimmed.starts_with("//") || trimmed.starts_with("#") || trimmed.starts_with("/*") {
+            if self.is_comment_line(trimmed, lang) {
                 continue;
             }
 
@@ -616,21 +675,17 @@ impl SmellDetector {
     pub fn detect_too_many_parameters(&self, source: &str, file_path: &str) -> Vec<CodeSmell> {
         let mut smells = Vec::new();
         let lines: Vec<&str> = source.lines().collect();
+        let lang = SourceLanguage::from_file_path(file_path);
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
             // Look for function definitions
-            if trimmed.starts_with("fn ")
-                || trimmed.starts_with("def ")
-                || trimmed.starts_with("function ")
-                || trimmed.starts_with("public ")
-                || trimmed.starts_with("private ")
-                || trimmed.contains("fn ")
-            {
+            if self.is_function_signature(trimmed, lang) {
                 // Extract parameters from parentheses
                 if let Some(paren_start) = trimmed.find('(') {
-                    if let Some(paren_end) = trimmed.find(')') {
+                    if let Some(local_paren_end) = trimmed[paren_start + 1..].find(')') {
+                        let paren_end = paren_start + 1 + local_paren_end;
                         let params_str = &trimmed[paren_start + 1..paren_end];
 
                         if !params_str.trim().is_empty() {
@@ -706,6 +761,7 @@ impl SmellDetector {
     pub fn detect_empty_blocks(&self, source: &str, file_path: &str) -> Vec<CodeSmell> {
         let mut smells = Vec::new();
         let lines: Vec<&str> = source.lines().collect();
+        let lang = SourceLanguage::from_file_path(file_path);
 
         let mut in_block = false;
         let mut block_start = 0;
@@ -716,7 +772,7 @@ impl SmellDetector {
             let trimmed = line.trim();
 
             // Skip comments
-            if trimmed.starts_with("//") || trimmed.starts_with("#") || trimmed.starts_with("/*") {
+            if self.is_comment_line(trimmed, lang) {
                 continue;
             }
 
@@ -745,9 +801,7 @@ impl SmellDetector {
                         .filter(|l| {
                             let t = l.trim();
                             !t.is_empty()
-                                && !t.starts_with("//")
-                                && !t.starts_with("#")
-                                && !t.starts_with("/*")
+                                && !self.is_comment_line(t, lang)
                                 && !t.starts_with("*")
                                 && t != "{"
                                 && t != "}"
@@ -784,6 +838,7 @@ impl SmellDetector {
     pub fn detect_too_many_returns(&self, source: &str, file_path: &str) -> Vec<CodeSmell> {
         let mut smells = Vec::new();
         let lines: Vec<&str> = source.lines().collect();
+        let lang = SourceLanguage::from_file_path(file_path);
 
         let mut in_function = false;
         let mut function_start = 0;
@@ -791,43 +846,54 @@ impl SmellDetector {
         let mut function_name = String::new();
         let mut return_count = 0;
         let mut function_is_python_style = false;
+        let mut function_is_ruby_style = false;
+        let mut saw_open_brace = false;
+        let mut ruby_block_depth = 0i32;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
             // Skip comments
-            if trimmed.starts_with("//") || trimmed.starts_with("#") {
+            if self.is_comment_line(trimmed, lang) {
                 continue;
             }
 
             // Detect function start
-            if !in_function
-                && (trimmed.starts_with("fn ")
-                    || trimmed.starts_with("def ")
-                    || trimmed.starts_with("function ")
-                    || trimmed.starts_with("public ")
-                    || trimmed.starts_with("private "))
-            {
+            if !in_function && self.is_function_signature(trimmed, lang) {
                 in_function = true;
                 function_start = i;
                 brace_count = 0;
                 function_name = self.extract_function_name(trimmed);
                 return_count = 0;
-                function_is_python_style = trimmed.starts_with("def ");
+                function_is_python_style = self.is_python_style_function(trimmed, lang);
+                function_is_ruby_style = self.is_ruby_style_function(trimmed, lang);
+                saw_open_brace = false;
+                ruby_block_depth = 0;
             }
 
             if in_function {
                 brace_count += trimmed.matches('{').count() as i32;
                 brace_count -= trimmed.matches('}').count() as i32;
+                if function_is_ruby_style {
+                    ruby_block_depth += self.ruby_block_delta(trimmed);
+                }
+                if trimmed.contains('{') {
+                    saw_open_brace = true;
+                }
 
                 // Count return statements
                 if trimmed.contains("return ") || trimmed.starts_with("return") {
                     return_count += 1;
                 }
 
-                if (brace_count == 0 && i > function_start && !function_is_python_style)
+                if (brace_count == 0
+                    && i > function_start
+                    && !function_is_python_style
+                    && !function_is_ruby_style
+                    && saw_open_brace)
                     || (function_is_python_style
                         && self.is_python_function_end(&lines, i, function_start))
+                    || (function_is_ruby_style && ruby_block_depth <= 0 && i >= function_start)
                 {
                     if return_count > self.config.max_returns {
                         let severity = if return_count > self.config.max_returns * 2 {
@@ -857,6 +923,7 @@ impl SmellDetector {
 
                     in_function = false;
                     function_is_python_style = false;
+                    function_is_ruby_style = false;
                 }
             }
         }
@@ -894,11 +961,25 @@ impl SmellDetector {
         }
 
         // Now strip function keywords
-        let keywords = ["fn ", "def ", "function "];
+        let keywords = ["fn ", "def ", "function ", "fun "];
         for keyword in keywords {
             if line.starts_with(keyword) {
                 line = &line[keyword.len()..];
                 break;
+            }
+        }
+
+        // Handle assignment-style declarations (e.g., "const name = (...) =>")
+        if let Some(eq_pos) = line.find('=') {
+            let left = line[..eq_pos].trim();
+            if let Some(name) = left
+                .split_whitespace()
+                .last()
+                .filter(|name| !name.is_empty())
+            {
+                return name
+                    .trim_matches(|c: char| c == ':' || c == ',')
+                    .to_string();
             }
         }
 
@@ -912,6 +993,135 @@ impl SmellDetector {
             })
             .unwrap_or("unknown")
             .to_string()
+    }
+
+    fn is_comment_line(&self, trimmed: &str, lang: SourceLanguage) -> bool {
+        if trimmed.is_empty() {
+            return true;
+        }
+        if trimmed.starts_with("//") || trimmed.starts_with("/*") || trimmed.starts_with('*') {
+            return true;
+        }
+        (matches!(
+            lang,
+            SourceLanguage::Python
+                | SourceLanguage::Ruby
+                | SourceLanguage::Php
+                | SourceLanguage::Shell
+        )) && trimmed.starts_with('#')
+    }
+
+    fn is_python_style_function(&self, trimmed: &str, lang: SourceLanguage) -> bool {
+        matches!(lang, SourceLanguage::Python)
+            && (trimmed.starts_with("def ") || trimmed.starts_with("async def "))
+    }
+
+    fn is_ruby_style_function(&self, trimmed: &str, lang: SourceLanguage) -> bool {
+        matches!(lang, SourceLanguage::Ruby) && trimmed.starts_with("def ")
+    }
+
+    fn ruby_block_delta(&self, trimmed: &str) -> i32 {
+        let first_token = trimmed
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .find(|s| !s.is_empty());
+
+        let mut starts = 0;
+        if matches!(
+            first_token,
+            Some("def")
+                | Some("class")
+                | Some("module")
+                | Some("if")
+                | Some("unless")
+                | Some("case")
+                | Some("while")
+                | Some("until")
+                | Some("for")
+                | Some("begin")
+        ) {
+            starts += 1;
+        }
+        if trimmed.contains(" do ") || trimmed.ends_with(" do") || trimmed.contains(" do |") {
+            starts += 1;
+        }
+
+        let ends = trimmed
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|w| *w == "end")
+            .count() as i32;
+
+        starts - ends
+    }
+
+    fn is_function_signature(&self, trimmed: &str, lang: SourceLanguage) -> bool {
+        if trimmed.is_empty()
+            || trimmed.starts_with("if ")
+            || trimmed.starts_with("else ")
+            || trimmed.starts_with("for ")
+            || trimmed.starts_with("while ")
+            || trimmed.starts_with("switch ")
+            || trimmed.starts_with("match ")
+            || trimmed.starts_with("catch ")
+            || trimmed.starts_with("class ")
+            || trimmed.starts_with("struct ")
+            || trimmed.starts_with("impl ")
+        {
+            return false;
+        }
+
+        match lang {
+            SourceLanguage::Python => {
+                trimmed.starts_with("def ") || trimmed.starts_with("async def ")
+            }
+            SourceLanguage::Ruby => trimmed.starts_with("def "),
+            SourceLanguage::Rust => trimmed.starts_with("fn ") || trimmed.contains(" fn "),
+            SourceLanguage::Kotlin => trimmed.starts_with("fun ") || trimmed.contains(" fun "),
+            SourceLanguage::Scala => trimmed.starts_with("def ") || trimmed.contains(" def "),
+            SourceLanguage::JavaScript | SourceLanguage::TypeScript => {
+                trimmed.starts_with("function ")
+                    || trimmed.starts_with("async function ")
+                    || (trimmed.contains("=>") && trimmed.contains('=') && trimmed.contains('('))
+                    || (trimmed.contains('(')
+                        && trimmed.contains(')')
+                        && trimmed.contains('{')
+                        && !trimmed.ends_with(';'))
+            }
+            SourceLanguage::Php => {
+                trimmed.starts_with("function ")
+                    || (trimmed.contains(" function ") && trimmed.contains('('))
+            }
+            SourceLanguage::Json => false,
+            SourceLanguage::Shell => {
+                (trimmed.contains("()")
+                    && (trimmed.ends_with('{')
+                        || trimmed.ends_with("{")
+                        || trimmed.contains("() {")
+                        || trimmed.contains("(){")))
+                    || (trimmed.starts_with("function ")
+                        && (trimmed.ends_with('{') || trimmed.ends_with("{")))
+            }
+            SourceLanguage::Java
+            | SourceLanguage::CSharp
+            | SourceLanguage::Go
+            | SourceLanguage::Swift
+            | SourceLanguage::ObjectiveC
+            | SourceLanguage::CLike => {
+                (trimmed.contains('(')
+                    && trimmed.contains(')')
+                    && (trimmed.ends_with('{')
+                        || trimmed.contains(") {")
+                        || trimmed.contains("){")))
+                    && !trimmed.ends_with(';')
+            }
+            SourceLanguage::Unknown => {
+                (trimmed.starts_with("fn ")
+                    || trimmed.starts_with("def ")
+                    || trimmed.starts_with("function ")
+                    || trimmed.contains(" fn ")
+                    || (trimmed.contains('(') && trimmed.contains(')') && trimmed.contains('{')))
+                    && !trimmed.ends_with(';')
+            }
+        }
     }
 
     /// Analyze a function's complexity metrics
@@ -1098,6 +1308,31 @@ def long_function():
     }
 
     #[test]
+    fn detect_long_ruby_function_smell_with_end_boundary() {
+        let detector = SmellDetector::with_config(SmellConfig {
+            max_function_lines: 4,
+            ..Default::default()
+        });
+        let source = r#"
+def long_fn(value)
+  if value > 0
+    do_work
+  end
+  finalize
+  value
+end
+
+def short_fn
+  1
+end
+"#;
+        let smells = detector.detect_long_functions(source, "test.rb");
+        assert!(!smells.is_empty());
+        assert_eq!(smells[0].smell_type, SmellType::LongFunction);
+        assert_eq!(smells[0].symbol_name, "long_fn");
+    }
+
+    #[test]
     fn detect_deep_nesting_smell() {
         let detector = SmellDetector::with_config(SmellConfig {
             max_nesting_depth: 2,
@@ -1241,6 +1476,24 @@ fn compute() {
     }
 
     #[test]
+    fn extract_function_name_kotlin_fun() {
+        let detector = SmellDetector::new();
+        assert_eq!(
+            detector.extract_function_name("fun calculateTotal(a: Int, b: Int): Int {"),
+            "calculateTotal"
+        );
+    }
+
+    #[test]
+    fn extract_function_name_javascript_arrow() {
+        let detector = SmellDetector::new();
+        assert_eq!(
+            detector.extract_function_name("const calculate_total = (a, b) => {"),
+            "calculate_total"
+        );
+    }
+
+    #[test]
     fn smell_config_default() {
         let config = SmellConfig::default();
         assert_eq!(config.max_function_lines, 50);
@@ -1308,6 +1561,44 @@ fn normal_fn(a: i32, b: String) -> i32 {
 }
 "#;
         let smells = detector.detect_too_many_parameters(source, "test.rs");
+        assert!(smells.is_empty());
+    }
+
+    #[test]
+    fn detect_too_many_parameters_in_javascript_arrow_function() {
+        let detector = SmellDetector::with_config(SmellConfig {
+            max_parameters: 3,
+            ..Default::default()
+        });
+        let source = r#"
+const buildUser = (id, email, firstName, lastName, role) => {
+    return { id, email, firstName, lastName, role };
+}
+"#;
+        let smells = detector.detect_too_many_parameters(source, "test.ts");
+        assert!(!smells.is_empty());
+        assert_eq!(smells[0].smell_type, SmellType::TooManyParameters);
+    }
+
+    #[test]
+    fn java_class_declaration_is_not_treated_as_function() {
+        let detector = SmellDetector::new();
+        let source = r#"
+public class UserService {
+    private String value;
+}
+"#;
+        let smells = detector.detect_too_many_parameters(source, "UserService.java");
+        assert!(smells.is_empty());
+    }
+
+    #[test]
+    fn kotlin_class_declaration_is_not_treated_as_function() {
+        let detector = SmellDetector::new();
+        let source = r#"
+class UserService(val value: String)
+"#;
+        let smells = detector.detect_too_many_parameters(source, "UserService.kt");
         assert!(smells.is_empty());
     }
 
@@ -1382,6 +1673,30 @@ def many_returns(x):
         let smells = detector.detect_too_many_returns(source, "test.py");
         assert!(!smells.is_empty());
         assert_eq!(smells[0].smell_type, SmellType::TooManyReturns);
+    }
+
+    #[test]
+    fn detect_too_many_returns_in_ruby_function() {
+        let detector = SmellDetector::with_config(SmellConfig {
+            max_returns: 2,
+            ..Default::default()
+        });
+        let source = r#"
+def many_returns(x)
+  return 0 if x < 0
+  return 10 if x > 10
+  return 5 if x == 5
+  x
+end
+
+def unaffected
+  1
+end
+"#;
+        let smells = detector.detect_too_many_returns(source, "test.rb");
+        assert!(!smells.is_empty());
+        assert_eq!(smells[0].smell_type, SmellType::TooManyReturns);
+        assert_eq!(smells[0].symbol_name, "many_returns");
     }
 
     #[test]

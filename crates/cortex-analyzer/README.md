@@ -1,134 +1,46 @@
 # cortex-analyzer
 
-Code analysis queries for call graphs, dependencies, and code metrics.
+`cortex-analyzer` provides graph-backed analysis and static quality checks.
 
-## Overview
+## Includes
 
-This crate provides analysis functionality for querying code relationships and metrics.
+- Relationship queries (`callers`, `callees`, `chain`, `deps`, `hierarchy`, `overrides`)
+- Quality queries (`dead_code`, `complexity`)
+- Smell detection and refactoring suggestions
+- Path filter support used by CLI and MCP
 
-## Query Types
+## Analyze path filters
 
-| Query | Description | Example |
-|-------|-------------|---------|
-| `find_code` | Search symbols | `find_code("UserRepo", Name)` |
-| `callers` | Find callers | `callers("main")` |
-| `callees` | Find callees | `callees("process")` |
-| `call_chain` | Find path | `call_chain("main", "db_query")` |
-| `dead_code` | Find unreachable | `dead_code()` |
-| `complexity` | Calculate complexity | `complexity("process_file")` |
-| `hierarchy` | Class hierarchy | `hierarchy("BaseHandler")` |
-| `overrides` | Method overrides | `overrides("handle")` |
+`AnalyzePathFilters` supports:
 
-## Code Quality Analysis
+- include paths/files/globs
+- exclude paths/files/globs
+- validation of glob syntax
+- include OR + exclude OR, excludes win
 
-### Code Smell Detection
+## Smell detector notes
 
-```rust
-use cortex_analyzer::{SmellDetector, SmellConfig, SmellType};
+Smell/refactoring analysis is language-aware and handles extension-specific boundaries, including Ruby `def ... end` patterns.
 
-let detector = SmellDetector::new();
-let smells = detector.detect("fn long_fn() { /* ... */ }", "test.rs");
-for smell in smells {
-    println!("{:?}: {} at line {}", smell.smell_type, smell.message, smell.line);
-}
-```
-
-### Coupling Analysis
+## Example
 
 ```rust
-use cortex_analyzer::CouplingAnalyzer;
+use cortex_analyzer::{AnalyzePathFilters, Analyzer};
 
-let mut analyzer = CouplingAnalyzer::new();
-analyzer.add_dependency("module_a", "module_b");
-analyzer.add_dependency("module_b", "module_c");
-
-let metrics = analyzer.analyze_coupling("module_a");
-println!("Afferent coupling: {}", metrics.afferent);
-println!("Efferent coupling: {}", metrics.efferent);
-println!("Instability: {}", metrics.instability());
+let filters = AnalyzePathFilters {
+    include_paths: vec!["src/auth".into()],
+    include_files: vec![],
+    include_globs: vec!["**/*.rs".into()],
+    exclude_paths: vec!["src/auth/generated".into()],
+    exclude_files: vec![],
+    exclude_globs: vec![],
+};
+filters.validate()?;
+let _rows = analyzer.callers_with_filters("authenticate", Some(&filters)).await?;
 ```
 
-### Cohesion Metrics
+## Test
 
-```rust
-use cortex_analyzer::CohesionMetrics;
-
-let metrics = CohesionMetrics::from_methods(&methods);
-println!("LCOM: {}", metrics.lcom);  // Lack of Cohesion of Methods
-```
-
-### Duplication Detection
-
-```rust
-use cortex_analyzer::DuplicationDetector;
-
-let detector = DuplicationDetector::new();
-let sources = vec![
-    ("a.rs".to_string(), "duplicate code...".to_string()),
-    ("b.rs".to_string(), "duplicate code...".to_string()),
-];
-let duplicates = detector.find_duplicates(&sources);
-for dup in duplicates {
-    println!("Duplicate in {} files", dup.locations.len());
-}
-```
-
-## Usage
-
-```rust
-use cortex_analyzer::Analyzer;
-use cortex_core::SearchKind;
-
-let analyzer = Analyzer::new();
-
-// Build a query to find code by name
-let query = analyzer.build_find_code_query(
-    "UserRepository",
-    SearchKind::Name,
-    None,  // No path filter
-);
-// Returns Cypher query string
-
-// Build callers query
-let query = analyzer.build_callers_query("main", Some(3));  // Depth 3
-```
-
-## Search Kinds
-
-- `Name` - Exact name match
-- `Pattern` - Regex pattern match
-- `Type` - Entity kind match (Function, Class, etc.)
-- `Content` - Search in source code
-
-## Dependencies
-
-- `cortex-core` - Core types
-- `regex` - Pattern matching
-
-## Tests
-
-Run tests with:
 ```bash
 cargo test -p cortex-analyzer -- --test-threads=1
 ```
-
-Current test count: **65 tests**
-
-## Additional Query Methods
-
-The `Analyzer` provides many useful query methods:
-
-| Method | Description |
-|--------|-------------|
-| `find_by_file` | Find all code nodes in a specific file |
-| `find_in_module` | Find all functions in a module/namespace |
-| `find_similar` | Find similar function names (fuzzy match) |
-| `entry_points` | Get entry points (functions not called by others) |
-| `find_tests` | Find all test functions |
-| `find_tests_for` | Find tests for a specific function |
-| `who_calls` | Alias for callers with optional depth |
-| `what_calls` | Alias for callees with optional depth |
-| `analyze_module` | Analyze module cohesion |
-| `find_by_annotation` | Find nodes with a specific annotation/decorator |
-| `unused_imports` | Find potentially unused imports |
-| `dependency_graph` | Get dependency graph for visualization |

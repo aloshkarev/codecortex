@@ -15,6 +15,10 @@ pub enum Language {
     Java,
     Php,
     Ruby,
+    Kotlin,
+    Swift,
+    Json,
+    Shell,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +47,10 @@ impl FromStr for Language {
             "java" => Ok(Self::Java),
             "php" => Ok(Self::Php),
             "ruby" | "rb" => Ok(Self::Ruby),
+            "kotlin" | "kt" | "kts" => Ok(Self::Kotlin),
+            "swift" => Ok(Self::Swift),
+            "json" => Ok(Self::Json),
+            "shell" | "sh" | "bash" | "zsh" => Ok(Self::Shell),
             _ => Err(ParseLanguageError),
         }
     }
@@ -62,6 +70,10 @@ impl Language {
             "java" => Some(Self::Java),
             "php" => Some(Self::Php),
             "rb" => Some(Self::Ruby),
+            "kt" | "kts" => Some(Self::Kotlin),
+            "swift" => Some(Self::Swift),
+            "json" => Some(Self::Json),
+            "sh" | "bash" | "zsh" => Some(Self::Shell),
             _ => None,
         }
     }
@@ -78,6 +90,10 @@ impl Language {
             Self::Java => "java",
             Self::Php => "php",
             Self::Ruby => "ruby",
+            Self::Kotlin => "kotlin",
+            Self::Swift => "swift",
+            Self::Json => "json",
+            Self::Shell => "shell",
         }
     }
 }
@@ -155,10 +171,37 @@ mod tests {
     }
 
     #[test]
+    fn language_from_str_kotlin() {
+        assert_eq!("kotlin".parse::<Language>().unwrap(), Language::Kotlin);
+        assert_eq!("kt".parse::<Language>().unwrap(), Language::Kotlin);
+        assert_eq!("kts".parse::<Language>().unwrap(), Language::Kotlin);
+    }
+
+    #[test]
+    fn language_from_str_swift() {
+        assert_eq!("swift".parse::<Language>().unwrap(), Language::Swift);
+        assert_eq!("SWIFT".parse::<Language>().unwrap(), Language::Swift);
+    }
+
+    #[test]
+    fn language_from_str_json() {
+        assert_eq!("json".parse::<Language>().unwrap(), Language::Json);
+        assert_eq!("JSON".parse::<Language>().unwrap(), Language::Json);
+    }
+
+    #[test]
+    fn language_from_str_shell() {
+        assert_eq!("shell".parse::<Language>().unwrap(), Language::Shell);
+        assert_eq!("sh".parse::<Language>().unwrap(), Language::Shell);
+        assert_eq!("bash".parse::<Language>().unwrap(), Language::Shell);
+        assert_eq!("zsh".parse::<Language>().unwrap(), Language::Shell);
+    }
+
+    #[test]
     fn language_from_str_unknown() {
         assert!("unknown".parse::<Language>().is_err());
-        assert!("kotlin".parse::<Language>().is_err());
-        assert!("swift".parse::<Language>().is_err());
+        assert!("lua".parse::<Language>().is_err());
+        assert!("yaml".parse::<Language>().is_err());
     }
 
     #[test]
@@ -282,6 +325,50 @@ mod tests {
     }
 
     #[test]
+    fn language_from_path_kotlin() {
+        assert_eq!(
+            Language::from_path(Path::new("src/Main.kt")),
+            Some(Language::Kotlin)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("build.gradle.kts")),
+            Some(Language::Kotlin)
+        );
+    }
+
+    #[test]
+    fn language_from_path_swift() {
+        assert_eq!(
+            Language::from_path(Path::new("Sources/App.swift")),
+            Some(Language::Swift)
+        );
+    }
+
+    #[test]
+    fn language_from_path_json() {
+        assert_eq!(
+            Language::from_path(Path::new("package.json")),
+            Some(Language::Json)
+        );
+    }
+
+    #[test]
+    fn language_from_path_shell() {
+        assert_eq!(
+            Language::from_path(Path::new("scripts/build.sh")),
+            Some(Language::Shell)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("scripts/run.bash")),
+            Some(Language::Shell)
+        );
+        assert_eq!(
+            Language::from_path(Path::new("scripts/dev.zsh")),
+            Some(Language::Shell)
+        );
+    }
+
+    #[test]
     fn language_as_str() {
         assert_eq!(Language::Rust.as_str(), "rust");
         assert_eq!(Language::Python.as_str(), "python");
@@ -293,6 +380,10 @@ mod tests {
         assert_eq!(Language::Java.as_str(), "java");
         assert_eq!(Language::Php.as_str(), "php");
         assert_eq!(Language::Ruby.as_str(), "ruby");
+        assert_eq!(Language::Kotlin.as_str(), "kotlin");
+        assert_eq!(Language::Swift.as_str(), "swift");
+        assert_eq!(Language::Json.as_str(), "json");
+        assert_eq!(Language::Shell.as_str(), "shell");
     }
 
     #[test]
@@ -313,6 +404,9 @@ mod tests {
 
         let lang: Language = serde_json::from_str("\"go\"").unwrap();
         assert_eq!(lang, Language::Go);
+
+        let lang: Language = serde_json::from_str("\"kotlin\"").unwrap();
+        assert_eq!(lang, Language::Kotlin);
     }
 
     #[test]

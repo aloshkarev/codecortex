@@ -7,6 +7,7 @@ authors.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+axum = { version = "0.8", features = ["ws"] }
 cortex-analyzer = { path = "../cortex-analyzer" }
 cortex-core = { path = "../cortex-core" }
 cortex-graph = { path = "../cortex-graph" }
@@ -15,6 +16,7 @@ cortex-parser = { path = "../cortex-parser" }
 cortex-vector = { path = "../cortex-vector" }
 cortex-watcher = { path = "../cortex-watcher" }
 dashmap.workspace = true
+futures-util = "0.3"
 lru = "0.16"
 rmcp.workspace = true
 rusqlite = { version = "0.38", features = ["bundled"] }
@@ -23,9 +25,12 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tokio-stream = "0.1"
 tracing.workspace = true
 uuid = { version = "1.10", features = ["v4"] }
 
 [dev-dependencies]
 jsonschema = "0.45"
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
 tempfile = "3.10"
+tokio-tungstenite = "0.28"

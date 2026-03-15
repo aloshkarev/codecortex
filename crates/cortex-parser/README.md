@@ -1,29 +1,31 @@
 # cortex-parser
 
-Multi-language source code parsing using Tree-sitter.
+`cortex-parser` provides multi-language parsing using Tree-sitter.
 
-## Overview
+It extracts symbols and structure used by indexer and analyzer crates.
 
-This crate provides parsing capabilities for multiple programming languages using Tree-sitter grammars.
+## Supported languages
 
-## Supported Languages
+- Rust
+- Python
+- Go
+- TypeScript
+- JavaScript
+- C
+- C++
+- Java
+- PHP
+- Ruby
+- Kotlin
+- Swift
+- JSON
+- Shell
 
-| Language | Extensions | Entities Extracted |
-|----------|------------|-------------------|
-| Rust | `.rs` | Functions, structs, enums, traits, impl blocks, type aliases, constants, macros |
-| C | `.c`, `.h` | Functions, structs, enums |
-| C++ | `.cpp`, `.hpp`, `.cc`, `.cxx` | Functions, classes, structs, enums, inheritance |
-| Python | `.py` | Functions, classes, methods, decorators |
-| Go | `.go` | Functions, structs, interfaces |
-| TypeScript | `.ts`, `.tsx` | Functions, classes, interfaces, type aliases, enums |
-| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Functions, classes |
-| Java | `.java` | Classes, methods, interfaces, enums, constructors |
-| PHP | `.php` | Classes, functions, traits, interfaces |
-| Ruby | `.rb` | Classes, methods, modules, singleton methods |
+## What is extracted
 
-## Usage
+Depending on language grammar, extraction includes functions, methods, classes/structs, interfaces/traits, enums, modules/namespaces, and related signature metadata.
 
-### Parser Registry
+## Example
 
 ```rust
 use cortex_parser::ParserRegistry;
@@ -34,35 +36,8 @@ let parser = registry.parser_for_path(Path::new("src/main.rs"))?;
 let result = parser.parse("fn main() {}");
 ```
 
-### Signature Extraction
+## Test
 
-```rust
-use cortex_parser::{SignatureExtractor, Language};
-
-let extractor = SignatureExtractor::new(Language::Rust);
-let signature = extractor.extract("fn add(a: i32, b: i32) -> i32 {}");
-// Returns: Signature { name: "add", params: [...], return_type: Some("i32") }
-```
-
-## Dependencies
-
-- `tree-sitter` - Parsing framework
-- `tree-sitter-rust` - Rust grammar
-- `tree-sitter-c` - C grammar
-- `tree-sitter-cpp` - C++ grammar
-- `tree-sitter-python` - Python grammar
-- `tree-sitter-go` - Go grammar
-- `tree-sitter-typescript` - TypeScript grammar
-- `tree-sitter-javascript` - JavaScript grammar
-- `tree-sitter-java` - Java grammar
-- `tree-sitter-php` - PHP grammar
-- `tree-sitter-ruby` - Ruby grammar
-
-## Tests
-
-Run tests with:
 ```bash
 cargo test -p cortex-parser -- --test-threads=1
 ```
-
-Current test count: **41 tests**

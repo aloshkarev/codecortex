@@ -562,7 +562,10 @@ mod tests {
     fn test_normalize_auth_field() {
         assert_eq!(normalize_auth_field(""), None);
         assert_eq!(normalize_auth_field("   "), None);
-        assert_eq!(normalize_auth_field("memgraph"), Some("memgraph".to_string()));
+        assert_eq!(
+            normalize_auth_field("memgraph"),
+            Some("memgraph".to_string())
+        );
         assert_eq!(normalize_auth_field("  user  "), Some("user".to_string()));
     }
 }
