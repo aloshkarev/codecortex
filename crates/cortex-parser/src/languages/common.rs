@@ -80,6 +80,13 @@ fn make_entity_node(
     if let Some(cc) = cyclomatic {
         props.insert("cyclomatic_complexity".into(), cc.to_string());
     }
+    let module_path = file_path_to_module_path(path);
+    let qualified_name = if module_path.is_empty() {
+        name.to_string()
+    } else {
+        format!("{module_path}::{name}")
+    };
+    props.insert("qualified_name".into(), qualified_name);
     CodeNode {
         id: entity_id(&kind, path, name, line),
         kind,
@@ -91,6 +98,21 @@ fn make_entity_node(
         docstring: None,
         properties: props,
     }
+}
+
+fn file_path_to_module_path(path: &Path) -> String {
+    let mut s = path.to_string_lossy().replace('\\', "/");
+    for suffix in [".rs", ".py", ".ts", ".tsx", ".js", ".go", ".java"] {
+        if let Some(stripped) = s.strip_suffix(suffix) {
+            s = stripped.to_string();
+            break;
+        }
+    }
+    s = s
+        .replace("/mod", "")
+        .replace("/__init__", "")
+        .replace("/index", "");
+    s.trim_matches('/').replace('/', "::")
 }
 
 fn contains_edge(from: &str, to: &str) -> CodeEdge {

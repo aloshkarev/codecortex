@@ -16,6 +16,18 @@ Use one shared runtime per repository:
 2. index vector data (`cortex vector-index`)
 3. run MCP server (`cortex mcp start`)
 
+## Scope and context model
+
+CodeCortex now runs in two default modes:
+
+- inside a known project: operations are project-scoped and use branch-aware graph context
+- outside known projects: `find`/`search` default to all-project scope unless `--project` is provided
+
+Common scope flags:
+
+- `--all-projects`: force cross-project mode
+- `--project <path>`: force explicit single-project mode
+
 ## Bootstrap command
 
 ```bash
@@ -128,6 +140,27 @@ Typical request lifecycle:
 2. client calls a tool with arguments
 3. tool executes on indexed data
 4. JSON response returns to the client
+
+## Navigation and review-aware MCP tools
+
+Adds navigation-oriented tools backed by graph context:
+
+- `go_to_definition`
+- `find_all_usages`
+- `quick_info`
+- `branch_structural_diff`
+- `pr_review`
+
+These tools require indexed graph data for the target repository/branch and return best results when both compared branches are indexed for structural diff.
+
+CLI equivalents:
+
+```bash
+cortex goto "main"
+cortex usages "GraphClient"
+cortex info "GraphClient"
+cortex analyze branch-diff feature/nav main --structural
+```
 
 ## Analyze scope filters
 

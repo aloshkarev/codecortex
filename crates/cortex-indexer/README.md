@@ -10,6 +10,12 @@
 - Build-system detection for repository metadata
 - Indexing reports with counts and timing
 
+## Recent updates
+
+- Indexing now resolves additional placeholder targets for navigation edges (`TYPE_REFERENCE`, `FIELD_ACCESS`) in addition to calls.
+- Added type-reference reconciliation pass so parser-emitted type references are linked to concrete graph nodes.
+- This improves downstream navigation precision for `go_to_definition`, `find_usages`, and branch structural analysis.
+
 ## Example
 
 ```rust

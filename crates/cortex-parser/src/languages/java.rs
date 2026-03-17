@@ -1,12 +1,14 @@
 //! Java language parser using Tree-sitter queries
 
 use super::common::{
-    CallCaptures, DefCaptures, ImportCaptures, InheritCaptures, ParamCaptures, extract_all,
+    CallCaptures, DefCaptures, ImportCaptures, InheritCaptures, ParamCaptures, entity_id,
+    extract_all, file_id,
 };
 use crate::parser_impl::ParseResult;
-use cortex_core::{EdgeKind, EntityKind, Language};
+use cortex_core::{CodeEdge, EdgeKind, EntityKind, Language};
+use std::collections::HashMap;
 use std::path::Path;
-use tree_sitter::Query;
+use tree_sitter::{Query, QueryCursor, StreamingIterator};
 
 const DEF_QUERY: &str = r#"
 (class_declaration
@@ -49,6 +51,23 @@ const INHERIT_QUERY: &str = r#"
 const PARAM_QUERY: &str = r#"
 (formal_parameter
   name: (identifier) @param)
+"#;
+
+const MEMBER_OF_QUERY: &str = r#"
+(class_declaration
+  name: (identifier) @class
+  body: (class_body
+    (method_declaration
+      name: (identifier) @method) @method_entity))
+"#;
+
+const TYPE_REF_QUERY: &str = r#"
+(type_identifier) @type_ref
+"#;
+
+const FIELD_ACCESS_QUERY: &str = r#"
+(field_access
+  field: (identifier) @field)
 "#;
 
 pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResult {
@@ -96,7 +115,7 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         },
     ];
 
-    extract_all(
+    let mut result = extract_all(
         source,
         path,
         Language::Java,
@@ -127,7 +146,117 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         }),
         None,
         None,
-    )
+    );
+    augment_navigation_edges(source, path, tree, &mut result);
+    result
+}
+
+fn augment_navigation_edges(
+    source: &str,
+    path: &Path,
+    tree: &tree_sitter::Tree,
+    result: &mut ParseResult,
+) {
+    let lang: tree_sitter::Language = tree_sitter_java::LANGUAGE.into();
+    let src = source.as_bytes();
+    let root = tree.root_node();
+    let fid = file_id(path);
+
+    if let Ok(member_q) = Query::new(&lang, MEMBER_OF_QUERY) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&member_q, root, src);
+        while let Some(m) = matches.next() {
+            let mut class_name = None::<String>;
+            let mut method_name = None::<String>;
+            let mut method_line = None::<u32>;
+            for cap in m.captures.iter() {
+                let cap_name = &member_q.capture_names()[cap.index as usize];
+                if *cap_name == "class" {
+                    class_name = Some(super::common::node_text(cap.node, src).trim().to_string());
+                } else if *cap_name == "method" {
+                    method_name = Some(super::common::node_text(cap.node, src).trim().to_string());
+                } else if *cap_name == "method_entity" {
+                    method_line = Some(cap.node.start_position().row as u32 + 1);
+                }
+            }
+            let (Some(class_name), Some(method_name), Some(method_line)) =
+                (class_name, method_name, method_line)
+            else {
+                continue;
+            };
+            let Some(parent) = result
+                .nodes
+                .iter()
+                .find(|n| n.kind == EntityKind::Class && n.name == class_name)
+                .map(|n| n.id.clone())
+            else {
+                continue;
+            };
+            let from = entity_id(&EntityKind::Function, path, &method_name, method_line);
+            push_edge(
+                &mut result.edges,
+                CodeEdge {
+                    from,
+                    to: parent,
+                    kind: EdgeKind::MemberOf,
+                    properties: HashMap::new(),
+                },
+            );
+        }
+    }
+
+    if let Ok(type_q) = Query::new(&lang, TYPE_REF_QUERY) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&type_q, root, src);
+        while let Some(m) = matches.next() {
+            for cap in m.captures.iter() {
+                let type_name = super::common::node_text(cap.node, src).trim().to_string();
+                if type_name.is_empty() {
+                    continue;
+                }
+                push_edge(
+                    &mut result.edges,
+                    CodeEdge {
+                        from: fid.clone(),
+                        to: format!("call_target:{type_name}"),
+                        kind: EdgeKind::TypeReference,
+                        properties: HashMap::new(),
+                    },
+                );
+            }
+        }
+    }
+
+    if let Ok(field_q) = Query::new(&lang, FIELD_ACCESS_QUERY) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&field_q, root, src);
+        while let Some(m) = matches.next() {
+            for cap in m.captures.iter() {
+                let field_name = super::common::node_text(cap.node, src).trim().to_string();
+                if field_name.is_empty() {
+                    continue;
+                }
+                push_edge(
+                    &mut result.edges,
+                    CodeEdge {
+                        from: fid.clone(),
+                        to: format!("call_target:{field_name}"),
+                        kind: EdgeKind::FieldAccess,
+                        properties: HashMap::new(),
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn push_edge(edges: &mut Vec<CodeEdge>, edge: CodeEdge) {
+    let exists = edges
+        .iter()
+        .any(|e| e.from == edge.from && e.to == edge.to && e.kind == edge.kind);
+    if !exists {
+        edges.push(edge);
+    }
 }
 
 #[cfg(test)]
@@ -217,5 +346,26 @@ mod tests {
         let result = extract(source, path, &tree);
 
         assert!(result.nodes.iter().any(|n| n.name == "Color"));
+    }
+
+    #[test]
+    fn test_parse_navigation_edges() {
+        let source = r#"
+            class User {
+                private Long id;
+                Long getId() { return this.id; }
+            }
+        "#;
+        let tree = parse_java(source);
+        let path = Path::new("User.java");
+        let result = extract(source, path, &tree);
+        assert!(result.edges.iter().any(|e| e.kind == EdgeKind::MemberOf));
+        assert!(
+            result
+                .edges
+                .iter()
+                .any(|e| e.kind == EdgeKind::TypeReference)
+        );
+        assert!(result.edges.iter().any(|e| e.kind == EdgeKind::FieldAccess));
     }
 }

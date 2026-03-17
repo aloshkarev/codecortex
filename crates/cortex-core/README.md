@@ -11,6 +11,14 @@
 - Complexity helpers (cyclomatic and cognitive)
 - Git helpers used by project and indexing flows
 
+## Recent updates
+
+- Added navigation edge kinds to `EdgeKind`:
+  - `MemberOf` (`MEMBER_OF`)
+  - `TypeReference` (`TYPE_REFERENCE`)
+  - `FieldAccess` (`FIELD_ACCESS`)
+- These are used by parser/indexer/analyzer navigation flows and branch structural diff logic.
+
 ## Example
 
 ```rust

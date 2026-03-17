@@ -208,5 +208,4 @@ mod tests {
 
         assert!(result.calls.iter().any(|call| call == "make"));
     }
-
 }

@@ -9,6 +9,8 @@ It combines graph indexing, static analysis, optional vector retrieval, and an M
 - repository indexing into Memgraph/Neo4j-compatible graph backends
 - structural analysis (callers, callees, chains, dependencies, dead code, complexity, smells, refactoring)
 - project and branch-aware operations
+- navigation (`goto`, `usages`, `info`) on indexed graph data
+- cross-project operations (`--all-projects`, `--project`, cross-project analyze/search tools)
 - MCP tools for assistant clients
 - optional vector indexing and semantic search
 - language coverage: Rust, Python, Go, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Kotlin, Swift, JSON, Shell
@@ -41,12 +43,34 @@ cortex query "MATCH (n:CodeNode) RETURN count(n) AS c"
 ## Command groups
 
 - repository: `index`, `list`, `delete`, `stats`, `watch`, `unwatch`
-- search/query: `find`, `query`, `skeleton`, `signature`
-- analyze: `callers`, `callees`, `chain`, `hierarchy`, `deps`, `dead-code`, `complexity`, `overrides`, `smells`, `refactoring`, `branch-diff`, `review`
+- search/query: `find`, `query`, `skeleton`, `signature`, `goto`, `usages`, `info`
+- analyze: `callers`, `callees`, `chain`, `hierarchy`, `deps`, `dead-code`, `complexity`, `overrides`, `smells`, `refactoring`, `branch-diff`, `review`, `similar`, `shared-deps`, `compare-api`
 - vector: `vector-index`, `search`
 - project: `project ...`
 - mcp: `mcp start`, `mcp tools`
 - operations: `doctor`, `config`, `jobs`, `debug`, `daemon`, `interactive`
+
+## implementation highlights
+
+- context-aware smell detection uses project-wide symbol/call/import context with safe fallback to per-file heuristics (`--no-graph` available).
+- CLI scope resolution supports single-project and all-project modes; `find`, `search`, and cross-project analyzer/MCP tools operate across registered repositories.
+- graph model supports `MEMBER_OF`, `TYPE_REFERENCE`, `FIELD_ACCESS`, and `qualified_name`; navigation APIs and commands (`goto`, `usages`, `info`) are wired in CLI and MCP; branch structural diff and PR-aware review include graph impact signals.
+
+Use these commands after indexing:
+
+```bash
+# Single project navigation
+cortex goto "GraphClient"
+cortex usages "GraphClient"
+cortex info "GraphClient"
+
+# Cross-project mode
+cortex find name "main" --all-projects
+cortex analyze similar --symbol "parse" --min-repos 2
+
+# Structural branch intelligence
+cortex analyze branch-diff feature/nav main --structural
+```
 
 ## Analyze filter flags
 

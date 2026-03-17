@@ -12,6 +12,14 @@ It is used for semantic retrieval and hybrid graph+vector workflows.
 - Embedder trait and providers
 - Hybrid search integration with graph context
 
+## Recent updates
+
+- Hybrid search layer includes cross-repository query paths:
+  - `search_across_repositories`
+  - `find_similar_across_projects`
+  - `search_in_repository_and_branch`
+- These APIs power CLI and MCP cross-project search behavior.
+
 ## Typical flow
 
 1. Generate embeddings for code chunks.

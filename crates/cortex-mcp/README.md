@@ -18,6 +18,21 @@ Language coverage follows runtime parser/indexer support (including Kotlin, Swif
 - bundle/LSP
 - advanced queries
 
+## Recent updates
+
+- Added cross-project tools:
+  - `find_similar_across_projects`
+  - `find_shared_dependencies`
+  - `compare_api_surface`
+  - `search_across_projects`
+- Added navigation and review tools:
+  - `go_to_definition`
+  - `find_all_usages`
+  - `quick_info`
+  - `branch_structural_diff`
+  - `pr_review`
+- `pr_review` now supports diff-aware local input loading for branch/PR-style review scenarios.
+
 ## Serve transports
 
 `cortex-mcp` now supports:

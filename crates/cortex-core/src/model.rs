@@ -72,6 +72,12 @@ pub enum EdgeKind {
     HasProperty,
     Documents,
     Annotates,
+    /// Method/field belongs to a parent type (class/struct/trait/enum).
+    MemberOf,
+    /// Reference in type position (parameter/return/annotation).
+    TypeReference,
+    /// Field access expression (e.g. obj.field).
+    FieldAccess,
 }
 
 impl EdgeKind {
@@ -94,6 +100,9 @@ impl EdgeKind {
             Self::HasProperty => "HAS_PROPERTY",
             Self::Documents => "DOCUMENTS",
             Self::Annotates => "ANNOTATES",
+            Self::MemberOf => "MEMBER_OF",
+            Self::TypeReference => "TYPE_REFERENCE",
+            Self::FieldAccess => "FIELD_ACCESS",
         }
     }
 }
@@ -189,6 +198,9 @@ mod tests {
         assert_eq!(EdgeKind::HasProperty.cypher_rel_type(), "HAS_PROPERTY");
         assert_eq!(EdgeKind::Documents.cypher_rel_type(), "DOCUMENTS");
         assert_eq!(EdgeKind::Annotates.cypher_rel_type(), "ANNOTATES");
+        assert_eq!(EdgeKind::MemberOf.cypher_rel_type(), "MEMBER_OF");
+        assert_eq!(EdgeKind::TypeReference.cypher_rel_type(), "TYPE_REFERENCE");
+        assert_eq!(EdgeKind::FieldAccess.cypher_rel_type(), "FIELD_ACCESS");
     }
 
     #[test]

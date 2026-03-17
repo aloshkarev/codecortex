@@ -12,6 +12,12 @@ Available now:
 - MCP tool surface for assistant workflows across stdio, HTTP+SSE, and WebSocket transports
 - one-by-one real integration tests across pinned OSS fixtures
 
+Delivered in the recent implementation cycle:
+
+- project-aware analysis context for smell/quality checks and CLI fallback behavior
+- cross-project query/search/analyze routing in CLI and MCP
+- navigation (`goto`, `usages`, `info`), branch structural diff, and PR-aware review enrichment
+
 ## Near-term priorities
 
 ## 1) Reliability and performance
@@ -40,6 +46,7 @@ Available now:
 - better project lifecycle ergonomics (`project` subcommands)
 - queue and sync visibility improvements
 - cleaner branch-scoped indexing routines
+- stronger branch freshness and re-index guidance for structural diff and navigation flows
 
 ## 5) Vector/search workflows
 

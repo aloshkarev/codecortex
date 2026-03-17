@@ -16,6 +16,13 @@ This crate provides file watching functionality for monitoring code changes and 
 - **Event Filtering**: Configurable filters with glob patterns
 - **Performance Tuning**: Backpressure handling and adaptive polling
 
+## Integration status
+
+- `ProjectRegistry` is used by CLI scope resolution to determine:
+  - current project context for project-aware analysis
+  - fallback all-project behavior when no project is active
+- This crate remains the project lifecycle/source-of-truth layer for multi-repository workflows.
+
 ## Usage
 
 ### Watch Session
@@ -176,6 +183,7 @@ if is_remote_path("/Volumes/remote") {
 ## Tests
 
 Run tests with:
+
 ```bash
 cargo test -p cortex-watcher -- --test-threads=1
 ```

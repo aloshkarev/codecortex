@@ -64,8 +64,11 @@
 
 mod analyzer;
 pub mod code_smells;
+pub mod context;
 pub mod coupling;
+pub mod cross_project;
 pub mod duplication;
+pub mod navigation;
 pub mod refactoring;
 pub mod review;
 pub mod smells;
@@ -74,11 +77,21 @@ pub use analyzer::{AnalyzePathFilters, Analyzer};
 pub use code_smells::{
     CodeSmell, FunctionMetrics, Severity, SmellCategory, SmellConfig, SmellDetector, SmellType,
 };
+pub use context::{ProjectAnalysisContext, ProjectSymbolIndex, SymbolLocation};
 pub use coupling::{
     CohesionMetrics, CohesionType, CouplingAnalyzer, CouplingMetrics, CouplingRelation,
     CouplingType,
 };
+pub use cross_project::{
+    ApiSurfaceComparison, CrossProjectAnalyzer, CrossProjectLocation, CrossProjectMatch,
+    SharedDependency,
+};
 pub use duplication::{CodeLocation, DuplicateBlock, DuplicationConfig, DuplicationDetector};
+pub use navigation::{
+    BranchStructuralDiff, DefinitionConfidence, DefinitionResult, ImpactEntry, ModifiedSymbolEntry,
+    NavigationEngine, QuickInfo, QuickInfoMetrics, StructuralDiffSummary, SymbolDiffEntry,
+    UsageKind, UsageResult, extract_signature_from_source,
+};
 pub use refactoring::{
     Priority, RefactoringEngine, RefactoringRecommendation, RefactoringTechnique,
 };
@@ -88,11 +101,13 @@ pub use review::{
 };
 pub use smells::{
     SmellCategory as SmellsCategory, detect_alternative_classes, detect_comments,
-    detect_data_classes, detect_data_clumps, detect_dead_code, detect_deep_nesting,
-    detect_divergent_change, detect_duplicate_code, detect_feature_envy,
-    detect_inappropriate_intimacy, detect_large_classes, detect_lazy_classes,
-    detect_long_functions, detect_long_parameter_lists, detect_message_chains, detect_middle_man,
-    detect_parallel_inheritance, detect_primitive_obsession, detect_refused_bequest,
-    detect_shotgun_surgery, detect_speculative_generality, detect_switch_statements,
+    detect_data_classes, detect_data_clumps, detect_dead_code, detect_dead_code_with_context,
+    detect_deep_nesting, detect_divergent_change, detect_duplicate_code,
+    detect_duplicate_code_with_context, detect_feature_envy, detect_feature_envy_with_context,
+    detect_inappropriate_intimacy, detect_inappropriate_intimacy_with_context,
+    detect_large_classes, detect_lazy_classes, detect_long_functions, detect_long_parameter_lists,
+    detect_message_chains, detect_middle_man, detect_parallel_inheritance,
+    detect_primitive_obsession, detect_refused_bequest, detect_shotgun_surgery,
+    detect_shotgun_surgery_with_context, detect_speculative_generality, detect_switch_statements,
     detect_temporary_fields,
 };

@@ -5,12 +5,17 @@ use crate::contracts::{
 use crate::jobs::JobRegistry;
 use crate::metrics::global_metrics;
 use crate::vector_service::{VectorSearchFilters, VectorSearchRequest, VectorService};
-use cortex_analyzer::{AnalyzePathFilters, Analyzer};
+use cortex_analyzer::{
+    AnalyzePathFilters, Analyzer, CrossProjectAnalyzer, NavigationEngine, ReviewAnalyzer,
+    ReviewFileInput, ReviewInput, ReviewLineRange, Severity, UsageKind,
+};
 use cortex_core::{CortexConfig, GitOperations, ProjectStatus, SearchKind};
 use cortex_graph::{BundleStore, GraphClient};
 use cortex_indexer::Indexer;
 use cortex_parser::SignatureExtractor;
-use cortex_vector::SearchType;
+use cortex_vector::{
+    Embedder, HybridSearch, LanceStore, OllamaEmbedder, OpenAIEmbedder, SearchType,
+};
 use cortex_watcher::{ProjectRegistry, WatchSession};
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
@@ -28,6 +33,7 @@ use std::fs;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -132,6 +138,64 @@ pub struct VectorIndexStatusReq {
 pub struct VectorDeleteRepositoryReq {
     /// Repository identifier/path whose vector index should be removed
     pub repo_path: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SimilarAcrossReq {
+    /// Minimum number of repositories in which symbol should appear
+    pub min_repos: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SharedDepsReq {
+    /// Optional explicit repository filter list
+    pub repos: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CompareApiReq {
+    pub repo_a: String,
+    pub repo_b: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CrossProjectSearchReq {
+    pub query: String,
+    pub repositories: Vec<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GoToDefReq {
+    pub symbol: String,
+    pub from_file: Option<String>,
+    pub from_line: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindUsagesReq {
+    pub symbol: String,
+    pub kind: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct QuickInfoReq {
+    pub symbol: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BranchStructuralDiffReq {
+    pub source_branch: String,
+    pub target_branch: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct PrReviewReq {
+    pub base_ref: Option<String>,
+    pub head_ref: Option<String>,
+    pub path: Option<String>,
+    pub min_severity: Option<String>,
+    pub max_findings: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -556,6 +620,19 @@ impl CortexHandler {
         CortexConfig::load().unwrap_or_else(|_| self.config.clone())
     }
 
+    fn resolve_project_context(&self) -> Result<(String, Option<String>), McpError> {
+        let project_ref = self.projects.get_current_project().ok_or_else(|| {
+            McpError::invalid_params(
+                "No current project set. Use set_current_project first.",
+                None,
+            )
+        })?;
+        Ok((
+            project_ref.path.display().to_string(),
+            Some(project_ref.branch),
+        ))
+    }
+
     // ── indexing ─────────────────────────────────────────────────────────────
 
     #[tool(
@@ -859,6 +936,166 @@ impl CortexHandler {
     }
 
     #[tool(
+        description = "Find similar functions or symbols across multiple indexed repositories. Use when comparing codebases or finding duplicated functionality."
+    )]
+    async fn find_similar_across_projects(
+        &self,
+        Parameters(req): Parameters<SimilarAcrossReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let graph = self.graph_client().await?;
+        let analyzer = CrossProjectAnalyzer::new(graph);
+        let results = analyzer
+            .find_similar_symbols(None, req.min_repos.unwrap_or(2))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&results).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(
+        description = "Find shared dependencies between indexed projects. Shows modules imported by multiple repositories."
+    )]
+    async fn find_shared_dependencies(
+        &self,
+        Parameters(req): Parameters<SharedDepsReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let graph = self.graph_client().await?;
+        let analyzer = CrossProjectAnalyzer::new(graph);
+        let repos = if req.repos.is_empty() {
+            None
+        } else {
+            Some(req.repos.as_slice())
+        };
+        let results = analyzer
+            .find_shared_dependencies(repos)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&results).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(
+        description = "Compare public API surfaces between two repositories. Shows shared functions, unique functions, and a similarity score."
+    )]
+    async fn compare_api_surface(
+        &self,
+        Parameters(req): Parameters<CompareApiReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let graph = self.graph_client().await?;
+        let analyzer = CrossProjectAnalyzer::new(graph);
+        let result = analyzer
+            .compare_api_surface(&req.repo_a, &req.repo_b)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&result).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(
+        description = "Go to the definition of a symbol. Uses qualified-name and import-context disambiguation when possible."
+    )]
+    async fn go_to_definition(
+        &self,
+        Parameters(req): Parameters<GoToDefReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let graph = self.graph_client().await?;
+        let (repo_path, branch) = self.resolve_project_context()?;
+        let nav = NavigationEngine::new(graph, repo_path, branch);
+        let results = nav
+            .go_to_definition(
+                &req.symbol,
+                req.from_file.as_deref().unwrap_or(""),
+                req.from_line,
+            )
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&results).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(
+        description = "Find all usages of a symbol across the current project (calls, imports, type references, inheritance, and references)."
+    )]
+    async fn find_all_usages(
+        &self,
+        Parameters(req): Parameters<FindUsagesReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let graph = self.graph_client().await?;
+        let (repo_path, branch) = self.resolve_project_context()?;
+        let nav = NavigationEngine::new(graph, repo_path, branch);
+        let usage_kind = parse_usage_kind(req.kind.as_deref())
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let results = nav
+            .find_usages(&req.symbol, usage_kind)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&results).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(
+        description = "Get quick information about a symbol: signature, docs, definition location, and usage metrics."
+    )]
+    async fn quick_info(
+        &self,
+        Parameters(req): Parameters<QuickInfoReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let graph = self.graph_client().await?;
+        let (repo_path, branch) = self.resolve_project_context()?;
+        let nav = NavigationEngine::new(graph, repo_path, branch);
+        let results = nav
+            .quick_info(&req.symbol)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&results).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(
+        description = "Compare two branches at the symbol level (added/removed/modified symbols plus impact). Both branches should be indexed."
+    )]
+    async fn branch_structural_diff(
+        &self,
+        Parameters(req): Parameters<BranchStructuralDiffReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let graph = self.graph_client().await?;
+        let (repo_path, _) = self.resolve_project_context()?;
+        let nav = NavigationEngine::new(graph, repo_path, None);
+        let result = nav
+            .branch_structural_diff(&req.source_branch, &req.target_branch)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&result).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(
+        description = "Run review analysis with graph intelligence (impact warnings + potential new dead code)."
+    )]
+    async fn pr_review(
+        &self,
+        Parameters(req): Parameters<PrReviewReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let graph = self.graph_client().await?;
+        let (repo_path, branch) = self.resolve_project_context()?;
+        let nav = NavigationEngine::new(graph, repo_path.clone(), branch);
+        let reviewer = ReviewAnalyzer::new();
+        let input = build_review_input_from_req(&repo_path, &req)
+            .map_err(|e| McpError::invalid_params(e.to_string(), None))?;
+        let report = reviewer.analyze_with_graph(&input, &nav).await;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&report).unwrap_or_default(),
+        ))
+    }
+
+    #[tool(
         description = "Calculate cyclomatic complexity of symbols, ranked by highest complexity. Use when the user asks for 'complex code', 'most complex functions', or 'complexity analysis'. Supports optional include/exclude path/file/glob filters to scope results."
     )]
     async fn calculate_cyclomatic_complexity(
@@ -1106,6 +1343,38 @@ impl CortexHandler {
             ..req
         };
         self.vector_search(Parameters(req)).await
+    }
+
+    #[tool(
+        description = "Search code across all indexed repositories using vector embeddings. Returns results grouped by repository."
+    )]
+    async fn search_across_projects(
+        &self,
+        Parameters(req): Parameters<CrossProjectSearchReq>,
+    ) -> Result<CallToolResult, McpError> {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        let store_path = PathBuf::from(home).join(".cortex/vectors");
+        let store = LanceStore::open(&store_path)
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let embedder: Arc<dyn Embedder> = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
+            Arc::new(OpenAIEmbedder::new(api_key))
+        } else {
+            Arc::new(OllamaEmbedder::new())
+        };
+        let hybrid = HybridSearch::new(Arc::new(store), embedder);
+        let repos = if req.repositories.is_empty() {
+            None
+        } else {
+            Some(req.repositories.as_slice())
+        };
+        let results = hybrid
+            .search_across_repositories(&req.query, repos, req.limit.unwrap_or(10))
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        Ok(Self::ok(
+            serde_json::to_string_pretty(&results).unwrap_or_default(),
+        ))
     }
 
     #[tool(
@@ -4104,9 +4373,7 @@ fn validate_serve_options(options: &McpServeOptions) -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("max_clients must be greater than 0"));
     }
     if options.idle_timeout_secs == 0 {
-        return Err(anyhow::anyhow!(
-            "idle_timeout_secs must be greater than 0"
-        ));
+        return Err(anyhow::anyhow!("idle_timeout_secs must be greater than 0"));
     }
     if !options.allow_remote && !is_loopback(&options.listen) {
         return Err(anyhow::anyhow!(
@@ -4185,6 +4452,186 @@ fn build_analyze_filters(
     };
     filters.validate().map_err(anyhow::Error::msg)?;
     Ok(filters)
+}
+
+fn parse_usage_kind(kind: Option<&str>) -> anyhow::Result<Option<UsageKind>> {
+    let Some(kind) = kind else {
+        return Ok(None);
+    };
+    let value = kind.trim().to_ascii_lowercase().replace('-', "_");
+    let parsed = match value.as_str() {
+        "call" => UsageKind::Call,
+        "import" => UsageKind::Import,
+        "type_reference" | "typereference" => UsageKind::TypeReference,
+        "field_access" | "fieldaccess" => UsageKind::FieldAccess,
+        "inheritance" | "inherits" => UsageKind::Inheritance,
+        "implementation" | "implements" => UsageKind::Implementation,
+        "reference" => UsageKind::Reference,
+        _ => anyhow::bail!("unsupported usage kind: {}", kind),
+    };
+    Ok(Some(parsed))
+}
+
+fn parse_review_severity(input: Option<&str>) -> Severity {
+    match input.unwrap_or("warning").to_ascii_lowercase().as_str() {
+        "critical" => Severity::Critical,
+        "error" => Severity::Error,
+        "warning" | "warn" => Severity::Warning,
+        _ => Severity::Info,
+    }
+}
+
+fn build_review_input_from_req(repo_path: &str, req: &PrReviewReq) -> anyhow::Result<ReviewInput> {
+    let target_path = req.path.as_deref().unwrap_or(repo_path);
+    let root = PathBuf::from(target_path);
+    let base_ref = req.base_ref.clone().unwrap_or_else(|| "main".to_string());
+    let head_ref = req.head_ref.clone().unwrap_or_else(|| "HEAD".to_string());
+
+    let review_files = if root.join(".git").exists() {
+        load_local_review_inputs_for_mcp(&root, &base_ref, &head_ref)?
+    } else {
+        let mut files = Vec::new();
+        collect_review_files(&root, &mut files)?;
+        files
+            .into_iter()
+            .filter_map(|p| {
+                let source = fs::read_to_string(&p).ok()?;
+                Some(ReviewFileInput {
+                    path: p.display().to_string(),
+                    source,
+                    changed_ranges: Vec::<ReviewLineRange>::new(),
+                })
+            })
+            .collect()
+    };
+
+    Ok(ReviewInput {
+        base_ref: Some(base_ref),
+        head_ref: Some(head_ref),
+        filters: AnalyzePathFilters::default(),
+        min_severity: parse_review_severity(req.min_severity.as_deref()),
+        max_findings: req.max_findings,
+        files: review_files,
+    })
+}
+
+fn load_local_review_inputs_for_mcp(
+    repo_path: &Path,
+    base: &str,
+    head: &str,
+) -> anyhow::Result<Vec<ReviewFileInput>> {
+    let range = format!("{base}...{head}");
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["diff", "--unified=0", "--no-color", range.as_str()])
+        .output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "failed to compute local diff for pr_review: {}",
+            stderr.trim()
+        );
+    }
+
+    let patch = String::from_utf8_lossy(&output.stdout);
+    let changed = parse_unified_diff_changed_ranges_mcp(&patch);
+    let mut files = Vec::new();
+
+    for (rel_path, ranges) in changed {
+        if let Some(source) = read_file_at_ref_mcp(repo_path, head, &rel_path)? {
+            files.push(ReviewFileInput {
+                path: rel_path,
+                source,
+                changed_ranges: ranges,
+            });
+        }
+    }
+    Ok(files)
+}
+
+fn read_file_at_ref_mcp(
+    repo_path: &Path,
+    reference: &str,
+    file_path: &str,
+) -> anyhow::Result<Option<String>> {
+    let show_spec = format!("{reference}:{file_path}");
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["show", show_spec.as_str()])
+        .output()?;
+    if output.status.success() {
+        return Ok(Some(String::from_utf8_lossy(&output.stdout).to_string()));
+    }
+    Ok(None)
+}
+
+fn parse_unified_diff_changed_ranges_mcp(patch: &str) -> HashMap<String, Vec<ReviewLineRange>> {
+    let mut out: HashMap<String, Vec<ReviewLineRange>> = HashMap::new();
+    let mut current_path: Option<String> = None;
+    for line in patch.lines() {
+        if let Some(stripped) = line.strip_prefix("+++ b/") {
+            current_path = Some(stripped.to_string());
+            continue;
+        }
+        if line.starts_with("+++ /dev/null") {
+            current_path = None;
+            continue;
+        }
+        if line.starts_with("@@")
+            && let (Some(path), Some(range)) = (current_path.as_ref(), parse_hunk_range_mcp(line))
+        {
+            out.entry(path.clone()).or_default().push(range);
+        }
+    }
+    out
+}
+
+fn parse_hunk_range_mcp(line: &str) -> Option<ReviewLineRange> {
+    if !line.starts_with("@@") {
+        return None;
+    }
+    let plus_index = line.find('+')?;
+    let after_plus = &line[plus_index + 1..];
+    let end_index = after_plus.find(' ').unwrap_or(after_plus.len());
+    let range_part = &after_plus[..end_index];
+
+    let (start, count) = if let Some((start, count)) = range_part.split_once(',') {
+        (start.parse::<u32>().ok()?, count.parse::<u32>().ok()?)
+    } else {
+        (range_part.parse::<u32>().ok()?, 1)
+    };
+    if count == 0 || start == 0 {
+        return None;
+    }
+    Some(ReviewLineRange {
+        start_line: start,
+        end_line: start + count.saturating_sub(1),
+    })
+}
+
+fn collect_review_files(path: &Path, out: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    if path.is_file() {
+        out.push(path.to_path_buf());
+        return Ok(());
+    }
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let p = entry.path();
+        if p.is_dir() {
+            if p.file_name().and_then(|n| n.to_str()) == Some(".git") {
+                continue;
+            }
+            collect_review_files(&p, out)?;
+        } else if let Some(ext) = p.extension().and_then(|e| e.to_str())
+            && matches!(
+                ext,
+                "rs" | "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "java" | "c" | "cpp" | "h"
+            )
+        {
+            out.push(p);
+        }
+    }
+    Ok(())
 }
 
 fn analyzer_capabilities_json() -> Value {
@@ -4451,9 +4898,11 @@ mod tests {
     use super::{
         ContextCapsuleReq, CortexHandler, ImpactGraphReq, IndexStatusReq, LogicFlowReq, MemoryDb,
         ObservationRecord, SaveObservationReq, SearchMemoryReq, SessionContextReq, SkeletonReq,
-        SubmitLspEdgesReq, WorkspaceSetupReq, build_skeleton, detect_intent, exceeded_rate_limit,
-        looks_sensitive, simple_lexical_score,
+        SubmitLspEdgesReq, WorkspaceSetupReq, build_review_input_from_req, build_skeleton,
+        detect_intent, exceeded_rate_limit, looks_sensitive, parse_hunk_range_mcp,
+        parse_unified_diff_changed_ranges_mcp, parse_usage_kind, simple_lexical_score,
     };
+    use crate::handler::{PrReviewReq, UsageKind};
     use cortex_core::CortexConfig;
     use rmcp::handler::server::wrapper::Parameters;
     use rmcp::model::CallToolResult;
@@ -4938,5 +5387,74 @@ mod tests {
         let handler = CortexHandler::new(CortexConfig::default());
         // Just verify we can create one
         let _ = handler.tool_enabled("test", true);
+    }
+
+    #[test]
+    fn parse_usage_kind_handles_expected_values() {
+        assert!(matches!(
+            parse_usage_kind(Some("type-reference")).expect("parse"),
+            Some(UsageKind::TypeReference)
+        ));
+        assert!(matches!(
+            parse_usage_kind(Some("field_access")).expect("parse"),
+            Some(UsageKind::FieldAccess)
+        ));
+        assert!(matches!(
+            parse_usage_kind(Some("call")).expect("parse"),
+            Some(UsageKind::Call)
+        ));
+    }
+
+    #[test]
+    fn parse_hunk_range_parses_added_span() {
+        let range = parse_hunk_range_mcp("@@ -10,2 +20,5 @@").expect("range");
+        assert_eq!(range.start_line, 20);
+        assert_eq!(range.end_line, 24);
+    }
+
+    #[test]
+    fn parse_unified_diff_collects_ranges_per_file() {
+        let patch = r#"
+diff --git a/src/a.rs b/src/a.rs
+--- a/src/a.rs
++++ b/src/a.rs
+@@ -1,0 +1,2 @@
++fn one() {}
++fn two() {}
+"#;
+        let changed = parse_unified_diff_changed_ranges_mcp(patch);
+        let ranges = changed.get("src/a.rs").expect("file entry");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start_line, 1);
+        assert_eq!(ranges[0].end_line, 2);
+    }
+
+    #[test]
+    fn build_review_input_from_req_non_git_fallback_reads_sources() {
+        let base = std::env::temp_dir().join(format!(
+            "mcp-review-build-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("create temp dir");
+        let file = base.join("sample.rs");
+        std::fs::write(&file, "fn sample() {}\n").expect("write sample");
+
+        let req = PrReviewReq {
+            base_ref: Some("main".to_string()),
+            head_ref: Some("HEAD".to_string()),
+            path: Some(base.display().to_string()),
+            min_severity: Some("warning".to_string()),
+            max_findings: Some(10),
+        };
+        let input =
+            build_review_input_from_req(base.to_string_lossy().as_ref(), &req).expect("input");
+        assert!(!input.files.is_empty());
+        assert!(input.files.iter().any(|f| f.path.ends_with("sample.rs")));
+
+        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_dir(base);
     }
 }

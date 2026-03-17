@@ -5,7 +5,7 @@ use cortex_core::{CortexConfig, Result, SearchKind};
 use cortex_graph::{BundleStore, GraphClient};
 use cortex_indexer::Indexer;
 use cortex_watcher::WatchSession;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
 use tokio::runtime::Runtime;
@@ -76,9 +76,9 @@ impl McpServer {
     pub fn start_stdio(&self) -> Result<()> {
         let stdin = std::io::stdin();
         let mut stdout = std::io::stdout();
-        let rt = Runtime::new().map_err(|e| cortex_core::CortexError::Runtime(
-            format!("Failed to create tokio runtime: {}", e)
-        ))?;
+        let rt = Runtime::new().map_err(|e| {
+            cortex_core::CortexError::Runtime(format!("Failed to create tokio runtime: {}", e))
+        })?;
 
         for line in stdin.lock().lines().map_while(|r| r.ok()) {
             let req: Value = serde_json::from_str(&line).unwrap_or_else(|_| json!({}));
@@ -142,8 +142,15 @@ impl McpServer {
             "find_code" => {
                 let client = GraphClient::connect(&self.config).await?;
                 let analyzer = Analyzer::new(client);
-                let query = params.get("query").and_then(Value::as_str).unwrap_or_default();
-                let kind = match params.get("kind").and_then(Value::as_str).unwrap_or("pattern") {
+                let query = params
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                let kind = match params
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .unwrap_or("pattern")
+                {
                     "name" => SearchKind::Name,
                     "type" => SearchKind::Type,
                     "content" => SearchKind::Content,
@@ -171,24 +178,77 @@ impl McpServer {
                     .get("target2")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                let depth = params.get("depth").and_then(Value::as_u64).map(|d| d as usize);
+                let depth = params
+                    .get("depth")
+                    .and_then(Value::as_u64)
+                    .map(|d| d as usize);
                 let output = match query_type {
-                    "find_callers" => analyzer.callers_with_filters(target, Some(&filters)).await?,
-                    "find_callees" => analyzer.callees_with_filters(target, Some(&filters)).await?,
-                    "find_all_callers" => analyzer.all_callers_with_filters(target, Some(&filters)).await?,
-                    "find_all_callees" => analyzer.all_callees_with_filters(target, Some(&filters)).await?,
-                    "call_chain" => analyzer
-                        .call_chain_with_filters(target, target2, depth, Some(&filters))
-                        .await?,
-                    "class_hierarchy" => analyzer.class_hierarchy_with_filters(target, Some(&filters)).await?,
+                    "find_callers" => {
+                        analyzer
+                            .callers_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "find_callees" => {
+                        analyzer
+                            .callees_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "find_all_callers" => {
+                        analyzer
+                            .all_callers_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "find_all_callees" => {
+                        analyzer
+                            .all_callees_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "call_chain" => {
+                        analyzer
+                            .call_chain_with_filters(target, target2, depth, Some(&filters))
+                            .await?
+                    }
+                    "class_hierarchy" => {
+                        analyzer
+                            .class_hierarchy_with_filters(target, Some(&filters))
+                            .await?
+                    }
                     "dead_code" => analyzer.dead_code_with_filters(Some(&filters)).await?,
-                    "overrides" => analyzer.overrides_with_filters(target, Some(&filters)).await?,
-                    "module_deps" => analyzer.module_dependencies_with_filters(target, Some(&filters)).await?,
-                    "variable_scope" => analyzer.variable_scope_with_filters(target, Some(&filters)).await?,
-                    "find_importers" => analyzer.find_importers_with_filters(target, Some(&filters)).await?,
-                    "find_by_decorator" => analyzer.find_by_decorator_with_filters(target, Some(&filters)).await?,
-                    "find_by_argument" => analyzer.find_by_argument_with_filters(target, Some(&filters)).await?,
-                    "find_complexity" => analyzer.find_complexity_with_filters(target, Some(&filters)).await?,
+                    "overrides" => {
+                        analyzer
+                            .overrides_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "module_deps" => {
+                        analyzer
+                            .module_dependencies_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "variable_scope" => {
+                        analyzer
+                            .variable_scope_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "find_importers" => {
+                        analyzer
+                            .find_importers_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "find_by_decorator" => {
+                        analyzer
+                            .find_by_decorator_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "find_by_argument" => {
+                        analyzer
+                            .find_by_argument_with_filters(target, Some(&filters))
+                            .await?
+                    }
+                    "find_complexity" => {
+                        analyzer
+                            .find_complexity_with_filters(target, Some(&filters))
+                            .await?
+                    }
                     _ => Vec::new(),
                 };
                 Ok(json!(output))
@@ -205,7 +265,9 @@ impl McpServer {
                 let client = GraphClient::connect(&self.config).await?;
                 let analyzer = Analyzer::new(client);
                 let filters = parse_analyze_filters(&params)?;
-                Ok(json!(analyzer.dead_code_with_filters(Some(&filters)).await?))
+                Ok(json!(
+                    analyzer.dead_code_with_filters(Some(&filters)).await?
+                ))
             }
             "calculate_cyclomatic_complexity" | "find_most_complex_functions" => {
                 let client = GraphClient::connect(&self.config).await?;
@@ -224,7 +286,10 @@ impl McpServer {
             }
             "delete_repository" => {
                 let client = GraphClient::connect(&self.config).await?;
-                let path = params.get("path").and_then(Value::as_str).unwrap_or_default();
+                let path = params
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 client.delete_repository(path).await?;
                 Ok(json!({"deleted": path}))
             }
@@ -234,7 +299,10 @@ impl McpServer {
             }
             "list_jobs" => Ok(json!(self.jobs.list())),
             "load_bundle" => {
-                let path = params.get("path").and_then(Value::as_str).unwrap_or_default();
+                let path = params
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 Ok(json!(BundleStore::import(PathBuf::from(path).as_path())?))
             }
             "search_registry_bundles" => Ok(json!({"bundles":[] })),
@@ -247,7 +315,9 @@ impl McpServer {
                 "status":"ok",
                 "analyzer": analyzer_capabilities_json()
             })),
-            "add_package_to_graph" | "visualize_graph_query" => Ok(json!({"status":"not_implemented"})),
+            "add_package_to_graph" | "visualize_graph_query" => {
+                Ok(json!({"status":"not_implemented"}))
+            }
             _ => Ok(json!({"error":"unknown_method"})),
         }
     }

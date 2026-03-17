@@ -1,11 +1,12 @@
 use super::common::{
     CallCaptures, DefCaptures, ImportCaptures, InheritCaptures, ParamCaptures, VariableCaptures,
-    extract_all,
+    entity_id, extract_all, file_id,
 };
 use crate::parser_impl::ParseResult;
-use cortex_core::{EdgeKind, EntityKind, Language};
+use cortex_core::{CodeEdge, EdgeKind, EntityKind, Language};
+use std::collections::HashMap;
 use std::path::Path;
-use tree_sitter::Query;
+use tree_sitter::{Query, QueryCursor, StreamingIterator};
 
 const DEF_QUERY: &str = r#"
 (function_item
@@ -80,6 +81,23 @@ const VARIABLE_QUERY: &str = r#"
   pattern: (identifier) @var)
 "#;
 
+const MEMBER_OF_QUERY: &str = r#"
+(impl_item
+  type: (type_identifier) @parent
+  body: (declaration_list
+    (function_item
+      name: (identifier) @method) @method_entity))
+"#;
+
+const TYPE_REF_QUERY: &str = r#"
+(type_identifier) @type_ref
+"#;
+
+const FIELD_ACCESS_QUERY: &str = r#"
+(field_expression
+  field: (field_identifier) @field)
+"#;
+
 pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResult {
     let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
 
@@ -147,7 +165,7 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         },
     ];
 
-    extract_all(
+    let mut result = extract_all(
         source,
         path,
         Language::Rust,
@@ -177,7 +195,130 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
         Some(&VariableCaptures {
             var: var_q.capture_index_for_name("var").unwrap_or(0),
         }),
-    )
+    );
+
+    augment_navigation_edges(source, path, tree, &mut result);
+    result
+}
+
+fn augment_navigation_edges(
+    source: &str,
+    path: &Path,
+    tree: &tree_sitter::Tree,
+    result: &mut ParseResult,
+) {
+    let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
+    let src = source.as_bytes();
+    let root = tree.root_node();
+    let fid = file_id(path);
+
+    // MEMBER_OF edges from impl methods to parent type.
+    if let Ok(member_q) = Query::new(&lang, MEMBER_OF_QUERY) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&member_q, root, src);
+        while let Some(m) = matches.next() {
+            let mut parent_name = None::<String>;
+            let mut method_name = None::<String>;
+            let mut method_line = None::<u32>;
+            for cap in m.captures.iter() {
+                let cap_name = &member_q.capture_names()[cap.index as usize];
+                if *cap_name == "parent" {
+                    parent_name = Some(super::common::node_text(cap.node, src).trim().to_string());
+                } else if *cap_name == "method" {
+                    method_name = Some(super::common::node_text(cap.node, src).trim().to_string());
+                } else if *cap_name == "method_entity" {
+                    method_line = Some(cap.node.start_position().row as u32 + 1);
+                }
+            }
+            let (Some(parent_name), Some(method_name), Some(method_line)) =
+                (parent_name, method_name, method_line)
+            else {
+                continue;
+            };
+            let Some(parent) = result
+                .nodes
+                .iter()
+                .find(|n| {
+                    matches!(
+                        n.kind,
+                        EntityKind::Struct
+                            | EntityKind::Class
+                            | EntityKind::Trait
+                            | EntityKind::Enum
+                            | EntityKind::TypeAlias
+                    ) && n.name == parent_name
+                })
+                .map(|n| n.id.clone())
+            else {
+                continue;
+            };
+            let from = entity_id(&EntityKind::Function, path, &method_name, method_line);
+            push_edge(
+                &mut result.edges,
+                CodeEdge {
+                    from,
+                    to: parent,
+                    kind: EdgeKind::MemberOf,
+                    properties: HashMap::new(),
+                },
+            );
+        }
+    }
+
+    // TYPE_REFERENCE edges from file node to placeholder targets.
+    if let Ok(type_q) = Query::new(&lang, TYPE_REF_QUERY) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&type_q, root, src);
+        while let Some(m) = matches.next() {
+            for cap in m.captures.iter() {
+                let name = super::common::node_text(cap.node, src).trim().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                push_edge(
+                    &mut result.edges,
+                    CodeEdge {
+                        from: fid.clone(),
+                        to: format!("call_target:{name}"),
+                        kind: EdgeKind::TypeReference,
+                        properties: HashMap::new(),
+                    },
+                );
+            }
+        }
+    }
+
+    // FIELD_ACCESS edges from file node to placeholder targets.
+    if let Ok(field_q) = Query::new(&lang, FIELD_ACCESS_QUERY) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(&field_q, root, src);
+        while let Some(m) = matches.next() {
+            for cap in m.captures.iter() {
+                let name = super::common::node_text(cap.node, src).trim().to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                push_edge(
+                    &mut result.edges,
+                    CodeEdge {
+                        from: fid.clone(),
+                        to: format!("call_target:{name}"),
+                        kind: EdgeKind::FieldAccess,
+                        properties: HashMap::new(),
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn push_edge(edges: &mut Vec<CodeEdge>, edge: CodeEdge) {
+    let exists = edges
+        .iter()
+        .any(|e| e.from == edge.from && e.to == edge.to && e.kind == edge.kind);
+    if !exists {
+        edges.push(edge);
+    }
 }
 
 #[cfg(test)]
@@ -440,5 +581,26 @@ mod tests {
                 .iter()
                 .any(|m| m == "crate::module::{TypeA, TypeB}")
         );
+    }
+
+    #[test]
+    fn test_parse_navigation_edges() {
+        let source = r#"
+            struct User { id: i32 }
+            impl User {
+                fn get_id(&self) -> i32 { self.id }
+            }
+        "#;
+        let tree = parse_rust(source);
+        let path = Path::new("user.rs");
+        let result = extract(source, path, &tree);
+        assert!(result.edges.iter().any(|e| e.kind == EdgeKind::MemberOf));
+        assert!(
+            result
+                .edges
+                .iter()
+                .any(|e| e.kind == EdgeKind::TypeReference)
+        );
+        assert!(result.edges.iter().any(|e| e.kind == EdgeKind::FieldAccess));
     }
 }

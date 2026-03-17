@@ -1,6 +1,6 @@
-use futures_util::{SinkExt, StreamExt};
 use cortex_core::CortexConfig;
 use cortex_mcp::{McpServeOptions, McpTransport, start_with_options};
+use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::time::Duration;
 use tokio_tungstenite::connect_async;
@@ -11,9 +11,9 @@ fn free_port() -> u16 {
     listener.local_addr().expect("local addr").port()
 }
 
-async fn connect_with_retry(url: &str) -> tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-> {
+async fn connect_with_retry(
+    url: &str,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
     let mut last_err = None;
     for _ in 0..120 {
         match connect_async(url).await {

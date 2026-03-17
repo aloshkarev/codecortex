@@ -74,6 +74,7 @@
 pub mod backend;
 pub mod bundle;
 pub mod client;
+pub mod cross_project;
 pub mod memgraph;
 pub mod migration;
 pub mod pool;
@@ -86,13 +87,14 @@ pub mod writer;
 pub use backend::{BackendConfig, BackendKind, BackendStats, QueryOptions, QueryResult};
 pub use bundle::BundleStore;
 pub use client::GraphClient;
+pub use cross_project::CrossProjectQueryBuilder;
 pub use memgraph::MemgraphClient;
 pub use migration::{CURRENT_VERSION, MIGRATIONS, Migration, MigrationManager, MigrationResult};
 pub use pool::{ConnectionPool, PoolConfig, PoolStats, PooledConnection};
 pub use query_engine::{AnalysisQuery, QueryEngine};
 pub use schema::{
     BranchIndexRecord, create_branch_index, delete_branch_index, ensure_constraints,
-    get_branch_indexes, is_branch_index_current, mark_branch_index_stale,
+    ensure_navigation_schema, get_branch_indexes, is_branch_index_current, mark_branch_index_stale,
 };
 pub use scoped_query::{QueryScope, ScopedQueryBuilder, ScopedResult};
 pub use timeout::{QueryTiming, QueryType, TimeoutConfig, TimeoutExecutor};

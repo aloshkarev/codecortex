@@ -477,7 +477,11 @@ impl Indexer {
         let call_targets: HashSet<(String, String)> = pass_two_edges
             .iter()
             .filter_map(|edge| {
-                if !matches!(edge.kind, EdgeKind::Calls) || !edge.to.starts_with("call_target:") {
+                if !matches!(
+                    edge.kind,
+                    EdgeKind::Calls | EdgeKind::TypeReference | EdgeKind::FieldAccess
+                ) || !edge.to.starts_with("call_target:")
+                {
                     return None;
                 }
                 let name = edge.to.trim_start_matches("call_target:").to_string();
@@ -492,6 +496,16 @@ impl Indexer {
         let resolved_calls = self
             .client
             .resolve_call_targets(&repository_path, branch.as_deref())
+            .await
+            .unwrap_or(0);
+        let _resolved_type_refs = self
+            .client
+            .resolve_type_references(&repository_path, branch.as_deref())
+            .await
+            .unwrap_or(0);
+        let _resolved_field_accesses = self
+            .client
+            .resolve_field_accesses(&repository_path, branch.as_deref())
             .await
             .unwrap_or(0);
 

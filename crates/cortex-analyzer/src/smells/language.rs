@@ -62,10 +62,7 @@ pub(crate) fn is_comment_line(trimmed: &str, lang: SourceLanguage) -> bool {
     }
     (matches!(
         lang,
-        SourceLanguage::Python
-            | SourceLanguage::Ruby
-            | SourceLanguage::Php
-            | SourceLanguage::Shell
+        SourceLanguage::Python | SourceLanguage::Ruby | SourceLanguage::Php | SourceLanguage::Shell
     )) && trimmed.starts_with('#')
 }
 

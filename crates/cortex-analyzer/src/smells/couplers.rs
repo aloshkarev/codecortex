@@ -13,6 +13,7 @@ use super::language::{
     SourceLanguage, extract_function_name as shared_extract_function_name,
     is_comment_line as shared_is_comment_line, is_method_signature,
 };
+use crate::context::ProjectAnalysisContext;
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
 use std::collections::HashMap;
 
@@ -64,6 +65,76 @@ pub fn detect_feature_envy(source: &str, file_path: &str, config: &SmellConfig) 
         }
     }
 
+    smells
+}
+
+/// Detect feature envy with project-wide call graph context.
+pub fn detect_feature_envy_with_context(
+    source: &str,
+    file_path: &str,
+    config: &SmellConfig,
+    context: &ProjectAnalysisContext,
+) -> Vec<CodeSmell> {
+    let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
+    let methods = extract_methods_with_access_patterns(&lines, lang);
+    let own_module = extract_module_from_path(file_path);
+
+    let mut smells = detect_feature_envy(source, file_path, config);
+
+    for (method_name, method_info) in &methods {
+        let mut module_call_counts: HashMap<String, usize> = HashMap::new();
+
+        if let Some(callees) = context.symbols().callees.get(method_name) {
+            for callee_name in callees {
+                if let Some(locations) = context.symbols().definitions.get(callee_name) {
+                    for location in locations {
+                        let module_name = extract_module_from_path(&location.file_path);
+                        *module_call_counts.entry(module_name).or_default() += 1;
+                    }
+                }
+            }
+        }
+
+        let own_calls = module_call_counts.get(&own_module).copied().unwrap_or(0);
+        for (module, count) in module_call_counts {
+            if module == own_module {
+                continue;
+            }
+            if count > own_calls && count >= config.min_other_accesses {
+                smells.push(CodeSmell {
+                    smell_type: SmellType::FeatureEnvy,
+                    severity: Severity::Warning,
+                    file_path: file_path.to_string(),
+                    line_number: method_info.line_number,
+                    symbol_name: method_name.clone(),
+                    message: format!(
+                        "Method '{}' calls module '{}' {} times vs {} in own module '{}'",
+                        method_name, module, count, own_calls, own_module
+                    ),
+                    metric_value: Some(count),
+                    threshold: Some(config.min_other_accesses),
+                    suggestion: Some(format!(
+                        "Consider moving '{}' closer to module '{}'",
+                        method_name, module
+                    )),
+                });
+            }
+        }
+    }
+
+    smells.sort_by(|a, b| {
+        a.file_path
+            .cmp(&b.file_path)
+            .then_with(|| a.line_number.cmp(&b.line_number))
+            .then_with(|| a.smell_type.to_string().cmp(&b.smell_type.to_string()))
+    });
+    smells.dedup_by(|a, b| {
+        a.file_path == b.file_path
+            && a.line_number == b.line_number
+            && a.smell_type == b.smell_type
+            && a.symbol_name == b.symbol_name
+    });
     smells
 }
 
@@ -127,6 +198,76 @@ pub fn detect_inappropriate_intimacy(
         }
     }
 
+    smells
+}
+
+/// Detect inappropriate intimacy with project-wide module dependency data.
+pub fn detect_inappropriate_intimacy_with_context(
+    source: &str,
+    file_path: &str,
+    config: &SmellConfig,
+    context: &ProjectAnalysisContext,
+) -> Vec<CodeSmell> {
+    let mut smells = detect_inappropriate_intimacy(source, file_path, config);
+    let own_module = extract_module_from_path(file_path);
+
+    let Some(outgoing) = context.symbols().module_dependencies.get(&own_module) else {
+        return smells;
+    };
+
+    for target_module in outgoing {
+        let reverse_count = context
+            .symbols()
+            .module_dependencies
+            .get(target_module)
+            .map_or(0, |set| usize::from(set.contains(&own_module)));
+        let forward_count = 1usize;
+        let total_cross_access = forward_count + reverse_count;
+
+        if total_cross_access >= config.min_intimacy_accesses {
+            smells.push(CodeSmell {
+                smell_type: SmellType::InappropriateIntimacy,
+                severity: if reverse_count > 0 {
+                    Severity::Warning
+                } else {
+                    Severity::Info
+                },
+                file_path: file_path.to_string(),
+                line_number: 1,
+                symbol_name: format!("{} <-> {}", own_module, target_module),
+                message: format!(
+                    "Modules '{}' and '{}' are tightly coupled ({} cross-links{})",
+                    own_module,
+                    target_module,
+                    total_cross_access,
+                    if reverse_count > 0 {
+                        ", bidirectional"
+                    } else {
+                        ""
+                    }
+                ),
+                metric_value: Some(total_cross_access),
+                threshold: Some(config.min_intimacy_accesses),
+                suggestion: Some(
+                    "Reduce coupling: consider Extract Class, Hide Delegate, or clearer boundaries"
+                        .to_string(),
+                ),
+            });
+        }
+    }
+
+    smells.sort_by(|a, b| {
+        a.file_path
+            .cmp(&b.file_path)
+            .then_with(|| a.line_number.cmp(&b.line_number))
+            .then_with(|| a.smell_type.to_string().cmp(&b.smell_type.to_string()))
+    });
+    smells.dedup_by(|a, b| {
+        a.file_path == b.file_path
+            && a.line_number == b.line_number
+            && a.smell_type == b.smell_type
+            && a.symbol_name == b.symbol_name
+    });
     smells
 }
 
@@ -736,6 +877,19 @@ fn extract_class_name(line: &str) -> String {
     "unknown".to_string()
 }
 
+fn extract_module_from_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if let Some((prefix, _)) = normalized.rsplit_once('/') {
+        if prefix.is_empty() {
+            "root".to_string()
+        } else {
+            prefix.to_string()
+        }
+    } else {
+        "root".to_string()
+    }
+}
+
 fn extract_method_name(line: &str) -> String {
     shared_extract_function_name(line)
 }
@@ -743,6 +897,8 @@ fn extract_method_name(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ProjectSymbolIndex, SymbolLocation};
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_extract_message_chains() {
@@ -790,5 +946,56 @@ mod tests {
             0,
             SourceLanguage::Unknown
         ));
+    }
+
+    #[test]
+    fn test_feature_envy_with_context_cross_module_signal() {
+        let config = SmellConfig {
+            min_other_accesses: 2,
+            max_envy_ratio: 0.5,
+            ..Default::default()
+        };
+        let source = r#"
+fn worker() {
+    util_a();
+    util_b();
+}
+"#;
+
+        let mut callees: HashMap<String, HashSet<String>> = HashMap::new();
+        callees.insert(
+            "worker".to_string(),
+            HashSet::from([String::from("util_a"), String::from("util_b")]),
+        );
+        let mut definitions: HashMap<String, Vec<SymbolLocation>> = HashMap::new();
+        definitions.insert(
+            "util_a".to_string(),
+            vec![SymbolLocation {
+                file_path: "src/external/mod_a.rs".to_string(),
+                line_number: 10,
+                kind: "FUNCTION".to_string(),
+            }],
+        );
+        definitions.insert(
+            "util_b".to_string(),
+            vec![SymbolLocation {
+                file_path: "src/external/mod_a.rs".to_string(),
+                line_number: 20,
+                kind: "FUNCTION".to_string(),
+            }],
+        );
+
+        let context = crate::ProjectAnalysisContext::from_symbols_for_tests(ProjectSymbolIndex {
+            callees,
+            definitions,
+            ..Default::default()
+        });
+        let smells = detect_feature_envy_with_context(source, "src/local.rs", &config, &context);
+        assert!(
+            smells
+                .iter()
+                .any(|s| s.smell_type == SmellType::FeatureEnvy && s.symbol_name == "worker"),
+            "expected project-level feature envy signal for worker"
+        );
     }
 }

@@ -1,9 +1,9 @@
 use crate::{
     AnalyzePathFilters, CodeSmell, RefactoringEngine, RefactoringRecommendation, Severity,
-    SmellDetector,
+    SmellDetector, navigation::NavigationEngine,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReviewLineRange {
@@ -182,6 +182,115 @@ impl ReviewAnalyzer {
         }
     }
 
+    /// Enhanced review that augments findings with project graph intelligence.
+    pub async fn analyze_with_graph(
+        &self,
+        input: &ReviewInput,
+        nav: &NavigationEngine,
+    ) -> ReviewReport {
+        let mut report = self.analyze(input);
+        let mut impact_findings: Vec<ReviewSmellFinding> = Vec::new();
+        let added_functions = Self::added_functions_from_branch_diff(input, nav).await;
+
+        for file in &input.files {
+            let changed_functions =
+                extract_changed_function_names(&file.source, &file.changed_ranges);
+            for func_name in changed_functions {
+                if let Ok(affected) = nav.find_usages(&func_name, None).await {
+                    if !affected.is_empty() {
+                        let caller_count = affected.len();
+                        impact_findings.push(ReviewSmellFinding {
+                            file_path: file.path.clone(),
+                            line_number: find_function_line(&file.source, &func_name).unwrap_or(0),
+                            severity: if caller_count > 10 {
+                                Severity::Warning
+                            } else {
+                                Severity::Info
+                            },
+                            smell_type: "impact_warning".to_string(),
+                            symbol_name: func_name.clone(),
+                            message: format!(
+                                "Changed function '{}' has {} callers/usages across the project that may be affected",
+                                func_name, caller_count
+                            ),
+                            in_changed_lines: true,
+                        });
+                    }
+                }
+            }
+        }
+
+        for file in &input.files {
+            let new_functions = extract_new_function_names(
+                &file.source,
+                &file.changed_ranges,
+                added_functions.get(&file.path),
+            );
+            for func_name in new_functions {
+                if let Ok(usages) = nav.find_usages(&func_name, None).await {
+                    if usages.is_empty() {
+                        impact_findings.push(ReviewSmellFinding {
+                            file_path: file.path.clone(),
+                            line_number: find_function_line(&file.source, &func_name).unwrap_or(0),
+                            severity: Severity::Info,
+                            smell_type: "new_dead_code".to_string(),
+                            symbol_name: func_name.clone(),
+                            message: format!(
+                                "New function '{}' has no callers/usages yet. Verify intended integration.",
+                                func_name
+                            ),
+                            in_changed_lines: true,
+                        });
+                    }
+                }
+            }
+        }
+
+        let impact_total = impact_findings.len();
+        report.smells.extend(impact_findings);
+        report.smells.sort_by(|a, b| {
+            b.severity
+                .cmp(&a.severity)
+                .then_with(|| a.file_path.cmp(&b.file_path))
+                .then_with(|| a.line_number.cmp(&b.line_number))
+        });
+        if let Some(limit) = input.max_findings
+            && report.smells.len() > limit
+        {
+            report.smells.truncate(limit);
+        }
+        report.summary.smell_findings_total += impact_total;
+        report.summary.smell_findings_returned = report.smells.len();
+        report.summary.by_severity = summarize_smells_by_severity(&report.smells);
+        report
+    }
+
+    async fn added_functions_from_branch_diff(
+        input: &ReviewInput,
+        nav: &NavigationEngine,
+    ) -> HashMap<String, HashSet<String>> {
+        let (Some(base_ref), Some(head_ref)) =
+            (input.base_ref.as_deref(), input.head_ref.as_deref())
+        else {
+            return HashMap::new();
+        };
+        let Ok(diff) = nav.branch_structural_diff(head_ref, base_ref).await else {
+            return HashMap::new();
+        };
+
+        let mut added_by_file: HashMap<String, HashSet<String>> = HashMap::new();
+        for entry in diff.added_symbols {
+            if !is_function_kind(&entry.kind) {
+                continue;
+            }
+            added_by_file
+                .entry(entry.file_path)
+                .or_default()
+                .insert(entry.name);
+        }
+        added_by_file
+    }
+
     fn filter_smells_for_review(
         &self,
         smells: &[CodeSmell],
@@ -234,6 +343,80 @@ impl ReviewAnalyzer {
             description: rec.description.clone(),
         }
     }
+}
+
+fn extract_changed_function_names(source: &str, ranges: &[ReviewLineRange]) -> Vec<String> {
+    source
+        .lines()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            let line_no = idx as u32 + 1;
+            let in_changed = ranges.is_empty() || ranges.iter().any(|r| r.contains(line_no));
+            if !in_changed {
+                return None;
+            }
+            extract_function_name(line)
+        })
+        .collect()
+}
+
+fn extract_new_function_names(
+    source: &str,
+    ranges: &[ReviewLineRange],
+    known_added_functions: Option<&HashSet<String>>,
+) -> Vec<String> {
+    let Some(added) = known_added_functions else {
+        return Vec::new();
+    };
+    extract_changed_function_names(source, ranges)
+        .into_iter()
+        .filter(|name| added.contains(name))
+        .collect()
+}
+
+fn find_function_line(source: &str, function_name: &str) -> Option<u32> {
+    source
+        .lines()
+        .enumerate()
+        .find_map(|(idx, line)| match extract_function_name(line) {
+            Some(name) if name == function_name => Some(idx as u32 + 1),
+            _ => None,
+        })
+}
+
+fn extract_function_name(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    let candidates = ["fn ", "def ", "function "];
+    for prefix in candidates {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            let name = rest
+                .split('(')
+                .next()
+                .unwrap_or_default()
+                .trim()
+                .trim_end_matches('{')
+                .trim();
+            if !name.is_empty() {
+                return Some(name.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn is_function_kind(kind: &str) -> bool {
+    let upper = kind.to_ascii_uppercase();
+    upper.contains("FUNCTION") || upper.contains("METHOD")
+}
+
+fn summarize_smells_by_severity(smells: &[ReviewSmellFinding]) -> BTreeMap<String, usize> {
+    let mut by_severity = BTreeMap::new();
+    for smell in smells {
+        *by_severity
+            .entry(smell.severity.to_string())
+            .or_insert(0usize) += 1;
+    }
+    by_severity
 }
 
 #[cfg(test)]
@@ -316,5 +499,38 @@ fn long_one() {
         let report = analyzer.analyze(&input);
         assert!(report.summary.files_analyzed > 0);
         assert!(report.smells.iter().all(|s| s.in_changed_lines));
+    }
+
+    #[test]
+    fn extract_new_function_names_uses_added_symbol_filter() {
+        let source = r#"
+fn existing_one() {
+    let x = 1;
+}
+
+fn truly_new() {
+    let y = 2;
+}
+"#;
+        let ranges = vec![ReviewLineRange {
+            start_line: 1,
+            end_line: 20,
+        }];
+        let mut added = HashSet::new();
+        added.insert("truly_new".to_string());
+
+        let names = extract_new_function_names(source, &ranges, Some(&added));
+        assert_eq!(names, vec!["truly_new".to_string()]);
+    }
+
+    #[test]
+    fn extract_new_function_names_requires_added_symbol_context() {
+        let source = "fn maybe_changed() {}";
+        let ranges = vec![ReviewLineRange {
+            start_line: 1,
+            end_line: 1,
+        }];
+        let names = extract_new_function_names(source, &ranges, None);
+        assert!(names.is_empty());
     }
 }

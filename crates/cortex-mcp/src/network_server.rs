@@ -1,7 +1,7 @@
 use crate::handler::{CortexHandler, McpServeOptions, McpTransport};
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::Request;
 use axum::extract::Extension;
+use axum::extract::Request;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{Next, from_fn};
 use axum::response::{IntoResponse, Response};
@@ -33,11 +33,7 @@ fn unauthorized_response() -> Response {
 }
 
 fn too_many_clients_response() -> Response {
-    (
-        StatusCode::TOO_MANY_REQUESTS,
-        "Too many clients connected",
-    )
-        .into_response()
+    (StatusCode::TOO_MANY_REQUESTS, "Too many clients connected").into_response()
 }
 
 fn token_from_headers(headers: &HeaderMap) -> Option<String> {
@@ -70,10 +66,7 @@ async fn auth_middleware(req: Request, next: Next) -> Response {
     next.run(req).await
 }
 
-async fn ws_upgrade(
-    ws: WebSocketUpgrade,
-    Extension(state): Extension<NetworkState>,
-) -> Response {
+async fn ws_upgrade(ws: WebSocketUpgrade, Extension(state): Extension<NetworkState>) -> Response {
     let active = state.ws_clients.load(Ordering::SeqCst);
     if active >= state.max_clients {
         return too_many_clients_response();
@@ -101,9 +94,8 @@ async fn websocket_loop(socket: WebSocket, state: NetworkState) {
     let outgoing = sink
         .sink_map_err(|e| io::Error::other(format!("websocket sink error: {e}")))
         .with(|msg: ServerJsonRpcMessage| {
-            let text = serde_json::to_string(&msg).map_err(|e| {
-                io::Error::other(format!("serialize ws message: {e}"))
-            });
+            let text = serde_json::to_string(&msg)
+                .map_err(|e| io::Error::other(format!("serialize ws message: {e}")));
             future::ready(text.map(|text| Message::Text(text.into())))
         });
 
@@ -132,7 +124,10 @@ pub async fn start_network(config: CortexConfig, options: McpServeOptions) -> an
 
     let mut app = Router::new();
 
-    if matches!(options.transport, McpTransport::HttpSse | McpTransport::Multi) {
+    if matches!(
+        options.transport,
+        McpTransport::HttpSse | McpTransport::Multi
+    ) {
         let cfg_for_factory = config.clone();
         let http_service: StreamableHttpService<CortexHandler, LocalSessionManager> =
             StreamableHttpService::new(
@@ -143,13 +138,14 @@ pub async fn start_network(config: CortexConfig, options: McpServeOptions) -> an
         app = app.route_service("/mcp", any_service(http_service));
     }
 
-    if matches!(options.transport, McpTransport::WebSocket | McpTransport::Multi) {
+    if matches!(
+        options.transport,
+        McpTransport::WebSocket | McpTransport::Multi
+    ) {
         app = app.route("/ws", get(ws_upgrade));
     }
 
-    app = app
-        .layer(Extension(state))
-        .layer(from_fn(auth_middleware));
+    app = app.layer(Extension(state)).layer(from_fn(auth_middleware));
 
     let listener = tokio::net::TcpListener::bind(options.listen).await?;
     tracing::info!(
@@ -234,7 +230,11 @@ mod tests {
         ws1.send(WsMessage::Text(tools_call.to_string().into()))
             .await
             .expect("send tools/list");
-        let response = ws1.next().await.expect("tools/list recv").expect("tools/list msg");
+        let response = ws1
+            .next()
+            .await
+            .expect("tools/list recv")
+            .expect("tools/list msg");
         let text = match response {
             WsMessage::Text(t) => t.to_string(),
             other => panic!("unexpected response: {:?}", other),

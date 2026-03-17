@@ -22,13 +22,16 @@ pub use bloaters::{
 };
 pub use change_preventers::{
     detect_divergent_change, detect_parallel_inheritance, detect_shotgun_surgery,
+    detect_shotgun_surgery_with_context,
 };
 pub use couplers::{
-    detect_feature_envy, detect_inappropriate_intimacy, detect_message_chains, detect_middle_man,
+    detect_feature_envy, detect_feature_envy_with_context, detect_inappropriate_intimacy,
+    detect_inappropriate_intimacy_with_context, detect_message_chains, detect_middle_man,
 };
 pub use dispensables::{
-    detect_comments, detect_data_classes, detect_dead_code, detect_duplicate_code,
-    detect_lazy_classes, detect_speculative_generality,
+    detect_comments, detect_data_classes, detect_dead_code, detect_dead_code_with_context,
+    detect_duplicate_code, detect_duplicate_code_with_context, detect_lazy_classes,
+    detect_speculative_generality,
 };
 pub use oo_abusers::{detect_alternative_classes, detect_refused_bequest, detect_temporary_fields};
 

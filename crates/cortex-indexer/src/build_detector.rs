@@ -414,9 +414,13 @@ impl BuildDetector {
 
     /// Check for Kotlin Gradle build files
     fn has_gradle_kotlin(&self) -> bool {
-        ["build.gradle.kts", "settings.gradle.kts", "gradle.properties"]
-            .iter()
-            .any(|name| self.root.join(name).exists())
+        [
+            "build.gradle.kts",
+            "settings.gradle.kts",
+            "gradle.properties",
+        ]
+        .iter()
+        .any(|name| self.root.join(name).exists())
     }
 
     /// Check for Swift Package Manager manifests

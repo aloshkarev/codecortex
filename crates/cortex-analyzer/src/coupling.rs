@@ -5,6 +5,7 @@
 //! - **Cohesion Metrics**: Measure how well module elements belong together
 //! - **Dependency Graph**: Build and analyze dependency relationships
 
+use crate::context::ProjectAnalysisContext;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -165,6 +166,30 @@ impl CouplingAnalyzer {
             .entry(method.to_string())
             .or_default()
             .insert(field.to_string());
+    }
+
+    /// Build a coupling analyzer from project-wide graph-derived context.
+    pub fn from_context(context: &ProjectAnalysisContext) -> Self {
+        let mut analyzer = Self::new();
+
+        for (module, deps) in &context.symbols().module_dependencies {
+            for dep in deps {
+                analyzer.add_dependency(module, dep);
+            }
+        }
+
+        for (func, callees) in &context.symbols().callees {
+            for callee in callees {
+                if let Some(locations) = context.symbols().definitions.get(callee) {
+                    for loc in locations {
+                        let module = extract_module_from_path(&loc.file_path);
+                        analyzer.add_field_access(func, &module);
+                    }
+                }
+            }
+        }
+
+        analyzer
     }
 
     /// Calculate coupling metrics for a module
@@ -409,9 +434,24 @@ impl CouplingAnalyzer {
     }
 }
 
+fn extract_module_from_path(path: &str) -> String {
+    let normalized = path.replace('\\', "/");
+    if let Some((prefix, _)) = normalized.rsplit_once('/') {
+        if prefix.is_empty() {
+            "root".to_string()
+        } else {
+            prefix.to_string()
+        }
+    } else {
+        "root".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ProjectSymbolIndex, SymbolLocation};
+    use std::collections::HashMap;
 
     #[test]
     fn coupling_analyzer_new() {
@@ -582,5 +622,34 @@ mod tests {
         let analyzer = CouplingAnalyzer::new();
         let cohesion_type = analyzer.determine_cohesion_type(0.55, 5, 3);
         assert_eq!(cohesion_type, CohesionType::Temporal);
+    }
+
+    #[test]
+    fn test_coupling_from_context() {
+        let mut module_dependencies: HashMap<String, HashSet<String>> = HashMap::new();
+        module_dependencies.insert("src/a".to_string(), HashSet::from([String::from("src/b")]));
+
+        let mut callees: HashMap<String, HashSet<String>> = HashMap::new();
+        callees.insert("fa".to_string(), HashSet::from([String::from("fb")]));
+        let mut definitions: HashMap<String, Vec<SymbolLocation>> = HashMap::new();
+        definitions.insert(
+            "fb".to_string(),
+            vec![SymbolLocation {
+                file_path: "src/b/mod.rs".to_string(),
+                line_number: 3,
+                kind: "FUNCTION".to_string(),
+            }],
+        );
+
+        let context = crate::ProjectAnalysisContext::from_symbols_for_tests(ProjectSymbolIndex {
+            module_dependencies,
+            callees,
+            definitions,
+            ..Default::default()
+        });
+
+        let analyzer = CouplingAnalyzer::from_context(&context);
+        let metrics = analyzer.analyze_coupling("src/a");
+        assert!(metrics.ce >= 1, "expected outgoing dependency from context");
     }
 }

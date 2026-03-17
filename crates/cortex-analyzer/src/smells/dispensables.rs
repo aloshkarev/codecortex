@@ -15,7 +15,9 @@ use super::language::{
     SourceLanguage, extract_function_name as shared_extract_function_name,
     is_comment_line as shared_is_comment_line, is_function_signature,
 };
+use crate::context::ProjectAnalysisContext;
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
+use crate::{DuplicationConfig, DuplicationDetector};
 use std::collections::{HashMap, HashSet};
 
 /// Detect excessive comments - code that needs comments to be understood
@@ -199,6 +201,71 @@ pub fn detect_duplicate_code(
     smells
 }
 
+/// Detect duplicate code with project-wide context.
+pub fn detect_duplicate_code_with_context(
+    source: &str,
+    file_path: &str,
+    config: &SmellConfig,
+    context: &ProjectAnalysisContext,
+) -> Vec<CodeSmell> {
+    let mut smells = detect_duplicate_code(source, file_path, config);
+
+    let detector = DuplicationDetector::with_config(DuplicationConfig {
+        min_lines: config.min_duplicate_lines.max(2),
+        min_tokens: config.min_duplicate_tokens.max(10),
+        similarity_threshold: config.min_duplicate_similarity,
+        ignore_whitespace: true,
+        normalize_identifiers: true,
+    });
+
+    let duplicates = detector.detect_project_wide(context);
+    let mut seen = HashSet::new();
+    for dup in duplicates {
+        let (line_number, other_file) = if dup.location1.file_path == file_path {
+            (
+                dup.location1.start_line as u32,
+                dup.location2.file_path.clone(),
+            )
+        } else if dup.location2.file_path == file_path {
+            (
+                dup.location2.start_line as u32,
+                dup.location1.file_path.clone(),
+            )
+        } else {
+            continue;
+        };
+
+        let key = format!("{}:{}:{}", file_path, line_number, other_file);
+        if !seen.insert(key) {
+            continue;
+        }
+
+        smells.push(CodeSmell {
+            smell_type: SmellType::DuplicateCode,
+            severity: if dup.similarity >= 0.9 {
+                Severity::Error
+            } else {
+                Severity::Warning
+            },
+            file_path: file_path.to_string(),
+            line_number,
+            symbol_name: format!("duplicate_with:{}", other_file),
+            message: format!(
+                "Project-wide duplicate code detected with '{}' ({:.0}% similarity)",
+                other_file,
+                dup.similarity * 100.0
+            ),
+            metric_value: Some((dup.similarity * 100.0) as usize),
+            threshold: Some((config.min_duplicate_similarity * 100.0) as usize),
+            suggestion: Some(
+                "Extract shared logic into reusable abstractions across files".to_string(),
+            ),
+        });
+    }
+
+    smells
+}
+
 /// Detect data classes - classes with only data, no behavior
 pub fn detect_data_classes(source: &str, file_path: &str, config: &SmellConfig) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
@@ -253,14 +320,59 @@ pub fn detect_data_classes(source: &str, file_path: &str, config: &SmellConfig) 
 }
 
 /// Detect dead code - unreachable or unused code
-pub fn detect_dead_code(source: &str, file_path: &str, _config: &SmellConfig) -> Vec<CodeSmell> {
+pub fn detect_dead_code_with_context(
+    source: &str,
+    file_path: &str,
+    _config: &SmellConfig,
+    context: &ProjectAnalysisContext,
+) -> Vec<CodeSmell> {
     let mut smells = Vec::new();
+    let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
+
+    let defined_functions = extract_defined_functions(&lines, lang);
+    let called_functions = extract_all_function_calls(&lines, lang);
+
+    for (func_name, line_number) in &defined_functions {
+        if is_entry_point(func_name) {
+            continue;
+        }
+
+        let called_in_same_file = called_functions.contains(func_name);
+        let called_in_project = context.symbols().has_callers(func_name);
+
+        if !called_in_same_file && !called_in_project {
+            smells.push(CodeSmell {
+                smell_type: SmellType::DeadCode,
+                severity: Severity::Warning,
+                file_path: file_path.to_string(),
+                line_number: *line_number,
+                symbol_name: func_name.clone(),
+                message: format!("Function '{}' has no callers in the project", func_name),
+                metric_value: Some(0),
+                threshold: Some(1),
+                suggestion: Some(
+                    "Remove unused function or document why it's intentionally unused".to_string(),
+                ),
+            });
+        }
+    }
+
+    smells.extend(detect_unreachable_and_unused_variables(
+        &lines, file_path, lang,
+    ));
+    smells
+}
+
+/// Detect dead code - unreachable or unused code
+pub fn detect_dead_code(source: &str, file_path: &str, _config: &SmellConfig) -> Vec<CodeSmell> {
     let lines: Vec<&str> = source.lines().collect();
     let lang = SourceLanguage::from_file_path(file_path);
 
     // Extract all defined functions and their usages
     let defined_functions = extract_defined_functions(&lines, lang);
     let called_functions = extract_all_function_calls(&lines, lang);
+    let mut smells = Vec::new();
 
     // Find unused functions
     for (func_name, line_number) in &defined_functions {
@@ -281,11 +393,22 @@ pub fn detect_dead_code(source: &str, file_path: &str, _config: &SmellConfig) ->
         }
     }
 
-    // Check for unreachable code patterns
+    smells.extend(detect_unreachable_and_unused_variables(
+        &lines, file_path, lang,
+    ));
+
+    smells
+}
+
+fn detect_unreachable_and_unused_variables(
+    lines: &[&str],
+    file_path: &str,
+    lang: SourceLanguage,
+) -> Vec<CodeSmell> {
+    let mut smells = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Code after return/throw/break/continue
         if i > 0 {
             let prev_line = lines[i - 1].trim();
             if is_exit_statement(prev_line)
@@ -308,9 +431,8 @@ pub fn detect_dead_code(source: &str, file_path: &str, _config: &SmellConfig) ->
             }
         }
 
-        // Variables defined but never used
         if let Some(var_name) = extract_variable_definition(trimmed) {
-            if !is_variable_used(&lines, &var_name, i + 1) {
+            if !is_variable_used(lines, &var_name, i + 1) {
                 smells.push(CodeSmell {
                     smell_type: SmellType::DeadCode,
                     severity: Severity::Info,
@@ -325,7 +447,6 @@ pub fn detect_dead_code(source: &str, file_path: &str, _config: &SmellConfig) ->
             }
         }
     }
-
     smells
 }
 
@@ -757,6 +878,9 @@ fn extract_all_function_calls(lines: &[&str], lang: SourceLanguage) -> HashSet<S
     let mut calls = HashSet::new();
 
     for line in lines {
+        if is_function_definition(line.trim(), lang) {
+            continue;
+        }
         let call_names = extract_function_calls(line.trim(), lang);
         calls.extend(call_names);
     }
@@ -1101,6 +1225,8 @@ fn is_keyword(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProjectSymbolIndex;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_is_getter_or_setter() {
@@ -1172,5 +1298,48 @@ fn example() {
                 .any(|s| s.message.contains("unreachable")),
             "Actual unreachable code should be flagged"
         );
+    }
+
+    #[test]
+    fn test_dead_code_with_context_no_false_positive_for_cross_file_call() {
+        let config = SmellConfig::default();
+        let source = r#"
+fn helper() {
+    println!("used elsewhere");
+}
+"#;
+        let mut callers: HashMap<String, HashSet<String>> = HashMap::new();
+        callers.insert("helper".to_string(), HashSet::from([String::from("main")]));
+
+        let context = crate::ProjectAnalysisContext::from_symbols_for_tests(ProjectSymbolIndex {
+            callers,
+            ..Default::default()
+        });
+
+        let smells = detect_dead_code_with_context(source, "src/lib.rs", &config, &context);
+        assert!(
+            !smells
+                .iter()
+                .any(|s| s.smell_type == SmellType::DeadCode && s.symbol_name == "helper"),
+            "helper should not be reported dead when called from another file"
+        );
+    }
+
+    #[test]
+    fn test_dead_code_with_context_true_dead() {
+        let config = SmellConfig::default();
+        let source = r#"
+def never_used():
+    return 42
+"#;
+
+        let context =
+            crate::ProjectAnalysisContext::from_symbols_for_tests(ProjectSymbolIndex::default());
+        let smells = detect_dead_code_with_context(source, "src/lib.py", &config, &context);
+        assert!(smells.iter().any(|s| {
+            s.smell_type == SmellType::DeadCode
+                && s.symbol_name == "never_used"
+                && s.message.contains("no callers in the project")
+        }));
     }
 }

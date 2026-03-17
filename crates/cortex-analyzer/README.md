@@ -9,6 +9,14 @@
 - Smell detection and refactoring suggestions
 - Path filter support used by CLI and MCP
 
+## Recent updates
+  - added `ProjectAnalysisContext` and project symbol index for context-aware analysis
+  - added context-aware smell paths (`*_with_context`) to reduce per-file false positives
+  - added project-wide duplication path support
+  - added cross-project analysis surface (`CrossProjectAnalyzer`) for similarity/shared dependency/API comparison flows
+  - added `NavigationEngine` with `go_to_definition`, `find_usages`, `quick_info`, `branch_structural_diff`
+  - added graph-enriched review path via `ReviewAnalyzer::analyze_with_graph`
+
 ## Analyze path filters
 
 `AnalyzePathFilters` supports:

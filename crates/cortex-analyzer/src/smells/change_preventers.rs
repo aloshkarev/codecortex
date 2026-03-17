@@ -11,6 +11,7 @@ use super::language::{
     SourceLanguage, extract_function_name as shared_extract_function_name, is_function_signature,
     is_method_signature,
 };
+use crate::context::ProjectAnalysisContext;
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
 use std::collections::HashMap;
 
@@ -171,6 +172,48 @@ pub fn detect_shotgun_surgery(
                     ),
                 });
             }
+        }
+    }
+
+    smells
+}
+
+/// Detect shotgun surgery using project-wide caller context.
+pub fn detect_shotgun_surgery_with_context(
+    source: &str,
+    file_path: &str,
+    config: &SmellConfig,
+    context: &ProjectAnalysisContext,
+) -> Vec<CodeSmell> {
+    let mut smells = Vec::new();
+    let lines: Vec<&str> = source.lines().collect();
+    let lang = SourceLanguage::from_file_path(file_path);
+    let functions = extract_function_info(&lines, lang);
+
+    for (func_name, func_info) in &functions {
+        let callers = context.symbols().caller_count(func_name);
+        if callers >= config.min_shotgun_callers {
+            smells.push(CodeSmell {
+                smell_type: SmellType::ShotgunSurgery,
+                severity: if callers >= config.min_shotgun_callers * 2 {
+                    Severity::Error
+                } else {
+                    Severity::Warning
+                },
+                file_path: file_path.to_string(),
+                line_number: func_info.line_number,
+                symbol_name: func_name.clone(),
+                message: format!(
+                    "Function '{}' is called from {} different places across the project - changes may require shotgun surgery",
+                    func_name, callers
+                ),
+                metric_value: Some(callers),
+                threshold: Some(config.min_shotgun_callers),
+                suggestion: Some(
+                    "Consider using Inline Method or Move Method to centralize the functionality"
+                        .to_string(),
+                ),
+            });
         }
     }
 
@@ -566,6 +609,8 @@ fn is_keyword(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ProjectSymbolIndex;
+    use std::collections::{HashMap, HashSet};
 
     #[test]
     fn test_extract_method_subject() {
@@ -589,5 +634,33 @@ mod tests {
         assert!(calls.contains(&"process".to_string()));
         assert!(calls.contains(&"validate".to_string()));
         assert!(calls.contains(&"save".to_string()));
+    }
+
+    #[test]
+    fn test_shotgun_surgery_with_context() {
+        let config = SmellConfig {
+            min_shotgun_callers: 2,
+            ..Default::default()
+        };
+        let source = r#"
+fn target() {}
+"#;
+
+        let mut callers: HashMap<String, HashSet<String>> = HashMap::new();
+        callers.insert(
+            "target".to_string(),
+            HashSet::from([String::from("a"), String::from("b"), String::from("c")]),
+        );
+        let context = crate::ProjectAnalysisContext::from_symbols_for_tests(ProjectSymbolIndex {
+            callers,
+            ..Default::default()
+        });
+
+        let smells = detect_shotgun_surgery_with_context(source, "src/lib.rs", &config, &context);
+        assert!(smells.iter().any(|s| {
+            s.smell_type == SmellType::ShotgunSurgery
+                && s.symbol_name == "target"
+                && s.metric_value == Some(3)
+        }));
     }
 }

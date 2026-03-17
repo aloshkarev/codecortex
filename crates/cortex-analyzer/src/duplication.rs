@@ -5,6 +5,7 @@
 //! - **Token-based Comparison**: Language-agnostic comparison
 //! - **Similarity Scoring**: Measure code similarity
 
+use crate::context::ProjectAnalysisContext;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -46,10 +47,7 @@ fn is_comment_line(trimmed: &str, lang: SourceLanguage) -> bool {
     }
     matches!(
         lang,
-        SourceLanguage::Python
-            | SourceLanguage::Ruby
-            | SourceLanguage::Php
-            | SourceLanguage::Shell
+        SourceLanguage::Python | SourceLanguage::Ruby | SourceLanguage::Php | SourceLanguage::Shell
     ) && trimmed.starts_with('#')
 }
 
@@ -450,6 +448,65 @@ impl DuplicationDetector {
             .filter(|(_, locations)| locations.len() > 1)
             .collect()
     }
+
+    /// Detect duplicates across all source files known by project context.
+    pub fn detect_project_wide(&self, context: &ProjectAnalysisContext) -> Vec<DuplicateBlock> {
+        let mut file_paths: HashSet<String> = HashSet::new();
+        for locations in context.symbols().definitions.values() {
+            for location in locations {
+                if !location.file_path.is_empty() {
+                    file_paths.insert(location.file_path.clone());
+                }
+            }
+        }
+
+        let mut sources = Vec::new();
+        for file_path in file_paths {
+            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                sources.push((file_path, content));
+            }
+        }
+
+        let mut duplicates = self.find_duplicates(&sources);
+        if duplicates.is_empty() {
+            for (line, locations) in self.find_duplicate_lines(&sources) {
+                if locations.len() < 2 {
+                    continue;
+                }
+                for i in 0..locations.len() {
+                    for j in (i + 1)..locations.len() {
+                        if locations[i].file_path == locations[j].file_path {
+                            continue;
+                        }
+                        duplicates.push(DuplicateBlock {
+                            location1: locations[i].clone(),
+                            location2: locations[j].clone(),
+                            similarity: 1.0,
+                            line_count: 1,
+                            snippet: line.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        duplicates.sort_by(|a, b| {
+            a.location1
+                .file_path
+                .cmp(&b.location1.file_path)
+                .then_with(|| a.location1.start_line.cmp(&b.location1.start_line))
+                .then_with(|| a.location2.file_path.cmp(&b.location2.file_path))
+                .then_with(|| a.location2.start_line.cmp(&b.location2.start_line))
+        });
+        duplicates.dedup_by(|a, b| {
+            a.location1.file_path == b.location1.file_path
+                && a.location1.start_line == b.location1.start_line
+                && a.location1.end_line == b.location1.end_line
+                && a.location2.file_path == b.location2.file_path
+                && a.location2.start_line == b.location2.start_line
+                && a.location2.end_line == b.location2.end_line
+        });
+        duplicates
+    }
 }
 
 impl Default for DuplicationDetector {
@@ -461,6 +518,8 @@ impl Default for DuplicationDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ProjectSymbolIndex, SymbolLocation};
+    use std::collections::HashMap;
 
     #[test]
     fn duplication_detector_new() {
@@ -689,5 +748,68 @@ fn function_two() {
         assert!((config.similarity_threshold - 0.8).abs() < 0.001);
         assert!(config.ignore_whitespace);
         assert!(config.normalize_identifiers);
+    }
+
+    #[test]
+    fn detect_project_wide_uses_context_files() {
+        let base = std::env::temp_dir().join(format!(
+            "dup-project-wide-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&base).expect("create temp dir");
+
+        let file_a = base.join("a.rs");
+        let file_b = base.join("b.rs");
+        let shared = r#"
+fn same_logic(x: i32) -> i32 {
+    let y = x + 1;
+    let z = y * 2;
+    z - 3
+}
+"#;
+        std::fs::write(&file_a, shared).expect("write file a");
+        std::fs::write(&file_b, shared).expect("write file b");
+
+        let mut definitions: HashMap<String, Vec<SymbolLocation>> = HashMap::new();
+        definitions.insert(
+            "same_logic_a".to_string(),
+            vec![SymbolLocation {
+                file_path: file_a.display().to_string(),
+                line_number: 1,
+                kind: "FUNCTION".to_string(),
+            }],
+        );
+        definitions.insert(
+            "same_logic_b".to_string(),
+            vec![SymbolLocation {
+                file_path: file_b.display().to_string(),
+                line_number: 1,
+                kind: "FUNCTION".to_string(),
+            }],
+        );
+
+        let context = crate::ProjectAnalysisContext::from_symbols_for_tests(ProjectSymbolIndex {
+            definitions,
+            ..Default::default()
+        });
+        let detector = DuplicationDetector::with_config(DuplicationConfig {
+            min_lines: 2,
+            min_tokens: 4,
+            similarity_threshold: 0.8,
+            ignore_whitespace: true,
+            normalize_identifiers: false,
+        });
+        let duplicates = detector.detect_project_wide(&context);
+        assert!(
+            !duplicates.is_empty(),
+            "expected cross-file duplicates from context file set"
+        );
+
+        let _ = std::fs::remove_file(&file_a);
+        let _ = std::fs::remove_file(&file_b);
+        let _ = std::fs::remove_dir(&base);
     }
 }

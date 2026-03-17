@@ -25,6 +25,15 @@ It extracts symbols and structure used by indexer and analyzer crates.
 
 Depending on language grammar, extraction includes functions, methods, classes/structs, interfaces/traits, enums, modules/namespaces, and related signature metadata.
 
+## Recent updates
+
+- Parsers now emit `qualified_name` for extracted entities to improve symbol disambiguation.
+- Language handlers for Rust, Python, TypeScript, Go, and Java augment edges with:
+  - `MEMBER_OF`
+  - `TYPE_REFERENCE`
+  - `FIELD_ACCESS`
+- These edges feed `goto`, `usages`, `quick_info`, and structural diff features in analyzer/CLI/MCP.
+
 ## Example
 
 ```rust

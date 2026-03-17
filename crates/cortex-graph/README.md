@@ -77,17 +77,28 @@ println!("Migrated to version {}", result.version);
 ## Schema
 
 The graph uses the following node labels:
+
 - `Repository` - Root repository nodes
 - `Directory` - Directory structure
 - `File` - Source files
 - `Function`, `Class`, `Struct`, `Enum`, `Trait` - Code entities
 
 Relationship types:
+
 - `CONTAINS` - Hierarchical containment
 - `CALLS` - Function calls
 - `IMPORTS` - Import statements
 - `INHERITS` - Class inheritance
 - `IMPLEMENTS` - Trait implementations
+- `MEMBER_OF` - Member-to-parent type relationship
+- `TYPE_REFERENCE` - Type-position references
+- `FIELD_ACCESS` - Field access expressions
+
+## Recent updates
+
+- Added `CrossProjectQueryBuilder` for multi-repository query composition and filtering.
+- Added navigation-oriented schema indexes on `qualified_name` for fast symbol resolution.
+- `GraphClient` now includes type-reference resolution and promotes key node properties (`qualified_name`, `visibility`) for query efficiency.
 
 ## Dependencies
 
@@ -99,6 +110,7 @@ Relationship types:
 ## Tests
 
 Run tests with:
+
 ```bash
 cargo test -p cortex-graph -- --test-threads=1
 ```

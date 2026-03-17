@@ -65,6 +65,15 @@ const BRANCH_SCHEMA_STATEMENTS: &[&str] = &[
     "CREATE INDEX ON :BranchIndex(commit_hash);",
 ];
 
+/// Additional indexes for navigation-heavy lookups.
+const NAVIGATION_SCHEMA_STATEMENTS: &[&str] = &[
+    "CREATE INDEX ON :CodeNode(qualified_name);",
+    "CREATE INDEX ON :Function(qualified_name);",
+    "CREATE INDEX ON :Class(qualified_name);",
+    "CREATE INDEX ON :Method(qualified_name);",
+    "CREATE INDEX ON :Struct(qualified_name);",
+];
+
 /// Record of an indexed branch stored in the graph
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchIndexRecord {
@@ -127,7 +136,8 @@ pub async fn ensure_constraints(client: &GraphClient) -> Result<()> {
 
     let all_statements = SCHEMA_STATEMENTS
         .iter()
-        .chain(BRANCH_SCHEMA_STATEMENTS.iter());
+        .chain(BRANCH_SCHEMA_STATEMENTS.iter())
+        .chain(NAVIGATION_SCHEMA_STATEMENTS.iter());
 
     for statement in all_statements {
         let cypher = if is_neo4j {
@@ -148,6 +158,16 @@ pub async fn ensure_constraints(client: &GraphClient) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Ensure optional navigation schema indexes.
+pub async fn ensure_navigation_schema(client: &GraphClient) -> Result<()> {
+    for stmt in NAVIGATION_SCHEMA_STATEMENTS {
+        if let Err(e) = client.run(stmt).await {
+            tracing::debug!("Navigation schema statement skipped: {} ({})", stmt, e);
+        }
+    }
     Ok(())
 }
 

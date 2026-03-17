@@ -111,7 +111,9 @@ mod tests {
 
     fn parse_c(source: &str) -> tree_sitter::Tree {
         let mut parser = Parser::new();
-        parser.set_language(&tree_sitter_c::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_c::LANGUAGE.into())
+            .unwrap();
         parser.parse(source, None).unwrap()
     }
 

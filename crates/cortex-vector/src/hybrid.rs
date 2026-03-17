@@ -210,6 +210,135 @@ impl HybridSearch {
         self.semantic_search_with_filter(query, k, filter).await
     }
 
+    /// Search across all repositories or a filtered subset.
+    pub async fn search_across_repositories(
+        &self,
+        query: &str,
+        repositories: Option<&[String]>,
+        k: usize,
+    ) -> Result<Vec<HybridResult>, crate::VectorError> {
+        let embedding = self.embedder.embed_query(query).await?;
+
+        let results = match repositories {
+            Some(repos) if repos.len() == 1 => {
+                let mut filter = HashMap::new();
+                filter.insert(
+                    "repository".to_string(),
+                    MetadataValue::String(repos[0].clone()),
+                );
+                self.vector_store
+                    .search_with_filter(embedding, k * 3, filter)
+                    .await?
+            }
+            Some(repos) => {
+                let all_results = self
+                    .vector_store
+                    .search(embedding, k * 3 * repos.len())
+                    .await?;
+                all_results
+                    .into_iter()
+                    .filter(|r| {
+                        r.metadata
+                            .get("repository")
+                            .and_then(|v| match v {
+                                MetadataValue::String(s) => Some(s.as_str()),
+                                _ => None,
+                            })
+                            .is_some_and(|repo| repos.iter().any(|r| r == repo))
+                    })
+                    .collect()
+            }
+            None => self.vector_store.search(embedding, k * 3).await?,
+        };
+
+        let mut hybrid_results: Vec<HybridResult> = results
+            .into_iter()
+            .map(|r| HybridResult {
+                combined_score: r.score,
+                result: r,
+                graph_context: None,
+            })
+            .collect();
+
+        hybrid_results.sort_by(|a, b| {
+            b.combined_score
+                .partial_cmp(&a.combined_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        hybrid_results.truncate(k);
+        Ok(hybrid_results)
+    }
+
+    /// Find similar code across projects excluding the source repository.
+    pub async fn find_similar_across_projects(
+        &self,
+        query: &str,
+        source_repo: &str,
+        k: usize,
+    ) -> Result<Vec<HybridResult>, crate::VectorError> {
+        let embedding = self.embedder.embed_query(query).await?;
+        let all_results = self.vector_store.search(embedding, k * 5).await?;
+
+        let mut cross_project: Vec<HybridResult> = all_results
+            .into_iter()
+            .filter(|r| {
+                r.metadata
+                    .get("repository")
+                    .and_then(|v| match v {
+                        MetadataValue::String(s) => Some(s.as_str()),
+                        _ => None,
+                    })
+                    .is_none_or(|repo| repo != source_repo)
+            })
+            .map(|r| HybridResult {
+                combined_score: r.score,
+                result: r,
+                graph_context: None,
+            })
+            .collect();
+
+        cross_project.sort_by(|a, b| {
+            b.combined_score
+                .partial_cmp(&a.combined_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        cross_project.truncate(k);
+        Ok(cross_project)
+    }
+
+    /// Search in a specific repository and branch.
+    pub async fn search_in_repository_and_branch(
+        &self,
+        query: &str,
+        repository: &str,
+        branch: &str,
+        k: usize,
+    ) -> Result<Vec<HybridResult>, crate::VectorError> {
+        let embedding = self.embedder.embed_query(query).await?;
+        let mut filter = HashMap::new();
+        filter.insert(
+            "repository".to_string(),
+            MetadataValue::String(repository.to_string()),
+        );
+        filter.insert(
+            "branch".to_string(),
+            MetadataValue::String(branch.to_string()),
+        );
+
+        let results = self
+            .vector_store
+            .search_with_filter(embedding, k, filter)
+            .await?;
+        Ok(results
+            .into_iter()
+            .map(|r| HybridResult {
+                combined_score: r.score,
+                result: r,
+                graph_context: None,
+            })
+            .collect())
+    }
+
     /// Search within a specific file
     pub async fn search_in_file(
         &self,
@@ -418,6 +547,8 @@ mod tests {
     #[derive(Default)]
     struct MockVectorStore {
         upsert_batch_calls: Arc<Mutex<usize>>,
+        search_results: Arc<Mutex<Vec<crate::SearchResult>>>,
+        filtered_results: Arc<Mutex<Vec<crate::SearchResult>>>,
     }
 
     #[async_trait]
@@ -444,7 +575,7 @@ mod tests {
             _query: Vec<f32>,
             _k: usize,
         ) -> Result<Vec<crate::SearchResult>, crate::VectorError> {
-            Ok(Vec::new())
+            Ok(self.search_results.lock().expect("lock poisoned").clone())
         }
 
         async fn search_with_filter(
@@ -453,7 +584,7 @@ mod tests {
             _k: usize,
             _filter: HashMap<String, MetadataValue>,
         ) -> Result<Vec<crate::SearchResult>, crate::VectorError> {
-            Ok(Vec::new())
+            Ok(self.filtered_results.lock().expect("lock poisoned").clone())
         }
 
         async fn get(
@@ -557,5 +688,63 @@ mod tests {
             detect_intent("api usage for search"),
             QueryIntent::ApiUsage
         ));
+    }
+
+    #[tokio::test]
+    async fn test_search_across_repositories_filtered() {
+        let vector_store = Arc::new(MockVectorStore::default());
+        *vector_store.search_results.lock().expect("lock poisoned") = vec![
+            crate::SearchResult {
+                id: "1".to_string(),
+                score: 0.9,
+                metadata: HashMap::from([(
+                    "repository".to_string(),
+                    MetadataValue::String("/r1".to_string()),
+                )]),
+                content: Some("a".to_string()),
+            },
+            crate::SearchResult {
+                id: "2".to_string(),
+                score: 0.8,
+                metadata: HashMap::from([(
+                    "repository".to_string(),
+                    MetadataValue::String("/r2".to_string()),
+                )]),
+                content: Some("b".to_string()),
+            },
+        ];
+        let embedder = Arc::new(MockEmbedder {
+            embeddings: vec![vec![0.0; crate::EMBEDDING_DIMENSION]],
+        });
+        let search = HybridSearch::new(vector_store, embedder);
+
+        let repos = vec!["/r2".to_string(), "/r3".to_string()];
+        let results = search
+            .search_across_repositories("query", Some(&repos), 5)
+            .await
+            .expect("search should succeed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].result.id, "2");
+    }
+
+    #[tokio::test]
+    async fn test_search_in_repository_and_branch() {
+        let vector_store = Arc::new(MockVectorStore::default());
+        *vector_store.filtered_results.lock().expect("lock poisoned") = vec![crate::SearchResult {
+            id: "branch-hit".to_string(),
+            score: 0.75,
+            metadata: HashMap::new(),
+            content: None,
+        }];
+        let embedder = Arc::new(MockEmbedder {
+            embeddings: vec![vec![0.0; crate::EMBEDDING_DIMENSION]],
+        });
+        let search = HybridSearch::new(vector_store, embedder);
+        let results = search
+            .search_in_repository_and_branch("query", "/repo", "main", 3)
+            .await
+            .expect("search should succeed");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].result.id, "branch-hit");
     }
 }

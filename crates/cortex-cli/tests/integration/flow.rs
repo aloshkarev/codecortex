@@ -116,6 +116,18 @@ fn run_analyze_checks(
         ],
         &[
             "analyze",
+            "smells",
+            ".",
+            "--no-graph",
+            "--max-files",
+            "1000",
+            "--limit",
+            "200",
+            "--include-glob",
+            "__INCLUDE_GLOB__",
+        ],
+        &[
+            "analyze",
             "refactoring",
             ".",
             "--max-files",

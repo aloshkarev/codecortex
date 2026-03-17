@@ -7,12 +7,34 @@ It runs indexing, queries, analysis, project operations, vector workflows, and M
 ## Command areas
 
 - repository: `index`, `list`, `delete`, `stats`
-- search/query: `find`, `query`, `skeleton`, `signature`
-- analyze: callers/callees/chain/hierarchy/deps/dead-code/complexity/overrides/smells/refactoring/branch-diff/review
+- search/query: `find`, `query`, `skeleton`, `signature`, `goto`, `usages`, `info`
+- analyze: callers/callees/chain/hierarchy/deps/dead-code/complexity/overrides/smells/refactoring/branch-diff/review/similar/shared-deps/compare-api
 - vector: `vector-index`, `search`
 - project: `project ...`
 - mcp: `mcp start`, `mcp tools`
 - ops: `doctor`, `config`, `jobs`, `debug`, `daemon`, `interactive`
+
+## Scope behavior
+
+- Inside a known project: defaults to single-project scope.
+- Outside known projects: `find`/`search` default to all-project scope.
+- Overrides:
+  - `--all-projects` to force multi-project mode
+  - `--project <path>` to force explicit single-project mode
+
+Navigation commands (`goto`, `usages`, `info`) require single-project scope.
+
+## Navigation and review updates
+
+- Added CLI navigation commands:
+  - `cortex goto <symbol>`
+  - `cortex usages <symbol>`
+  - `cortex info <symbol>`
+- Enhanced branch diff with structural mode:
+  - `cortex analyze branch-diff <source> <target> --structural`
+- Review flow can use graph intelligence when context is available:
+  - impact warnings for changed symbols
+  - potential new dead code signals
 
 ## MCP serve modes
 

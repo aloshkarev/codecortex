@@ -63,11 +63,17 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{Shell, generate};
 use comfy_table::{Cell, Color, ContentArrangement, Table, presets::UTF8_FULL};
 use cortex_analyzer::{
-    AnalyzePathFilters, Analyzer, CodeSmell, RefactoringEngine, RefactoringRecommendation,
-    ReviewAnalyzer, ReviewFileInput, ReviewInput, ReviewLineRange, Severity, SmellDetector,
+    AnalyzePathFilters, Analyzer, ApiSurfaceComparison, CodeSmell, CrossProjectAnalyzer,
+    NavigationEngine, ProjectAnalysisContext, RefactoringEngine, RefactoringRecommendation,
+    ReviewAnalyzer, ReviewFileInput, ReviewInput, ReviewLineRange, Severity, SmellConfig,
+    SmellDetector, UsageKind, detect_dead_code, detect_dead_code_with_context,
+    detect_duplicate_code, detect_duplicate_code_with_context, detect_feature_envy,
+    detect_feature_envy_with_context, detect_inappropriate_intimacy,
+    detect_inappropriate_intimacy_with_context, detect_shotgun_surgery,
+    detect_shotgun_surgery_with_context,
 };
 use cortex_core::{CortexConfig, FileChangeType, GitOperations, SearchKind};
-use cortex_graph::{BundleStore, GraphClient};
+use cortex_graph::{BundleStore, CrossProjectQueryBuilder, GraphClient, is_branch_index_current};
 use cortex_indexer::Indexer;
 use cortex_mcp::tool_names;
 use cortex_vector::{JsonStore, LanceStore, VectorStore};
@@ -121,6 +127,12 @@ struct Cli {
     format: OutputFormat,
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
+    /// Search/analyze across all indexed projects (overrides project detection)
+    #[arg(long, global = true)]
+    all_projects: bool,
+    /// Explicitly scope to a specific project path
+    #[arg(long, global = true)]
+    project: Option<PathBuf>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -261,6 +273,30 @@ enum Commands {
         #[arg(long)]
         include_related: bool,
     },
+    /// Go to definition of a symbol
+    Goto {
+        /// Symbol name to look up
+        symbol: String,
+        /// Source file for import-context disambiguation
+        #[arg(long)]
+        from_file: Option<String>,
+        /// Source line number (reserved for richer disambiguation)
+        #[arg(long)]
+        from_line: Option<u32>,
+    },
+    /// Find all usages of a symbol across the project
+    Usages {
+        /// Symbol name to find usages for
+        symbol: String,
+        /// Filter by usage kind
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Get quick info about a symbol
+    Info {
+        /// Symbol name
+        symbol: String,
+    },
     /// Semantic code search using vector embeddings
     Search {
         /// Search query (natural language description)
@@ -399,6 +435,9 @@ enum AnalyzeCommand {
         /// Maximum number of findings to return
         #[arg(long, default_value_t = 500)]
         limit: usize,
+        /// Disable graph-backed project context (per-file only)
+        #[arg(long)]
+        no_graph: bool,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
@@ -431,6 +470,9 @@ enum AnalyzeCommand {
         /// Maximum number of ahead/behind commits returned per side
         #[arg(long, default_value_t = 50)]
         commit_limit: usize,
+        /// Include symbol-level structural diff (requires indexed branches)
+        #[arg(long)]
+        structural: bool,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
@@ -468,6 +510,27 @@ enum AnalyzeCommand {
         fail_on: Option<String>,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
+    },
+    /// Find symbols/functions appearing across multiple repositories
+    Similar {
+        /// Symbol name hint (used for output context)
+        symbol: String,
+        /// Minimum number of repositories the symbol must appear in
+        #[arg(long, default_value_t = 2)]
+        min_repos: usize,
+    },
+    /// Find shared dependencies across repositories
+    SharedDeps {
+        /// Optional: compare only these repositories
+        #[arg(long, value_delimiter = ',')]
+        repos: Vec<String>,
+    },
+    /// Compare public API surfaces between two repositories
+    CompareApi {
+        /// First repository path
+        repo_a: String,
+        /// Second repository path
+        repo_b: String,
     },
 }
 
@@ -752,6 +815,7 @@ async fn main() -> anyhow::Result<()> {
     init_logging(cli.verbose)?;
     let mut config = CortexConfig::load()?;
     let format = cli.format;
+    let scope = resolve_project_scope(&cli);
 
     match cli.command {
         Commands::Setup => run_setup(&mut config)?,
@@ -766,8 +830,8 @@ async fn main() -> anyhow::Result<()> {
         } => run_index(&config, &path, force, mode, base_branch.as_deref(), format).await?,
         Commands::Watch { path } => run_watch(&config, &path).await?,
         Commands::Unwatch { path } => run_unwatch(&config, &path)?,
-        Commands::Find { command } => run_find(&config, command, format).await?,
-        Commands::Analyze { command } => run_analyze(&config, command, format).await?,
+        Commands::Find { command } => run_find(&config, command, format, &scope).await?,
+        Commands::Analyze { command } => run_analyze(&config, command, format, &scope).await?,
         Commands::Bundle { command } => run_bundle(&config, command, format).await?,
         Commands::Config { command } => run_config(&mut config, command, format)?,
         Commands::Clean => run_clean(&config, format).await?,
@@ -799,6 +863,25 @@ async fn main() -> anyhow::Result<()> {
             repo,
             include_related,
         } => run_signature(&config, &symbol, repo.as_deref(), include_related, format).await?,
+        Commands::Goto {
+            symbol,
+            from_file,
+            from_line,
+        } => {
+            run_goto(
+                &config,
+                &symbol,
+                from_file.as_deref(),
+                from_line,
+                format,
+                &scope,
+            )
+            .await?
+        }
+        Commands::Usages { symbol, kind } => {
+            run_usages(&config, &symbol, kind.as_deref(), format, &scope).await?
+        }
+        Commands::Info { symbol } => run_info(&config, &symbol, format, &scope).await?,
         Commands::Search {
             query,
             limit,
@@ -818,6 +901,7 @@ async fn main() -> anyhow::Result<()> {
                 kind.as_deref(),
                 language.as_deref(),
                 format,
+                &scope,
             )
             .await?
         }
@@ -1322,7 +1406,9 @@ async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
             let effective_token = if let Some(value) = token {
                 Some(value)
             } else if let Some(env_name) = token_env {
-                std::env::var(env_name).ok().filter(|v| !v.trim().is_empty())
+                std::env::var(env_name)
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
             } else {
                 None
             };
@@ -1907,6 +1993,77 @@ fn normalize_scope_path_str(value: &str) -> String {
         .to_string()
 }
 
+#[derive(Debug, Clone)]
+enum ProjectScope {
+    SingleProject {
+        repository_path: String,
+        branch: Option<String>,
+    },
+    AllProjects {
+        repository_filter: Option<Vec<String>>,
+    },
+    ExplicitProject {
+        repository_path: String,
+        branch: Option<String>,
+    },
+}
+
+fn resolve_project_scope(cli: &Cli) -> ProjectScope {
+    if cli.all_projects {
+        return ProjectScope::AllProjects {
+            repository_filter: None,
+        };
+    }
+
+    if let Some(project_path) = &cli.project {
+        let repository_path = normalize_scope_path_str(project_path.to_string_lossy().as_ref());
+        let branch = resolve_git_context(project_path).map(|(_, b, _)| b);
+        return ProjectScope::ExplicitProject {
+            repository_path,
+            branch,
+        };
+    }
+
+    let registry = cortex_watcher::ProjectRegistry::new();
+    if let Some(project) = registry.get_current_project() {
+        return ProjectScope::SingleProject {
+            repository_path: normalize_scope_path_str(project.path.to_string_lossy().as_ref()),
+            branch: Some(project.branch),
+        };
+    }
+
+    let cwd = std::env::current_dir().unwrap_or_default();
+    if let Some(git_root) = find_git_repository_root(&cwd)
+        && registry.get_project(&git_root).is_some()
+    {
+        let branch = resolve_git_context(&git_root).map(|(_, b, _)| b);
+        return ProjectScope::SingleProject {
+            repository_path: normalize_scope_path_str(git_root.to_string_lossy().as_ref()),
+            branch,
+        };
+    }
+
+    ProjectScope::AllProjects {
+        repository_filter: None,
+    }
+}
+
+fn navigation_scope(scope: &ProjectScope) -> anyhow::Result<(String, Option<String>)> {
+    match scope {
+        ProjectScope::SingleProject {
+            repository_path,
+            branch,
+        }
+        | ProjectScope::ExplicitProject {
+            repository_path,
+            branch,
+        } => Ok((repository_path.clone(), branch.clone())),
+        ProjectScope::AllProjects { .. } => anyhow::bail!(
+            "navigation commands require a single project scope; use --project <path>"
+        ),
+    }
+}
+
 fn default_project_scope_root() -> Option<PathBuf> {
     let registry = cortex_watcher::ProjectRegistry::new();
     if let Some(project) = registry.get_current_project() {
@@ -1917,11 +2074,19 @@ fn default_project_scope_root() -> Option<PathBuf> {
     find_git_repository_root(&cwd).or(Some(cwd))
 }
 
-fn merge_filters_with_project_scope(mut filters: AnalyzePathFilters) -> AnalyzePathFilters {
-    let Some(scope_root) = default_project_scope_root() else {
-        return filters;
+fn merge_filters_with_scope(
+    mut filters: AnalyzePathFilters,
+    scope: &ProjectScope,
+) -> AnalyzePathFilters {
+    let scope_path = match scope {
+        ProjectScope::SingleProject {
+            repository_path, ..
+        }
+        | ProjectScope::ExplicitProject {
+            repository_path, ..
+        } => repository_path.clone(),
+        ProjectScope::AllProjects { .. } => return filters,
     };
-    let scope_path = normalize_scope_path_str(scope_root.to_string_lossy().as_ref());
     if scope_path.is_empty() {
         return filters;
     }
@@ -1939,9 +2104,17 @@ fn default_project_scope_root_str() -> Option<String> {
     default_project_scope_root().map(|p| normalize_scope_path_str(p.to_string_lossy().as_ref()))
 }
 
-fn effective_search_repo_scope(repo: Option<&str>) -> Option<String> {
+fn effective_search_repo_scope(repo: Option<&str>, scope: &ProjectScope) -> Option<String> {
     repo.map(std::borrow::ToOwned::to_owned)
-        .or_else(default_project_scope_root_str)
+        .or_else(|| match scope {
+            ProjectScope::SingleProject {
+                repository_path, ..
+            }
+            | ProjectScope::ExplicitProject {
+                repository_path, ..
+            } => Some(repository_path.clone()),
+            ProjectScope::AllProjects { .. } => None,
+        })
 }
 
 fn filter_repository_stats_to_scope(rows: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
@@ -1958,55 +2131,112 @@ fn filter_repository_stats_to_scope(rows: Vec<serde_json::Value>) -> Vec<serde_j
         .collect()
 }
 
+fn print_cross_project_results(
+    format: OutputFormat,
+    results: &[serde_json::Value],
+) -> anyhow::Result<()> {
+    let mut by_repo: BTreeMap<String, Vec<&serde_json::Value>> = BTreeMap::new();
+    for result in results {
+        let repo = result
+            .get("repository")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        by_repo.entry(repo.to_string()).or_default().push(result);
+    }
+
+    let output = serde_json::json!({
+        "mode": "cross-project",
+        "total_results": results.len(),
+        "repositories": by_repo.len(),
+        "results_by_repository": by_repo,
+    });
+    print_formatted(format, &output)?;
+    Ok(())
+}
+
 async fn run_find(
     config: &CortexConfig,
     command: FindCommand,
     format: OutputFormat,
+    scope: &ProjectScope,
 ) -> anyhow::Result<()> {
-    let analyzer = Analyzer::new(GraphClient::connect(config).await?);
-    let scoped_path = default_project_scope_root()
-        .map(|p| normalize_scope_path_str(p.to_string_lossy().as_ref()));
-    let scoped_filters = scoped_path.as_ref().map(|path| AnalyzePathFilters {
-        include_paths: vec![path.clone()],
-        include_files: Vec::new(),
-        include_globs: Vec::new(),
-        exclude_paths: Vec::new(),
-        exclude_files: Vec::new(),
-        exclude_globs: Vec::new(),
-    });
-    let out = match command {
-        FindCommand::Name { name } => {
-            analyzer
-                .find_code(&name, SearchKind::Name, scoped_path.as_deref())
-                .await?
+    let graph = GraphClient::connect(config).await?;
+    let analyzer = Analyzer::new(graph.clone());
+    match scope {
+        ProjectScope::SingleProject {
+            repository_path, ..
         }
-        FindCommand::Pattern { pattern } => {
-            analyzer
-                .find_code(&pattern, SearchKind::Pattern, scoped_path.as_deref())
-                .await?
+        | ProjectScope::ExplicitProject {
+            repository_path, ..
+        } => {
+            let scoped_filters = AnalyzePathFilters {
+                include_paths: vec![repository_path.clone()],
+                include_files: Vec::new(),
+                include_globs: Vec::new(),
+                exclude_paths: Vec::new(),
+                exclude_files: Vec::new(),
+                exclude_globs: Vec::new(),
+            };
+            let out = match command {
+                FindCommand::Name { name } => {
+                    analyzer
+                        .find_code(&name, SearchKind::Name, Some(repository_path))
+                        .await?
+                }
+                FindCommand::Pattern { pattern } => {
+                    analyzer
+                        .find_code(&pattern, SearchKind::Pattern, Some(repository_path))
+                        .await?
+                }
+                FindCommand::Type { kind } => {
+                    analyzer
+                        .find_code(&kind, SearchKind::Type, Some(repository_path))
+                        .await?
+                }
+                FindCommand::Content { query } => {
+                    analyzer
+                        .find_code(&query, SearchKind::Content, Some(repository_path))
+                        .await?
+                }
+                FindCommand::Decorator { name } => {
+                    analyzer
+                        .find_by_decorator_with_filters(&name, Some(&scoped_filters))
+                        .await?
+                }
+                FindCommand::Argument { name } => {
+                    analyzer
+                        .find_by_argument_with_filters(&name, Some(&scoped_filters))
+                        .await?
+                }
+            };
+            print_formatted(format, &serde_json::to_value(out)?)?;
         }
-        FindCommand::Type { kind } => {
-            analyzer
-                .find_code(&kind, SearchKind::Type, scoped_path.as_deref())
-                .await?
+        ProjectScope::AllProjects { repository_filter } => {
+            let cross = match repository_filter {
+                Some(repos) => CrossProjectQueryBuilder::with_repositories(repos.clone()),
+                None => CrossProjectQueryBuilder::all(),
+            };
+            let out = match command {
+                FindCommand::Name { name } => cross.find_by_name(&graph, &name).await?,
+                FindCommand::Pattern { pattern } => cross.find_by_name(&graph, &pattern).await?,
+                FindCommand::Type { kind } => {
+                    analyzer.find_code(&kind, SearchKind::Type, None).await?
+                }
+                FindCommand::Content { query } => {
+                    analyzer
+                        .find_code(&query, SearchKind::Content, None)
+                        .await?
+                }
+                FindCommand::Decorator { name } => {
+                    analyzer.find_by_decorator_with_filters(&name, None).await?
+                }
+                FindCommand::Argument { name } => {
+                    analyzer.find_by_argument_with_filters(&name, None).await?
+                }
+            };
+            print_cross_project_results(format, &out)?;
         }
-        FindCommand::Content { query } => {
-            analyzer
-                .find_code(&query, SearchKind::Content, scoped_path.as_deref())
-                .await?
-        }
-        FindCommand::Decorator { name } => {
-            analyzer
-                .find_by_decorator_with_filters(&name, scoped_filters.as_ref())
-                .await?
-        }
-        FindCommand::Argument { name } => {
-            analyzer
-                .find_by_argument_with_filters(&name, scoped_filters.as_ref())
-                .await?
-        }
-    };
-    print_formatted(format, &serde_json::to_value(out)?)?;
+    }
     Ok(())
 }
 
@@ -2014,23 +2244,28 @@ async fn run_analyze(
     config: &CortexConfig,
     command: AnalyzeCommand,
     format: OutputFormat,
+    scope: &ProjectScope,
 ) -> anyhow::Result<()> {
     if let AnalyzeCommand::Smells {
         path,
         min_severity,
         max_files,
         limit,
+        no_graph,
         filters,
     } = &command
     {
         return run_analyze_smells(
+            config,
             path,
             min_severity,
             *max_files,
             *limit,
             &filters.to_filters(),
             format,
-        );
+            *no_graph,
+        )
+        .await;
     }
 
     if let AnalyzeCommand::Refactoring {
@@ -2056,17 +2291,21 @@ async fn run_analyze(
         target,
         path,
         commit_limit,
+        structural,
         filters,
     } = &command
     {
         return run_analyze_branch_diff(
+            config,
             source,
             target,
             path.as_deref(),
             *commit_limit,
+            *structural,
             &filters.to_filters(),
             format,
-        );
+        )
+        .await;
     }
 
     if let AnalyzeCommand::Review {
@@ -2084,6 +2323,7 @@ async fn run_analyze(
     } = &command
     {
         return run_analyze_review(
+            config,
             base.as_deref(),
             head.as_deref(),
             path.as_deref(),
@@ -2100,19 +2340,24 @@ async fn run_analyze(
         .await;
     }
 
-    let analyzer = Analyzer::new(GraphClient::connect(config).await?);
+    let graph = GraphClient::connect(config).await?;
+    let analyzer = Analyzer::new(graph.clone());
     let out = match command {
         AnalyzeCommand::Callers(TargetArg { target, filters }) => {
-            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
-            analyzer
-                .callers_with_filters(&target, Some(&filter_obj))
-                .await?
+            let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
+            serde_json::to_value(
+                analyzer
+                    .callers_with_filters(&target, Some(&filter_obj))
+                    .await?,
+            )?
         }
         AnalyzeCommand::Callees(TargetArg { target, filters }) => {
-            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
-            analyzer
-                .callees_with_filters(&target, Some(&filter_obj))
-                .await?
+            let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
+            serde_json::to_value(
+                analyzer
+                    .callees_with_filters(&target, Some(&filter_obj))
+                    .await?,
+            )?
         }
         AnalyzeCommand::Chain {
             from,
@@ -2120,45 +2365,77 @@ async fn run_analyze(
             depth,
             filters,
         } => {
-            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
-            analyzer
-                .call_chain_with_filters(&from, &to, depth, Some(&filter_obj))
-                .await?
+            let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
+            serde_json::to_value(
+                analyzer
+                    .call_chain_with_filters(&from, &to, depth, Some(&filter_obj))
+                    .await?,
+            )?
         }
         AnalyzeCommand::Hierarchy { class, filters } => {
-            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
-            analyzer
-                .class_hierarchy_with_filters(&class, Some(&filter_obj))
-                .await?
+            let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
+            serde_json::to_value(
+                analyzer
+                    .class_hierarchy_with_filters(&class, Some(&filter_obj))
+                    .await?,
+            )?
         }
         AnalyzeCommand::Deps { module, filters } => {
-            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
-            analyzer
-                .module_dependencies_with_filters(&module, Some(&filter_obj))
-                .await?
+            let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
+            serde_json::to_value(
+                analyzer
+                    .module_dependencies_with_filters(&module, Some(&filter_obj))
+                    .await?,
+            )?
         }
         AnalyzeCommand::DeadCode { filters } => {
-            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
-            analyzer.dead_code_with_filters(Some(&filter_obj)).await?
+            let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
+            serde_json::to_value(analyzer.dead_code_with_filters(Some(&filter_obj)).await?)?
         }
         AnalyzeCommand::Complexity { top, filters } => {
-            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
-            analyzer
-                .complexity_with_filters(top, Some(&filter_obj))
-                .await?
+            let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
+            serde_json::to_value(
+                analyzer
+                    .complexity_with_filters(top, Some(&filter_obj))
+                    .await?,
+            )?
         }
         AnalyzeCommand::Overrides { method, filters } => {
-            let filter_obj = merge_filters_with_project_scope(filters.to_filters());
-            analyzer
-                .overrides_with_filters(&method, Some(&filter_obj))
-                .await?
+            let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
+            serde_json::to_value(
+                analyzer
+                    .overrides_with_filters(&method, Some(&filter_obj))
+                    .await?,
+            )?
+        }
+        AnalyzeCommand::Similar { symbol, min_repos } => {
+            let rows = CrossProjectAnalyzer::new(graph.clone())
+                .find_similar_symbols(Some(&symbol), min_repos)
+                .await?;
+            serde_json::to_value(serde_json::json!({
+                "symbol": symbol,
+                "min_repos": min_repos,
+                "results": rows,
+            }))?
+        }
+        AnalyzeCommand::SharedDeps { repos } => {
+            let deps = CrossProjectAnalyzer::new(graph.clone())
+                .find_shared_dependencies(if repos.is_empty() { None } else { Some(&repos) })
+                .await?;
+            serde_json::to_value(deps)?
+        }
+        AnalyzeCommand::CompareApi { repo_a, repo_b } => {
+            let cmp: ApiSurfaceComparison = CrossProjectAnalyzer::new(graph.clone())
+                .compare_api_surface(&repo_a, &repo_b)
+                .await?;
+            serde_json::to_value(cmp)?
         }
         AnalyzeCommand::Smells { .. }
         | AnalyzeCommand::Refactoring { .. }
         | AnalyzeCommand::BranchDiff { .. }
         | AnalyzeCommand::Review { .. } => unreachable!(),
     };
-    print_formatted(format, &serde_json::to_value(out)?)?;
+    print_formatted(format, &out)?;
     Ok(())
 }
 
@@ -2189,17 +2466,33 @@ struct SmellScanResult {
     smells: Vec<CodeSmell>,
 }
 
-fn run_analyze_smells(
+async fn run_analyze_smells(
+    config: &CortexConfig,
     path: &str,
     min_severity: &str,
     max_files: usize,
     limit: usize,
     filters: &AnalyzePathFilters,
     format: OutputFormat,
+    no_graph: bool,
 ) -> anyhow::Result<()> {
     let severity = parse_severity(min_severity)?;
     filters.validate()?;
-    let mut scan = detect_smells_in_path(path, max_files, filters)?;
+    let context = if no_graph {
+        None
+    } else {
+        match build_project_context(config).await {
+            Ok(ctx) => Some(ctx),
+            Err(err) => {
+                eprintln!(
+                    "warning: project graph context unavailable ({}); falling back to per-file smell detection. Use --no-graph to silence this warning.",
+                    err
+                );
+                None
+            }
+        }
+    };
+    let mut scan = detect_smells_in_path_with_context(path, max_files, filters, context.as_ref())?;
     scan.smells.retain(|smell| smell.severity >= severity);
     scan.smells.sort_by(|a, b| {
         b.severity
@@ -2290,11 +2583,13 @@ fn run_analyze_refactoring(
     Ok(())
 }
 
-fn run_analyze_branch_diff(
+async fn run_analyze_branch_diff(
+    config: &CortexConfig,
     source: &str,
     target: &str,
     path: Option<&Path>,
     commit_limit: usize,
+    structural: bool,
     filters: &AnalyzePathFilters,
     format: OutputFormat,
 ) -> anyhow::Result<()> {
@@ -2331,7 +2626,7 @@ fn run_analyze_branch_diff(
         total_deletions += file.deletions;
     }
 
-    let output = serde_json::json!({
+    let mut output = serde_json::json!({
         "path": repo_path.display().to_string(),
         "source_branch": diff.source_branch,
         "target_branch": diff.target_branch,
@@ -2367,11 +2662,71 @@ fn run_analyze_branch_diff(
         })).collect::<Vec<_>>(),
     });
 
+    if structural {
+        let graph = GraphClient::connect(config).await?;
+        let source_commit = branch_head_commit(&repo_path, source);
+        let target_commit = branch_head_commit(&repo_path, target);
+        let mut warnings = Vec::new();
+        if let Some(commit) = source_commit.as_deref() {
+            let current =
+                is_branch_index_current(&graph, &repo_path.display().to_string(), source, commit)
+                    .await
+                    .unwrap_or(false);
+            if !current {
+                warnings.push(format!(
+                    "source branch '{}' index is not current; run `cortex index --force {}`",
+                    source,
+                    repo_path.display()
+                ));
+            }
+        }
+        if let Some(commit) = target_commit.as_deref() {
+            let current =
+                is_branch_index_current(&graph, &repo_path.display().to_string(), target, commit)
+                    .await
+                    .unwrap_or(false);
+            if !current {
+                warnings.push(format!(
+                    "target branch '{}' index is not current; run `cortex index --force {}`",
+                    target,
+                    repo_path.display()
+                ));
+            }
+        }
+        let nav = NavigationEngine::new(graph, repo_path.display().to_string(), None);
+        let structural_diff = nav
+            .branch_structural_diff(source, target)
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        output["structural"] = serde_json::to_value(structural_diff)?;
+        if !warnings.is_empty() {
+            output["structural_warnings"] = serde_json::to_value(warnings)?;
+        }
+    }
+
     print_formatted(format, &output)?;
     Ok(())
 }
 
+fn branch_head_commit(repo_path: &Path, branch: &str) -> Option<String> {
+    let output = Command::new("git")
+        .current_dir(repo_path)
+        .args(["rev-parse", branch])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if commit.is_empty() {
+        None
+    } else {
+        Some(commit)
+    }
+}
+
 async fn run_analyze_review(
+    config: &CortexConfig,
     base: Option<&str>,
     head: Option<&str>,
     path: Option<&Path>,
@@ -2393,7 +2748,9 @@ async fn run_analyze_review(
         Some(max_findings)
     };
 
-    let (base_ref, head_ref, files) = if gitlab_project.is_some() || mr_iid.is_some() {
+    let (base_ref, head_ref, files, local_repo_path) = if gitlab_project.is_some()
+        || mr_iid.is_some()
+    {
         let project = gitlab_project
             .ok_or_else(|| anyhow::anyhow!("--gitlab-project is required in GitLab review mode"))?;
         let iid =
@@ -2402,7 +2759,9 @@ async fn run_analyze_review(
             .map(str::to_string)
             .or_else(|| std::env::var("GITLAB_TOKEN").ok())
             .ok_or_else(|| anyhow::anyhow!("--gitlab-token or GITLAB_TOKEN is required"))?;
-        load_gitlab_review_inputs(api_base, &token, project, iid, filters).await?
+        let (base_ref, head_ref, files) =
+            load_gitlab_review_inputs(api_base, &token, project, iid, filters).await?;
+        (base_ref, head_ref, files, None)
     } else {
         let repo_input_path = resolve_analysis_repo_path(path)?;
         let repo_path = find_git_repository_root(&repo_input_path).unwrap_or(repo_input_path);
@@ -2413,9 +2772,11 @@ async fn run_analyze_review(
             Some(local_base.to_string()),
             Some(local_head.to_string()),
             files,
+            Some(repo_path.display().to_string()),
         )
     };
 
+    let nav_branch = base_ref.clone();
     let review_input = ReviewInput {
         base_ref,
         head_ref,
@@ -2425,7 +2786,14 @@ async fn run_analyze_review(
         files,
     };
 
-    let report = ReviewAnalyzer::new().analyze(&review_input);
+    let reviewer = ReviewAnalyzer::new();
+    let report = if let Some(repo_path) = local_repo_path {
+        let graph = GraphClient::connect(config).await?;
+        let nav = NavigationEngine::new(graph, repo_path, nav_branch);
+        reviewer.analyze_with_graph(&review_input, &nav).await
+    } else {
+        reviewer.analyze(&review_input)
+    };
     let output = serde_json::json!({
         "mode": if gitlab_project.is_some() || mr_iid.is_some() { "gitlab_mr" } else { "local_diff" },
         "base_ref": report.base_ref,
@@ -2895,6 +3263,15 @@ fn detect_smells_in_path(
     max_files: usize,
     filters: &AnalyzePathFilters,
 ) -> anyhow::Result<SmellScanResult> {
+    detect_smells_in_path_with_context(path, max_files, filters, None)
+}
+
+fn detect_smells_in_path_with_context(
+    path: &str,
+    max_files: usize,
+    filters: &AnalyzePathFilters,
+    context: Option<&ProjectAnalysisContext>,
+) -> anyhow::Result<SmellScanResult> {
     let root = PathBuf::from(path);
     if !root.exists() {
         anyhow::bail!("Path does not exist: {}", path);
@@ -2902,6 +3279,7 @@ fn detect_smells_in_path(
 
     let files = collect_analyzable_files(&root, max_files.max(1), filters)?;
     let detector = SmellDetector::new();
+    let smell_config = SmellConfig::default();
 
     let mut files_scanned = 0usize;
     let mut files_skipped = 0usize;
@@ -2925,7 +3303,50 @@ fn detect_smells_in_path(
         match std::fs::read_to_string(&file) {
             Ok(source) => {
                 files_scanned += 1;
-                smells.extend(detector.detect(&source, &file.display().to_string()));
+                let file_path = file.display().to_string();
+                smells.extend(detector.detect(&source, &file_path));
+                if let Some(ctx) = context {
+                    smells.extend(detect_dead_code_with_context(
+                        &source,
+                        &file_path,
+                        &smell_config,
+                        ctx,
+                    ));
+                    smells.extend(detect_shotgun_surgery_with_context(
+                        &source,
+                        &file_path,
+                        &smell_config,
+                        ctx,
+                    ));
+                    smells.extend(detect_feature_envy_with_context(
+                        &source,
+                        &file_path,
+                        &smell_config,
+                        ctx,
+                    ));
+                    smells.extend(detect_inappropriate_intimacy_with_context(
+                        &source,
+                        &file_path,
+                        &smell_config,
+                        ctx,
+                    ));
+                    smells.extend(detect_duplicate_code_with_context(
+                        &source,
+                        &file_path,
+                        &smell_config,
+                        ctx,
+                    ));
+                } else {
+                    smells.extend(detect_dead_code(&source, &file_path, &smell_config));
+                    smells.extend(detect_shotgun_surgery(&source, &file_path, &smell_config));
+                    smells.extend(detect_feature_envy(&source, &file_path, &smell_config));
+                    smells.extend(detect_inappropriate_intimacy(
+                        &source,
+                        &file_path,
+                        &smell_config,
+                    ));
+                    smells.extend(detect_duplicate_code(&source, &file_path, &smell_config));
+                }
             }
             Err(_) => {
                 read_errors += 1;
@@ -2933,12 +3354,36 @@ fn detect_smells_in_path(
         }
     }
 
+    smells.sort_by(|a, b| {
+        a.file_path
+            .cmp(&b.file_path)
+            .then_with(|| a.line_number.cmp(&b.line_number))
+            .then_with(|| a.smell_type.to_string().cmp(&b.smell_type.to_string()))
+    });
+    smells.dedup_by(|a, b| {
+        a.file_path == b.file_path
+            && a.line_number == b.line_number
+            && a.smell_type == b.smell_type
+            && a.symbol_name == b.symbol_name
+    });
+
     Ok(SmellScanResult {
         files_scanned,
         files_skipped,
         read_errors,
         smells,
     })
+}
+
+async fn build_project_context(config: &CortexConfig) -> anyhow::Result<ProjectAnalysisContext> {
+    let graph = GraphClient::connect(config).await?;
+    let scope_root = default_project_scope_root()
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine project root"))?;
+    let repository_path = normalize_scope_path_str(scope_root.to_string_lossy().as_ref());
+    let branch = resolve_git_context(&scope_root).map(|(_, branch, _)| branch);
+    ProjectAnalysisContext::build(graph, repository_path, branch)
+        .await
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
 }
 
 fn collect_analyzable_files(
@@ -5506,6 +5951,97 @@ fn run_skeleton(path: &PathBuf, mode: &str, format: OutputFormat) -> anyhow::Res
     Ok(())
 }
 
+async fn run_goto(
+    config: &CortexConfig,
+    symbol: &str,
+    from_file: Option<&str>,
+    from_line: Option<u32>,
+    format: OutputFormat,
+    scope: &ProjectScope,
+) -> anyhow::Result<()> {
+    let (repository_path, branch) = navigation_scope(scope)?;
+    let graph = GraphClient::connect(config).await?;
+    let nav = NavigationEngine::new(graph, repository_path, branch);
+    let results = nav
+        .go_to_definition(symbol, from_file.unwrap_or(""), from_line)
+        .await?;
+    print_formatted(
+        format,
+        &serde_json::json!({
+            "symbol": symbol,
+            "results_count": results.len(),
+            "definitions": results,
+        }),
+    )?;
+    Ok(())
+}
+
+async fn run_usages(
+    config: &CortexConfig,
+    symbol: &str,
+    kind: Option<&str>,
+    format: OutputFormat,
+    scope: &ProjectScope,
+) -> anyhow::Result<()> {
+    let (repository_path, branch) = navigation_scope(scope)?;
+    let graph = GraphClient::connect(config).await?;
+    let nav = NavigationEngine::new(graph, repository_path, branch);
+    let kind_filter = parse_usage_kind(kind)?;
+    let results = nav.find_usages(symbol, kind_filter).await?;
+    print_formatted(
+        format,
+        &serde_json::json!({
+            "symbol": symbol,
+            "kind_filter": kind,
+            "results_count": results.len(),
+            "usages": results,
+        }),
+    )?;
+    Ok(())
+}
+
+async fn run_info(
+    config: &CortexConfig,
+    symbol: &str,
+    format: OutputFormat,
+    scope: &ProjectScope,
+) -> anyhow::Result<()> {
+    let (repository_path, branch) = navigation_scope(scope)?;
+    let graph = GraphClient::connect(config).await?;
+    let nav = NavigationEngine::new(graph, repository_path, branch);
+    let results = nav.quick_info(symbol).await?;
+    print_formatted(
+        format,
+        &serde_json::json!({
+            "symbol": symbol,
+            "results_count": results.len(),
+            "quick_info": results,
+        }),
+    )?;
+    Ok(())
+}
+
+fn parse_usage_kind(kind: Option<&str>) -> anyhow::Result<Option<UsageKind>> {
+    let Some(kind) = kind else {
+        return Ok(None);
+    };
+    let normalized = kind.trim().to_ascii_lowercase().replace('-', "_");
+    let parsed = match normalized.as_str() {
+        "call" => UsageKind::Call,
+        "import" => UsageKind::Import,
+        "type_reference" | "typereference" => UsageKind::TypeReference,
+        "field_access" | "fieldaccess" => UsageKind::FieldAccess,
+        "inheritance" | "inherits" => UsageKind::Inheritance,
+        "implementation" | "implements" => UsageKind::Implementation,
+        "reference" => UsageKind::Reference,
+        _ => anyhow::bail!(
+            "unsupported usage kind '{}'; expected one of: call, import, type-reference, field-access, inheritance, implementation, reference",
+            kind
+        ),
+    };
+    Ok(Some(parsed))
+}
+
 async fn run_signature(
     config: &CortexConfig,
     symbol: &str,
@@ -5595,6 +6131,7 @@ async fn run_search(
     kind: Option<&str>,
     language: Option<&str>,
     format: OutputFormat,
+    scope: &ProjectScope,
 ) -> anyhow::Result<()> {
     use cortex_vector::{Embedder, OllamaEmbedder, OpenAIEmbedder};
     use cortex_vector::{HybridSearch, LanceStore, SearchType};
@@ -5618,15 +6155,40 @@ async fn run_search(
 
     // Parse search type
     let st = SearchType::from_str(search_type).unwrap_or(SearchType::Semantic);
-    let repo_scope = effective_search_repo_scope(repo);
+    let repo_scope = effective_search_repo_scope(repo, scope);
 
     // Execute search
     let results = match (repo_scope.as_deref(), path, kind, language) {
-        (Some(r), _, _, _) => hybrid.search_in_repository(query, r, limit).await?,
+        (Some(r), _, _, _) => {
+            let branch = match scope {
+                ProjectScope::SingleProject {
+                    branch: Some(b), ..
+                }
+                | ProjectScope::ExplicitProject {
+                    branch: Some(b), ..
+                } => Some(b.as_str()),
+                _ => None,
+            };
+            if let Some(b) = branch {
+                hybrid
+                    .search_in_repository_and_branch(query, r, b, limit)
+                    .await?
+            } else {
+                hybrid.search_in_repository(query, r, limit).await?
+            }
+        }
         (_, Some(p), _, _) => hybrid.search_in_file(query, p, limit).await?,
         (_, _, Some(k), _) => hybrid.search_by_kind(query, k, limit).await?,
         (_, _, _, Some(l)) => hybrid.search_by_language(query, l, limit).await?,
-        _ => hybrid.search(query, st, limit).await?,
+        _ => match scope {
+            ProjectScope::AllProjects { repository_filter } => {
+                let repos = repository_filter.as_deref();
+                hybrid
+                    .search_across_repositories(query, repos, limit)
+                    .await?
+            }
+            _ => hybrid.search(query, st, limit).await?,
+        },
     };
 
     // Format results
@@ -6571,6 +7133,9 @@ mod tests {
         assert!(subcommands.contains(&"refactoring"));
         assert!(subcommands.contains(&"branch-diff"));
         assert!(subcommands.contains(&"review"));
+        assert!(subcommands.contains(&"similar"));
+        assert!(subcommands.contains(&"shared-deps"));
+        assert!(subcommands.contains(&"compare-api"));
     }
 
     #[test]
@@ -6586,6 +7151,7 @@ mod tests {
                         min_severity,
                         max_files,
                         limit,
+                        no_graph,
                         filters,
                     },
             } => {
@@ -6593,10 +7159,104 @@ mod tests {
                 assert_eq!(min_severity, "info");
                 assert_eq!(max_files, 1000);
                 assert_eq!(limit, 500);
+                assert!(!no_graph);
                 assert!(filters.to_filters().is_empty());
             }
             _ => panic!("expected analyze smells command"),
         }
+    }
+
+    #[test]
+    fn test_analyze_smells_command_parse_with_no_graph() {
+        use clap::Parser;
+
+        let cli = Cli::parse_from([
+            "cortex",
+            "analyze",
+            "smells",
+            "./crates/cortex-cli",
+            "--no-graph",
+        ]);
+        match cli.command {
+            Commands::Analyze {
+                command: AnalyzeCommand::Smells { no_graph, .. },
+            } => {
+                assert!(no_graph);
+            }
+            _ => panic!("expected analyze smells command"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_analyze_smells_falls_back_when_graph_unavailable() {
+        let temp = std::env::temp_dir().join(format!(
+            "cortex-smells-fallback-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp).expect("create temp dir");
+        let file = temp.join("sample.rs");
+        std::fs::write(&file, "fn helper() {}\n").expect("write sample file");
+
+        let mut config = CortexConfig::default();
+        config.memgraph_uri = "invalid://memgraph".to_string();
+
+        let result = run_analyze_smells(
+            &config,
+            temp.to_string_lossy().as_ref(),
+            "info",
+            100,
+            100,
+            &AnalyzePathFilters::default(),
+            OutputFormat::Json,
+            false,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "expected graceful fallback to per-file analysis"
+        );
+
+        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_dir(temp);
+    }
+
+    #[tokio::test]
+    async fn test_run_analyze_smells_no_graph_skips_graph_connection() {
+        let temp = std::env::temp_dir().join(format!(
+            "cortex-smells-no-graph-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp).expect("create temp dir");
+        let file = temp.join("sample.py");
+        std::fs::write(&file, "def helper():\n    return 1\n").expect("write sample file");
+
+        let mut config = CortexConfig::default();
+        config.memgraph_uri = "invalid://memgraph".to_string();
+
+        let result = run_analyze_smells(
+            &config,
+            temp.to_string_lossy().as_ref(),
+            "info",
+            100,
+            100,
+            &AnalyzePathFilters::default(),
+            OutputFormat::Json,
+            true,
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "expected --no-graph path to skip graph usage"
+        );
+
+        let _ = std::fs::remove_file(file);
+        let _ = std::fs::remove_dir(temp);
     }
 
     #[test]
@@ -6626,6 +7286,73 @@ mod tests {
     }
 
     #[test]
+    fn test_analyze_similar_command_parse() {
+        use clap::Parser;
+        let cli = Cli::parse_from(["cortex", "analyze", "similar", "parse", "--min-repos", "3"]);
+        match cli.command {
+            Commands::Analyze {
+                command: AnalyzeCommand::Similar { symbol, min_repos },
+            } => {
+                assert_eq!(symbol, "parse");
+                assert_eq!(min_repos, 3);
+            }
+            _ => panic!("expected analyze similar command"),
+        }
+    }
+
+    #[test]
+    fn test_analyze_shared_deps_command_parse() {
+        use clap::Parser;
+        let cli = Cli::parse_from(["cortex", "analyze", "shared-deps", "--repos", "/a,/b"]);
+        match cli.command {
+            Commands::Analyze {
+                command: AnalyzeCommand::SharedDeps { repos },
+            } => {
+                assert_eq!(repos, vec!["/a".to_string(), "/b".to_string()]);
+            }
+            _ => panic!("expected analyze shared-deps command"),
+        }
+    }
+
+    #[test]
+    fn test_analyze_compare_api_command_parse() {
+        use clap::Parser;
+        let cli = Cli::parse_from(["cortex", "analyze", "compare-api", "/a", "/b"]);
+        match cli.command {
+            Commands::Analyze {
+                command: AnalyzeCommand::CompareApi { repo_a, repo_b },
+            } => {
+                assert_eq!(repo_a, "/a");
+                assert_eq!(repo_b, "/b");
+            }
+            _ => panic!("expected analyze compare-api command"),
+        }
+    }
+
+    #[test]
+    fn test_project_scope_all_flag() {
+        use clap::Parser;
+        let cli = Cli::parse_from(["cortex", "--all-projects", "find", "name", "UserService"]);
+        let scope = resolve_project_scope(&cli);
+        assert!(matches!(scope, ProjectScope::AllProjects { .. }));
+    }
+
+    #[test]
+    fn test_project_scope_explicit() {
+        use clap::Parser;
+        let cli = Cli::parse_from(["cortex", "--project", "/tmp/repo", "find", "name", "X"]);
+        let scope = resolve_project_scope(&cli);
+        match scope {
+            ProjectScope::ExplicitProject {
+                repository_path, ..
+            } => {
+                assert_eq!(repository_path, "/tmp/repo");
+            }
+            _ => panic!("expected explicit project scope"),
+        }
+    }
+
+    #[test]
     fn test_analyze_branch_diff_command_parse() {
         use clap::Parser;
 
@@ -6647,6 +7374,7 @@ mod tests {
                         path,
                         commit_limit,
                         filters,
+                        ..
                     },
             } => {
                 assert_eq!(source, "feature/auth");
@@ -6706,6 +7434,100 @@ mod tests {
             }
             _ => panic!("expected analyze review command"),
         }
+    }
+
+    #[test]
+    fn test_goto_command_parse() {
+        use clap::Parser;
+        let cli = Cli::parse_from([
+            "cortex",
+            "goto",
+            "UserService::get_user",
+            "--from-file",
+            "src/handlers/user.rs",
+            "--from-line",
+            "42",
+        ]);
+        match cli.command {
+            Commands::Goto {
+                symbol,
+                from_file,
+                from_line,
+            } => {
+                assert_eq!(symbol, "UserService::get_user");
+                assert_eq!(from_file, Some("src/handlers/user.rs".to_string()));
+                assert_eq!(from_line, Some(42));
+            }
+            _ => panic!("expected goto command"),
+        }
+    }
+
+    #[test]
+    fn test_usages_command_parse() {
+        use clap::Parser;
+        let cli = Cli::parse_from([
+            "cortex",
+            "usages",
+            "GraphClient",
+            "--kind",
+            "type-reference",
+        ]);
+        match cli.command {
+            Commands::Usages { symbol, kind } => {
+                assert_eq!(symbol, "GraphClient");
+                assert_eq!(kind, Some("type-reference".to_string()));
+            }
+            _ => panic!("expected usages command"),
+        }
+    }
+
+    #[test]
+    fn test_info_command_parse() {
+        use clap::Parser;
+        let cli = Cli::parse_from(["cortex", "info", "resolve_call_targets"]);
+        match cli.command {
+            Commands::Info { symbol } => {
+                assert_eq!(symbol, "resolve_call_targets");
+            }
+            _ => panic!("expected info command"),
+        }
+    }
+
+    #[test]
+    fn test_analyze_branch_diff_structural_parse() {
+        use clap::Parser;
+        let cli = Cli::parse_from([
+            "cortex",
+            "analyze",
+            "branch-diff",
+            "feature/nav",
+            "main",
+            "--structural",
+        ]);
+        match cli.command {
+            Commands::Analyze {
+                command: AnalyzeCommand::BranchDiff { structural, .. },
+            } => assert!(structural),
+            _ => panic!("expected branch-diff command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_usage_kind_type_reference() {
+        let parsed = parse_usage_kind(Some("type-reference")).expect("parse");
+        assert!(matches!(parsed, Some(UsageKind::TypeReference)));
+    }
+
+    #[test]
+    fn test_navigation_scope_rejects_all_projects() {
+        let scope = ProjectScope::AllProjects {
+            repository_filter: None,
+        };
+        let result = navigation_scope(&scope);
+        assert!(
+            result.is_err(),
+            "navigation scope should require single project"
+        );
     }
 
     #[test]
@@ -6810,10 +7632,14 @@ mod tests {
     fn test_merge_filters_with_project_scope_keeps_existing_scope() {
         let mut filters = AnalyzePathFilters::default();
         if let Some(scope_root) = default_project_scope_root() {
+            let scope = ProjectScope::SingleProject {
+                repository_path: normalize_scope_path_str(scope_root.to_string_lossy().as_ref()),
+                branch: None,
+            };
             filters
                 .include_paths
                 .push(scope_root.to_string_lossy().to_string());
-            let merged = merge_filters_with_project_scope(filters);
+            let merged = merge_filters_with_scope(filters, &scope);
             assert_eq!(merged.include_paths.len(), 1);
         }
     }
@@ -6821,7 +7647,10 @@ mod tests {
     #[test]
     fn test_effective_search_repo_scope_prefers_explicit_repo() {
         let explicit = "/tmp/explicit-repo";
-        let selected = effective_search_repo_scope(Some(explicit));
+        let scope = ProjectScope::AllProjects {
+            repository_filter: None,
+        };
+        let selected = effective_search_repo_scope(Some(explicit), &scope);
         assert_eq!(selected.as_deref(), Some(explicit));
     }
 
@@ -6857,6 +7686,8 @@ mod tests {
 
         assert!(global_flags.contains(&"format"));
         assert!(global_flags.contains(&"verbose"));
+        assert!(global_flags.contains(&"all_projects"));
+        assert!(global_flags.contains(&"project"));
     }
 
     #[test]

@@ -332,6 +332,16 @@ impl GraphClient {
             .get("repository_path")
             .cloned()
             .unwrap_or_default();
+        let qualified_name = node
+            .properties
+            .get("qualified_name")
+            .cloned()
+            .unwrap_or_default();
+        let visibility = node
+            .properties
+            .get("visibility")
+            .cloned()
+            .unwrap_or_default();
 
         let cypher = format!(
             "MERGE (n:{label} {{id: $id}})
@@ -340,6 +350,8 @@ impl GraphClient {
                  n.line_number = toInteger($line_number), n.lang = $lang,
                  n.source = $source, n.docstring = $docstring,
                  n.cyclomatic_complexity = toInteger($cyclomatic_complexity),
+                 n.qualified_name = $qualified_name,
+                 n.visibility = $visibility,
                  n.properties = $properties,
                  n.branch = $branch,
                  n.repository_path = $repository_path"
@@ -367,6 +379,8 @@ impl GraphClient {
                 "properties",
                 serde_json::to_string(&node.properties).unwrap_or_default(),
             ),
+            ("qualified_name", qualified_name),
+            ("visibility", visibility),
             ("branch", branch),
             ("repository_path", repository_path),
         ];
@@ -442,11 +456,93 @@ impl GraphClient {
         // Cleanup orphaned call targets
         self.run(
             "MATCH (ct:CallTarget)
-             WHERE NOT ()-[:CALLS]->(ct)
+             WHERE NOT ()-->(ct)
              DETACH DELETE ct",
         )
         .await?;
 
+        Ok(resolved)
+    }
+
+    /// Resolve TYPE_REFERENCE placeholders to concrete type/code nodes.
+    pub async fn resolve_type_references(
+        &self,
+        repository_path: &str,
+        branch: Option<&str>,
+    ) -> Result<usize> {
+        let branch_filter = if branch.is_some() {
+            " AND source.branch = $branch AND target.branch = $branch"
+        } else {
+            ""
+        };
+
+        let cypher = format!(
+            "MATCH (source)-[old:TYPE_REFERENCE]->(ct:CallTarget)
+             WHERE source.repository_path = $repo
+             WITH source, old, ct
+             MATCH (target:CodeNode {{name: ct.name}})
+             WHERE target.repository_path = $repo
+               AND target.kind IN ['CLASS', 'STRUCT', 'TRAIT', 'INTERFACE', 'ENUM', 'TYPE_ALIAS']
+               {branch_filter}
+             MERGE (source)-[r:TYPE_REFERENCE]->(target)
+             SET r.kind = 'TypeReference', r.properties = old.properties
+             DELETE old
+             RETURN count(r) AS resolved"
+        );
+
+        let mut params = vec![("repo", repository_path.to_string())];
+        if let Some(br) = branch {
+            params.push(("branch", br.to_string()));
+        }
+        let rows = self.query_with_params(&cypher, params).await?;
+
+        let mut resolved = 0usize;
+        for row in rows {
+            if let Some(count) = row.get("resolved").and_then(|v| v.as_u64()) {
+                resolved += count as usize;
+            }
+        }
+        Ok(resolved)
+    }
+
+    /// Resolve FIELD_ACCESS placeholders to concrete property/field-like nodes.
+    pub async fn resolve_field_accesses(
+        &self,
+        repository_path: &str,
+        branch: Option<&str>,
+    ) -> Result<usize> {
+        let branch_filter = if branch.is_some() {
+            " AND source.branch = $branch AND target.branch = $branch"
+        } else {
+            ""
+        };
+
+        let cypher = format!(
+            "MATCH (source)-[old:FIELD_ACCESS]->(ct:CallTarget)
+             WHERE source.repository_path = $repo
+             WITH source, old, ct
+             MATCH (target:CodeNode {{name: ct.name}})
+             WHERE target.repository_path = $repo
+               AND target.kind IN ['FIELD', 'PROPERTY', 'VARIABLE', 'CONSTANT', 'PARAMETER', 'ENUM_VARIANT']
+               {branch_filter}
+             MERGE (source)-[r:FIELD_ACCESS]->(target)
+             SET r.kind = 'FieldAccess', r.properties = old.properties
+             DELETE old
+             RETURN count(r) AS resolved"
+        );
+
+        let mut params = vec![("repo", repository_path.to_string())];
+        if let Some(br) = branch {
+            params.push(("branch", br.to_string()));
+        }
+        let rows = self.query_with_params(&cypher, params).await?;
+
+        let mut resolved = 0usize;
+        for row in rows {
+            if let Some(count) = row.get("resolved").and_then(|v| v.as_u64()) {
+                resolved += count as usize;
+            }
+        }
         Ok(resolved)
     }
 }
