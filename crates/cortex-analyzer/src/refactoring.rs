@@ -10,21 +10,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
+#[derive(Default)]
 pub enum Priority {
     /// Low priority - cosmetic or minor improvement
     Low = 1,
     /// Medium priority - should be addressed soon
+    #[default]
     Medium = 2,
     /// High priority - important for maintainability
     High = 3,
     /// Critical - blocking or severe issues
     Critical = 4,
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Self::Medium
-    }
 }
 
 impl std::fmt::Display for Priority {
@@ -593,7 +589,7 @@ impl RefactoringEngine {
 
         for rec in recommendations {
             *by_category.entry(rec.smell_type.category()).or_default() += 1;
-            *by_priority.entry(rec.priority.clone()).or_default() += 1;
+            *by_priority.entry(rec.priority).or_default() += 1;
             *by_technique.entry(rec.technique.clone()).or_default() += 1;
         }
 

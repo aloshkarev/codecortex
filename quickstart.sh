@@ -16,6 +16,7 @@ REPO_URL="https://github.com/aloshkarev/codecortex"
 INSTALL_DIR="${HOME}/.cortex"
 REPO_DIR=""
 NON_INTERACTIVE=false
+PREFER_NIX=true
 
 # Colors
 RED='\033[0;31m'
@@ -167,6 +168,10 @@ while [[ $# -gt 0 ]]; do
             NON_INTERACTIVE=true
             shift
             ;;
+        --no-nix)
+            PREFER_NIX=false
+            shift
+            ;;
         *)
             log_warning "Unknown argument: $1"
             shift
@@ -237,16 +242,23 @@ fi
 # Step 2: Check dependencies
 log_info "Checking dependencies..."
 
-# Check Rust
-if ! command_exists cargo; then
-    log_info "Installing Rust..."
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "${HOME}/.cargo/env" 2>/dev/null || true
-    export PATH="${HOME}/.cargo/bin:${PATH}"
+USE_NIX=false
+if [ "$PREFER_NIX" = true ] && command_exists nix; then
+    USE_NIX=true
+    log_success "Nix found - will use flake build path"
 fi
-log_success "Rust: $(rustc --version)"
 
-verify_build_prereqs
+if [ "$USE_NIX" = false ]; then
+    # Check Rust
+    if ! command_exists cargo; then
+        log_info "Installing Rust..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "${HOME}/.cargo/env" 2>/dev/null || true
+        export PATH="${HOME}/.cargo/bin:${PATH}"
+    fi
+    log_success "Rust: $(rustc --version)"
+    verify_build_prereqs
+fi
 
 # Check Docker (optional but recommended)
 if command_exists docker; then
@@ -271,10 +283,15 @@ else
 fi
 
 # Step 3: Build
-log_info "Building CodeCortex (this may take a few minutes)..."
-if ! run_with_retry 2 cargo build --release --locked; then
-    log_warning "Locked build failed; retrying without --locked"
-    run_with_retry 2 cargo build --release
+if [ "$USE_NIX" = true ]; then
+    log_info "Building CodeCortex with Nix (this may take a few minutes)..."
+    run_with_retry 2 nix build .#cortex
+else
+    log_info "Building CodeCortex (this may take a few minutes)..."
+    if ! run_with_retry 2 cargo build --release --locked; then
+        log_warning "Locked build failed; retrying without --locked"
+        run_with_retry 2 cargo build --release
+    fi
 fi
 log_success "Build complete"
 
@@ -282,11 +299,19 @@ log_success "Build complete"
 BIN_DIR="${HOME}/.local/bin"
 mkdir -p "$BIN_DIR"
 
-if [ ! -f target/release/cortex-cli ]; then
-    log_error "Build completed but target/release/cortex-cli is missing"
-    exit 1
+if [ "$USE_NIX" = true ]; then
+    if [ ! -f result/bin/cortex ]; then
+        log_error "Build completed but result/bin/cortex is missing"
+        exit 1
+    fi
+    cp result/bin/cortex "${BIN_DIR}/cortex"
+else
+    if [ ! -f target/release/cortex-cli ]; then
+        log_error "Build completed but target/release/cortex-cli is missing"
+        exit 1
+    fi
+    cp target/release/cortex-cli "${BIN_DIR}/cortex"
 fi
-cp target/release/cortex-cli "${BIN_DIR}/cortex"
 chmod +x "${BIN_DIR}/cortex"
 
 if [[ "$(uname -s)" == "Darwin" ]]; then

@@ -1,0 +1,28 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Explicitly declare text files
+*.rs text
+*.toml text
+*.json text
+*.yaml text
+*.yml text
+*.md text
+*.nix text
+*.sh text eol=lf
+Makefile text
+
+# Denote binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+
+# Rust/Cargo
+Cargo.lock binary
+
+# Nix
+flake.lock binary

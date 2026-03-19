@@ -4661,10 +4661,11 @@ fn collect_paths_for_filter(value: &Value, out: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
             for (k, v) in map {
-                if (k == "path" || k.ends_with(".path")) && v.is_string() {
-                    if let Some(path) = v.as_str() {
-                        out.push(path.to_string());
-                    }
+                if (k == "path" || k.ends_with(".path"))
+                    && v.is_string()
+                    && let Some(path) = v.as_str()
+                {
+                    out.push(path.to_string());
                 }
                 collect_paths_for_filter(v, out);
             }

@@ -984,27 +984,39 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    /// Helper to create a temporary git repository for testing
+    /// Helper to create a temporary git repository for testing.
+    /// Requires `git` to be in PATH (e.g. Nix check includes pkgs.git).
     fn create_test_repo() -> (TempDir, PathBuf) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let repo_path = temp_dir.path().to_path_buf();
 
-        // Initialize git repo
-        let _ = Command::new("git")
+        let check = |name: &str, out: std::process::Output| {
+            if !out.status.success() {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                panic!("test helper {} failed: {}", name, stderr.trim());
+            }
+        };
+
+        let out = Command::new("git")
             .current_dir(&repo_path)
             .args(["init"])
-            .output();
+            .output()
+            .expect("git init: is git in PATH?");
+        check("git init", out);
 
-        // Configure git user
-        let _ = Command::new("git")
+        let out = Command::new("git")
             .current_dir(&repo_path)
             .args(["config", "user.email", "test@example.com"])
-            .output();
+            .output()
+            .expect("git config email");
+        check("git config user.email", out);
 
-        let _ = Command::new("git")
+        let out = Command::new("git")
             .current_dir(&repo_path)
             .args(["config", "user.name", "Test User"])
-            .output();
+            .output()
+            .expect("git config name");
+        check("git config user.name", out);
 
         (temp_dir, repo_path)
     }
@@ -1014,15 +1026,26 @@ mod tests {
         let file_path = repo_path.join(filename);
         fs::write(&file_path, content).expect("Failed to write file");
 
-        let _ = Command::new("git")
+        let out = Command::new("git")
             .current_dir(repo_path)
             .args(["add", filename])
-            .output();
+            .output()
+            .expect("git add");
+        if !out.status.success() {
+            panic!("git add failed: {}", String::from_utf8_lossy(&out.stderr));
+        }
 
-        let _ = Command::new("git")
+        let out = Command::new("git")
             .current_dir(repo_path)
             .args(["commit", "-m", message])
-            .output();
+            .output()
+            .expect("git commit");
+        if !out.status.success() {
+            panic!(
+                "git commit failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
     }
 
     #[test]

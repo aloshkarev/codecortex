@@ -431,20 +431,20 @@ fn detect_unreachable_and_unused_variables(
             }
         }
 
-        if let Some(var_name) = extract_variable_definition(trimmed) {
-            if !is_variable_used(lines, &var_name, i + 1) {
-                smells.push(CodeSmell {
-                    smell_type: SmellType::DeadCode,
-                    severity: Severity::Info,
-                    file_path: file_path.to_string(),
-                    line_number: (i + 1) as u32,
-                    symbol_name: var_name.clone(),
-                    message: format!("Variable '{}' is defined but never used", var_name),
-                    metric_value: Some(0),
-                    threshold: Some(1),
-                    suggestion: Some("Remove unused variable or use it".to_string()),
-                });
-            }
+        if let Some(var_name) = extract_variable_definition(trimmed)
+            && !is_variable_used(lines, &var_name, i + 1)
+        {
+            smells.push(CodeSmell {
+                smell_type: SmellType::DeadCode,
+                severity: Severity::Info,
+                file_path: file_path.to_string(),
+                line_number: (i + 1) as u32,
+                symbol_name: var_name.clone(),
+                message: format!("Variable '{}' is defined but never used", var_name),
+                metric_value: Some(0),
+                threshold: Some(1),
+                suggestion: Some("Remove unused variable or use it".to_string()),
+            });
         }
     }
     smells
@@ -894,12 +894,10 @@ fn extract_function_calls(line: &str, lang: SourceLanguage) -> Vec<String> {
     let chars: Vec<char> = cleaned.chars().collect();
     let mut current_ident = String::new();
 
-    for i in 0..chars.len() {
-        let c = chars[i];
-
-        if c.is_alphanumeric() || c == '_' {
-            current_ident.push(c);
-        } else if c == '(' && !current_ident.is_empty() {
+    for c in &chars {
+        if c.is_alphanumeric() || *c == '_' {
+            current_ident.push(*c);
+        } else if *c == '(' && !current_ident.is_empty() {
             if !is_keyword(&current_ident) {
                 calls.push(current_ident.clone());
             }
@@ -948,8 +946,7 @@ fn extract_variable_definition(line: &str) -> Option<String> {
     let trimmed = line.trim();
 
     // Rust: let name = ...
-    if trimmed.starts_with("let ") {
-        let rest = &trimmed[4..];
+    if let Some(rest) = trimmed.strip_prefix("let ") {
         let name = rest.split('=').next()?.trim();
         // Get the variable name (may have type annotation)
         let name_part = name.split(':').next()?;
@@ -989,13 +986,13 @@ fn is_variable_definition(line: &str, var_name: &str) -> bool {
         return trimmed
             .split_whitespace()
             .nth(1)
-            .map_or(false, |n| n.trim_end_matches(':') == var_name);
+            .is_some_and(|n| n.trim_end_matches(':') == var_name);
     }
     if trimmed.starts_with("let mut ") {
         return trimmed
             .split_whitespace()
             .nth(2)
-            .map_or(false, |n| n.trim_end_matches(':') == var_name);
+            .is_some_and(|n| n.trim_end_matches(':') == var_name);
     }
     false
 }
@@ -1062,26 +1059,27 @@ fn find_generic_types(lines: &[&str], lang: SourceLanguage) -> HashMap<String, G
         let trimmed = line.trim();
 
         // Look for generic definitions
-        if trimmed.contains('<') && trimmed.contains('>') {
-            if is_class_definition(trimmed) || is_function_definition(trimmed, lang) {
-                let name = if is_class_definition(trimmed) {
-                    extract_class_name(trimmed)
-                } else {
-                    extract_function_name(trimmed)
-                };
+        if trimmed.contains('<')
+            && trimmed.contains('>')
+            && (is_class_definition(trimmed) || is_function_definition(trimmed, lang))
+        {
+            let name = if is_class_definition(trimmed) {
+                extract_class_name(trimmed)
+            } else {
+                extract_function_name(trimmed)
+            };
 
-                // Count type parameters
-                let type_params = count_type_parameters(trimmed);
+            // Count type parameters
+            let type_params = count_type_parameters(trimmed);
 
-                if type_params > 0 {
-                    types.insert(
-                        name,
-                        GenericTypeInfo {
-                            line_number: (i + 1) as u32,
-                            unused_params: 0, // Would need deeper analysis
-                        },
-                    );
-                }
+            if type_params > 0 {
+                types.insert(
+                    name,
+                    GenericTypeInfo {
+                        line_number: (i + 1) as u32,
+                        unused_params: 0, // Would need deeper analysis
+                    },
+                );
             }
         }
     }
@@ -1090,11 +1088,11 @@ fn find_generic_types(lines: &[&str], lang: SourceLanguage) -> HashMap<String, G
 }
 
 fn count_type_parameters(line: &str) -> usize {
-    if let Some(start) = line.find('<') {
-        if let Some(end) = line.rfind('>') {
-            let params = &line[start + 1..end];
-            return params.split(',').filter(|p| !p.trim().is_empty()).count();
-        }
+    if let Some(start) = line.find('<')
+        && let Some(end) = line.rfind('>')
+    {
+        let params = &line[start + 1..end];
+        return params.split(',').filter(|p| !p.trim().is_empty()).count();
     }
     0
 }
@@ -1151,8 +1149,7 @@ fn extract_class_name(line: &str) -> String {
         "trait ",
         "abstract class ",
     ] {
-        if line.starts_with(prefix) {
-            let rest = &line[prefix.len()..];
+        if let Some(rest) = line.strip_prefix(prefix) {
             return rest
                 .split(|c: char| c.is_whitespace() || c == '{' || c == '<' || c == '(')
                 .find(|s| !s.is_empty())

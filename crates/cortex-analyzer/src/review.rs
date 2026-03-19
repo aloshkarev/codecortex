@@ -196,10 +196,11 @@ impl ReviewAnalyzer {
             let changed_functions =
                 extract_changed_function_names(&file.source, &file.changed_ranges);
             for func_name in changed_functions {
-                if let Ok(affected) = nav.find_usages(&func_name, None).await {
-                    if !affected.is_empty() {
-                        let caller_count = affected.len();
-                        impact_findings.push(ReviewSmellFinding {
+                if let Ok(affected) = nav.find_usages(&func_name, None).await
+                    && !affected.is_empty()
+                {
+                    let caller_count = affected.len();
+                    impact_findings.push(ReviewSmellFinding {
                             file_path: file.path.clone(),
                             line_number: find_function_line(&file.source, &func_name).unwrap_or(0),
                             severity: if caller_count > 10 {
@@ -215,7 +216,6 @@ impl ReviewAnalyzer {
                             ),
                             in_changed_lines: true,
                         });
-                    }
                 }
             }
         }
@@ -227,9 +227,10 @@ impl ReviewAnalyzer {
                 added_functions.get(&file.path),
             );
             for func_name in new_functions {
-                if let Ok(usages) = nav.find_usages(&func_name, None).await {
-                    if usages.is_empty() {
-                        impact_findings.push(ReviewSmellFinding {
+                if let Ok(usages) = nav.find_usages(&func_name, None).await
+                    && usages.is_empty()
+                {
+                    impact_findings.push(ReviewSmellFinding {
                             file_path: file.path.clone(),
                             line_number: find_function_line(&file.source, &func_name).unwrap_or(0),
                             severity: Severity::Info,
@@ -241,7 +242,6 @@ impl ReviewAnalyzer {
                             ),
                             in_changed_lines: true,
                         });
-                    }
                 }
             }
         }

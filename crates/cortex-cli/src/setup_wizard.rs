@@ -30,12 +30,7 @@ fn is_port_available(host: &str, port: u16) -> bool {
 
 /// Find an available port starting from the given port
 fn find_available_port(host: &str, start_port: u16, max_attempts: u16) -> Option<u16> {
-    for port in start_port..start_port + max_attempts {
-        if is_port_available(host, port) {
-            return Some(port);
-        }
-    }
-    None
+    (start_port..start_port + max_attempts).find(|&port| is_port_available(host, port))
 }
 
 /// Check if a command exists
@@ -237,7 +232,7 @@ pub fn run_setup_wizard(config: &mut CortexConfig) -> Result<()> {
                 println!("  {} Port 7687 is in use", "⚠".yellow());
                 if let Some(available) = find_available_port("127.0.0.1", 7688, 10) {
                     let use_alt = Confirm::new()
-                        .with_prompt(&format!("Use port {} instead?", available))
+                        .with_prompt(format!("Use port {} instead?", available))
                         .default(true)
                         .interact()?;
                     if use_alt { available } else { default_port }
@@ -423,7 +418,7 @@ pub fn run_setup_wizard(config: &mut CortexConfig) -> Result<()> {
 
                 // Offer to pull the model
                 let pull_model = Confirm::new()
-                    .with_prompt(&format!("Pull model '{}' if not present?", model))
+                    .with_prompt(format!("Pull model '{}' if not present?", model))
                     .default(true)
                     .interact()?;
 
@@ -576,10 +571,10 @@ CORTEX_MEMGRAPH_PASSWORD={}
             env_content.push_str(&format!("# Qdrant URI: {}\n", config.vector.qdrant_uri));
         }
 
-        if config.llm.provider == "openai" {
-            if let Some(ref key) = config.llm.openai_api_key {
-                env_content.push_str(&format!("\n# OpenAI\nOPENAI_API_KEY={}\n", key));
-            }
+        if config.llm.provider == "openai"
+            && let Some(ref key) = config.llm.openai_api_key
+        {
+            env_content.push_str(&format!("\n# OpenAI\nOPENAI_API_KEY={}\n", key));
         }
 
         std::fs::write(".env.cortex", env_content)?;

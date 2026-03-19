@@ -40,6 +40,7 @@ NON_INTERACTIVE=false
 INSTALL_METHOD=""
 START_SERVICES=true
 INSTALL_MEMGRAPH=true
+PREFER_NIX=true
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Utility Functions
@@ -220,13 +221,19 @@ check_dependencies() {
         fi
     fi
 
-    # Check for Rust (optional, for cargo install)
-    if command_exists rustc && command_exists cargo; then
-        log_success "Rust toolchain found: $(rustc --version)"
-        INSTALL_METHOD="cargo"
+    # Prefer Nix when available unless explicitly disabled.
+    if [ "$PREFER_NIX" = true ] && command_exists nix; then
+        INSTALL_METHOD="nix"
+        log_success "Nix found - will use Nix build path"
     else
-        log_info "Rust not found - will use binary installation"
-        INSTALL_METHOD="binary"
+        # Check for Rust (optional, for cargo install)
+        if command_exists rustc && command_exists cargo; then
+            log_success "Rust toolchain found: $(rustc --version)"
+            INSTALL_METHOD="cargo"
+        else
+            log_info "Rust not found - will use binary installation"
+            INSTALL_METHOD="binary"
+        fi
     fi
 
     # Check for Docker (for Memgraph)
@@ -243,6 +250,11 @@ check_dependencies() {
     fi
 
     # Build-time preflight dependencies (source build path)
+    if [ "$INSTALL_METHOD" = "nix" ]; then
+        log_info "Skipping Cargo native build dependency preflight (Nix selected)"
+        return 0
+    fi
+
     local build_missing=()
     for dep in pkg-config cmake make protoc; do
         if ! command_exists "$dep"; then
@@ -433,6 +445,34 @@ install_cortex_cargo() {
     fi
 
     log_success "CodeCortex installed to ${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
+}
+
+install_cortex_nix() {
+    log_step "Installing CodeCortex via Nix"
+
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    log_info "Building CodeCortex from flake output..."
+    cd "$repo_dir"
+    run_with_retry 2 nix build .#cortex
+
+    mkdir -p "$CORTEX_BIN_DIR"
+    if [ ! -f result/bin/cortex ]; then
+        log_error "Nix build finished but result/bin/cortex not found"
+        return 1
+    fi
+    cp result/bin/cortex "${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
+    chmod +x "${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
+
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        log_info "Applying macOS ad-hoc code signature to cortex binary..."
+        codesign --force --sign - "${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
+        codesign --verify --verbose=4 "${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
+        PATH="${CORTEX_BIN_DIR}:${PATH}" cortex --version
+    fi
+
+    log_success "CodeCortex installed via Nix to ${CORTEX_BIN_DIR}/${CORTEX_BIN_NAME}"
 }
 
 install_cortex_binary() {
@@ -1162,6 +1202,7 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  --non-interactive    Run without prompts (use defaults)"
+    echo "  --no-nix             Do not use Nix even if installed"
     echo "  --no-memgraph        Skip Memgraph installation"
     echo "  --no-service         Skip service setup"
     echo "  --help               Show this help message"
@@ -1169,6 +1210,7 @@ show_help() {
     echo "Examples:"
     echo "  $0                           # Interactive installation"
     echo "  $0 --non-interactive         # Non-interactive with defaults"
+    echo "  $0 --no-nix                  # Force Cargo/binary installer path"
     echo "  $0 --no-memgraph             # Skip Memgraph setup"
     echo ""
 }
@@ -1183,6 +1225,10 @@ main() {
         case $1 in
             --non-interactive|-y)
                 NON_INTERACTIVE=true
+                shift
+                ;;
+            --no-nix)
+                PREFER_NIX=false
                 shift
                 ;;
             --no-memgraph)
@@ -1226,11 +1272,17 @@ main() {
     fi
 
     # Install CodeCortex
-    if [ "$INSTALL_METHOD" = "cargo" ]; then
-        install_cortex_cargo
-    else
-        install_cortex_binary
-    fi
+    case "$INSTALL_METHOD" in
+        nix)
+            install_cortex_nix
+            ;;
+        cargo)
+            install_cortex_cargo
+            ;;
+        *)
+            install_cortex_binary
+            ;;
+    esac
 
     # Verify installation
     verify_installation

@@ -333,8 +333,7 @@ fn extract_class_name_from_line(line: &str) -> String {
     let line = line.trim();
 
     // Handle impl blocks
-    if line.starts_with("impl ") {
-        let rest = &line[5..];
+    if let Some(rest) = line.strip_prefix("impl ") {
         return rest
             .split(|c: char| c.is_whitespace() || c == '{' || c == '<' || c == '>')
             .find(|s| !s.is_empty())
@@ -377,12 +376,12 @@ fn extract_class_methods(
     for line in lines {
         let trimmed = line.trim();
 
-        if trimmed.contains("class ") || trimmed.contains("struct ") || trimmed.contains("impl ") {
-            if trimmed.contains(class_name) {
-                in_class = true;
-                _target_class = class_name.to_string();
-                brace_count = 0;
-            }
+        if (trimmed.contains("class ") || trimmed.contains("struct ") || trimmed.contains("impl "))
+            && trimmed.contains(class_name)
+        {
+            in_class = true;
+            _target_class = class_name.to_string();
+            brace_count = 0;
         }
 
         if in_class {
@@ -416,36 +415,40 @@ fn find_inheritance_relationships(
         // Python: class Child(Parent):
 
         // Handle various inheritance patterns
-        if trimmed.contains("extends ") {
-            if let Some((child, parent)) = extract_extends_relation(trimmed) {
-                relations.push(InheritanceRelation {
-                    subclass: child,
-                    parent,
-                    line_number: (i + 1) as u32,
-                });
-            }
+        if trimmed.contains("extends ")
+            && let Some((child, parent)) = extract_extends_relation(trimmed)
+        {
+            relations.push(InheritanceRelation {
+                subclass: child,
+                parent,
+                line_number: (i + 1) as u32,
+            });
         }
 
         // Python style
-        if trimmed.starts_with("class ") && trimmed.contains('(') && !trimmed.contains("():") {
-            if let Some((child, parent)) = extract_python_inheritance(trimmed) {
-                relations.push(InheritanceRelation {
-                    subclass: child,
-                    parent,
-                    line_number: (i + 1) as u32,
-                });
-            }
+        if trimmed.starts_with("class ")
+            && trimmed.contains('(')
+            && !trimmed.contains("():")
+            && let Some((child, parent)) = extract_python_inheritance(trimmed)
+        {
+            relations.push(InheritanceRelation {
+                subclass: child,
+                parent,
+                line_number: (i + 1) as u32,
+            });
         }
 
         // C# style with colon
-        if trimmed.starts_with("class ") && trimmed.contains(':') && !trimmed.contains("::") {
-            if let Some((child, parent)) = extract_csharp_inheritance(trimmed) {
-                relations.push(InheritanceRelation {
-                    subclass: child,
-                    parent,
-                    line_number: (i + 1) as u32,
-                });
-            }
+        if trimmed.starts_with("class ")
+            && trimmed.contains(':')
+            && !trimmed.contains("::")
+            && let Some((child, parent)) = extract_csharp_inheritance(trimmed)
+        {
+            relations.push(InheritanceRelation {
+                subclass: child,
+                parent,
+                line_number: (i + 1) as u32,
+            });
         }
     }
 
@@ -502,11 +505,7 @@ fn extract_csharp_inheritance(line: &str) -> Option<(String, String)> {
     let colon_pos = line.find(':')?;
 
     let child = line[..colon_pos].trim().to_string();
-    let parent = line[colon_pos + 1..]
-        .trim()
-        .split_whitespace()
-        .next()?
-        .to_string();
+    let parent = line[colon_pos + 1..].split_whitespace().next()?.to_string();
 
     if child.is_empty() || parent.is_empty() {
         return None;
