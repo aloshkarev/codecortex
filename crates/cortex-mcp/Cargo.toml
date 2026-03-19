@@ -33,4 +33,4 @@ uuid = { version = "1.10", features = ["v4"] }
 jsonschema = "0.45"
 reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
 tempfile = "3.10"
-tokio-tungstenite = "0.28"
+tokio-tungstenite = "0.29"
