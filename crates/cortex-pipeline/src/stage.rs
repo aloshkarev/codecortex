@@ -960,7 +960,7 @@ mod tests {
         // Values should be normalized (0.0 to 1.0)
         for &val in embedding {
             assert!(
-                val >= 0.0 && val <= 1.0,
+                (0.0..=1.0).contains(&val),
                 "Embedding value {} out of range",
                 val
             );

@@ -19,6 +19,7 @@ pub fn compute_cyclomatic_complexity(source: &str) -> u32 {
 /// - Logical operators (&&, ||) but not at the top level
 ///
 /// See: https://www.sonarsource.com/resources/cognitive-complexity/
+#[allow(clippy::if_same_then_else)]
 pub fn compute_cognitive_complexity(source: &str) -> u32 {
     let mut complexity = 0u32;
     let mut nesting_level = 0u32;
@@ -39,7 +40,7 @@ pub fn compute_cognitive_complexity(source: &str) -> u32 {
         else if trimmed.starts_with("else if") {
             complexity += 1; // No nesting increment for else-if chain
         }
-        // Check for else
+        // Check for else (without "if") - no complexity increment, just avoid matching elsewhere
         else if trimmed.starts_with("else") && !trimmed.starts_with("else if") {
             // else alone doesn't add complexity, but we track for nesting
         }
@@ -48,25 +49,17 @@ pub fn compute_cognitive_complexity(source: &str) -> u32 {
             || trimmed.starts_with("for(")
             || trimmed.starts_with("while ")
             || trimmed.starts_with("while(")
-        {
-            complexity += 1 + nesting_level;
-            nesting_level += 1;
-        }
-        // Check for switch/match/case
-        else if trimmed.starts_with("switch ")
+            || trimmed.starts_with("switch ")
             || trimmed.starts_with("switch(")
             || trimmed.starts_with("match ")
             || trimmed.starts_with("match(")
+            || trimmed.starts_with("catch ")
+            || trimmed.starts_with("catch(")
         {
             complexity += 1 + nesting_level;
             nesting_level += 1;
         } else if trimmed.starts_with("case ") {
             complexity += 1;
-        }
-        // Check for catch
-        else if trimmed.starts_with("catch ") || trimmed.starts_with("catch(") {
-            complexity += 1 + nesting_level;
-            nesting_level += 1;
         }
         // Check for try (not counted, but starts a block)
         else if trimmed.starts_with("try ") || trimmed.starts_with("try{") {
@@ -74,21 +67,18 @@ pub fn compute_cognitive_complexity(source: &str) -> u32 {
         }
 
         // Track nesting level via braces
-        if chars[i] == '{' {
-            // Already handled control structures
-        } else if chars[i] == '}' && nesting_level > 0 {
+        if chars[i] == '}' && nesting_level > 0 {
             nesting_level = nesting_level.saturating_sub(1);
         }
+        // '{' is already accounted for in control structure handling above
 
         // Check for logical operators (add complexity for && and ||)
-        if i + 1 < chars.len() {
-            if chars[i] == '&' && chars[i + 1] == '&' {
-                complexity += 1;
-                i += 1; // Skip next char
-            } else if chars[i] == '|' && chars[i + 1] == '|' {
-                complexity += 1;
-                i += 1; // Skip next char
-            }
+        if i + 1 < chars.len()
+            && ((chars[i] == '&' && chars[i + 1] == '&')
+                || (chars[i] == '|' && chars[i + 1] == '|'))
+        {
+            complexity += 1;
+            i += 1; // Skip next char
         }
 
         // Check for ternary operator

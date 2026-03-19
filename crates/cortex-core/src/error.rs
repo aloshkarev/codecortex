@@ -40,6 +40,36 @@ impl From<std::io::Error> for CortexError {
     }
 }
 
+impl CortexError {
+    /// Check if this error is retryable
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Connection(_) | Self::Timeout(_) | Self::Database(_)
+        )
+    }
+
+    /// Get a short error category
+    pub fn category(&self) -> &'static str {
+        match self {
+            Self::UnsupportedLanguage(_) => "language",
+            Self::Config(_) => "config",
+            Self::Parse { .. } => "parse",
+            Self::Database(_) => "database",
+            Self::Io(_) => "io",
+            Self::InvalidArgument(_) => "argument",
+            Self::Timeout(_) => "timeout",
+            Self::Runtime(_) => "runtime",
+            Self::NotFound(_) => "not_found",
+            Self::AlreadyExists(_) => "conflict",
+            Self::Unauthorized(_) => "auth",
+            Self::Connection(_) => "connection",
+            Self::Embedding(_) => "embedding",
+            Self::Index(_) => "index",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,35 +118,5 @@ mod tests {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
         let cortex_err: CortexError = io_err.into();
         assert!(matches!(cortex_err, CortexError::Io(_)));
-    }
-}
-
-impl CortexError {
-    /// Check if this error is retryable
-    pub fn is_retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::Connection(_) | Self::Timeout(_) | Self::Database(_)
-        )
-    }
-
-    /// Get a short error category
-    pub fn category(&self) -> &'static str {
-        match self {
-            Self::UnsupportedLanguage(_) => "language",
-            Self::Config(_) => "config",
-            Self::Parse { .. } => "parse",
-            Self::Database(_) => "database",
-            Self::Io(_) => "io",
-            Self::InvalidArgument(_) => "argument",
-            Self::Timeout(_) => "timeout",
-            Self::Runtime(_) => "runtime",
-            Self::NotFound(_) => "not_found",
-            Self::AlreadyExists(_) => "conflict",
-            Self::Unauthorized(_) => "auth",
-            Self::Connection(_) => "connection",
-            Self::Embedding(_) => "embedding",
-            Self::Index(_) => "index",
-        }
     }
 }

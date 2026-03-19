@@ -176,7 +176,7 @@ impl LanceStore {
         }
 
         // Create embedding FixedSizeListArray
-        let embedding_array = Self::create_embedding_array(&documents)?;
+        let embedding_array = Self::create_embedding_array(documents)?;
 
         let id_array: ArrayRef = Arc::new(StringArray::from(ids));
         let content_array: ArrayRef = Arc::new(StringArray::from(contents));
@@ -580,7 +580,7 @@ impl VectorStore for LanceStore {
                 if let Some(doc) = Self::row_to_document(&batch, row_idx) {
                     let score = distances
                         .get(row_idx)
-                        .map(|d| 1.0 - (d / 2.0).min(1.0).max(0.0)) // Convert distance to similarity
+                        .map(|d| 1.0 - (d / 2.0).clamp(0.0, 1.0)) // Convert distance to similarity
                         .unwrap_or(1.0);
 
                     search_results.push(SearchResult {
@@ -651,7 +651,7 @@ impl VectorStore for LanceStore {
                 if let Some(doc) = Self::row_to_document(&batch, row_idx) {
                     let score = distances
                         .get(row_idx)
-                        .map(|d| 1.0 - (d / 2.0).min(1.0).max(0.0))
+                        .map(|d| 1.0 - (d / 2.0).clamp(0.0, 1.0))
                         .unwrap_or(1.0);
 
                     search_results.push(SearchResult {

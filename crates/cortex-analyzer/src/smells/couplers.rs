@@ -448,11 +448,11 @@ fn extract_methods_with_access_patterns(
             }
 
             // Method end
-            if brace_count == 0 && i as u32 >= method_start {
-                if let (Some(method_name), Some(info)) = (current_method.take(), method_info.take())
-                {
-                    methods.insert(method_name, info);
-                }
+            if brace_count == 0
+                && i as u32 >= method_start
+                && let (Some(method_name), Some(info)) = (current_method.take(), method_info.take())
+            {
+                methods.insert(method_name, info);
             }
         }
     }
@@ -543,14 +543,14 @@ fn extract_class_delegation_data(
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            if let Some(info) = classes.get_mut(class_name) {
-                if is_method_definition(trimmed, lang) {
-                    info.total_methods += 1;
+            if let Some(info) = classes.get_mut(class_name)
+                && is_method_definition(trimmed, lang)
+            {
+                info.total_methods += 1;
 
-                    // Check if this method is a delegation
-                    if is_delegating_method(trimmed, lines, i, lang) {
-                        info.delegating_methods += 1;
-                    }
+                // Check if this method is a delegation
+                if is_delegating_method(trimmed, lines, i, lang) {
+                    info.delegating_methods += 1;
                 }
             }
 
@@ -714,11 +714,12 @@ fn extract_foreign_class_accesses(line: &str) -> Vec<String> {
             // Get the class name before the pattern
             if let Some(class_name) = before
                 .split(|c: char| !c.is_alphanumeric() && c != '_')
-                .last()
+                .next_back()
+                && !class_name.is_empty()
+                && class_name != "self"
+                && class_name != "this"
             {
-                if !class_name.is_empty() && class_name != "self" && class_name != "this" {
-                    classes.push(class_name.to_string());
-                }
+                classes.push(class_name.to_string());
             }
         }
     }
@@ -731,10 +732,10 @@ fn extract_foreign_class_accesses(line: &str) -> Vec<String> {
             if let Some(type_name) = rest
                 .split(|c: char| c.is_whitespace() || c == ',' || c == ')')
                 .next()
+                && !type_name.is_empty()
+                && type_name.chars().next().unwrap_or('_').is_uppercase()
             {
-                if !type_name.is_empty() && type_name.chars().next().unwrap_or('_').is_uppercase() {
-                    classes.push(type_name.to_string());
-                }
+                classes.push(type_name.to_string());
             }
             pos += start + type_pattern.len();
         }
@@ -865,8 +866,7 @@ fn is_method_definition(trimmed: &str, lang: SourceLanguage) -> bool {
 
 fn extract_class_name(line: &str) -> String {
     for prefix in ["impl ", "struct ", "class ", "pub struct ", "pub class "] {
-        if line.starts_with(prefix) {
-            let rest = &line[prefix.len()..];
+        if let Some(rest) = line.strip_prefix(prefix) {
             return rest
                 .split(|c: char| c.is_whitespace() || c == '{' || c == '<' || c == '(')
                 .find(|s| !s.is_empty())

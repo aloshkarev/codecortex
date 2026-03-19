@@ -139,7 +139,7 @@ pub fn detect_shotgun_surgery(
     // Track which functions are called from how many different files/contexts
     let mut call_counts: HashMap<String, usize> = HashMap::new();
 
-    for (_func_name, func_info) in &functions {
+    for func_info in functions.values() {
         for called in &func_info.calls {
             *call_counts.entry(called.clone()).or_default() += 1;
         }
@@ -476,8 +476,7 @@ fn extract_class_name(line: &str) -> String {
     let line = line.trim();
 
     for prefix in ["impl ", "struct ", "class ", "pub struct ", "pub class "] {
-        if line.starts_with(prefix) {
-            let rest = &line[prefix.len()..];
+        if let Some(rest) = line.strip_prefix(prefix) {
             return rest
                 .split(|c: char| c.is_whitespace() || c == '{' || c == '<' || c == '(')
                 .find(|s| !s.is_empty())
@@ -516,12 +515,10 @@ fn extract_function_calls(line: &str) -> Vec<String> {
     let chars: Vec<char> = line.chars().collect();
     let mut current_ident = String::new();
 
-    for i in 0..chars.len() {
-        let c = chars[i];
-
-        if c.is_alphanumeric() || c == '_' {
-            current_ident.push(c);
-        } else if c == '(' && !current_ident.is_empty() {
+    for c in &chars {
+        if c.is_alphanumeric() || *c == '_' {
+            current_ident.push(*c);
+        } else if *c == '(' && !current_ident.is_empty() {
             // Check if this is likely a function call (not a keyword)
             if !is_keyword(&current_ident) {
                 calls.push(current_ident.clone());

@@ -6,7 +6,8 @@
 //! - Threshold relaxation
 
 use cortex_mcp::{CapsuleConfig, ContextCapsuleBuilder, GraphSearchResult};
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 
 fn make_result(id: &str, name: &str, path: &str, source: &str) -> GraphSearchResult {
     GraphSearchResult {

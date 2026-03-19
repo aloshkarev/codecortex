@@ -138,6 +138,7 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     Setup,
     Doctor,
@@ -1014,12 +1015,11 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
             return Some((host, port));
         }
 
-        if let Some((host, port_str)) = authority.rsplit_once(':') {
-            if !host.contains(':') {
-                if let Ok(port) = port_str.parse::<u16>() {
-                    return Some((host, port));
-                }
-            }
+        if let Some((host, port_str)) = authority.rsplit_once(':')
+            && !host.contains(':')
+            && let Ok(port) = port_str.parse::<u16>()
+        {
+            return Some((host, port));
         }
 
         Some((authority, 7687))
@@ -1102,10 +1102,10 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
                     .await
                 {
                     Ok(rows) => {
-                        if let Some(row) = rows.first() {
-                            if let Some(count) = row.get("count") {
-                                println!("   {} Total code nodes: {}", "✓".green(), count);
-                            }
+                        if let Some(row) = rows.first()
+                            && let Some(count) = row.get("count")
+                        {
+                            println!("   {} Total code nodes: {}", "✓".green(), count);
                         }
                     }
                     Err(e) => {
@@ -1141,11 +1141,8 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
                     Ok(store) => match store.health_check().await {
                         Ok(true) => {
                             println!("   {} Vector store healthy", "✓".green());
-                            match store.count().await {
-                                Ok(count) => {
-                                    println!("   {} Documents stored: {}", "✓".green(), count)
-                                }
-                                Err(_) => {}
+                            if let Ok(count) = store.count().await {
+                                println!("   {} Documents stored: {}", "✓".green(), count)
                             }
                         }
                         Ok(false) => {
@@ -1170,15 +1167,14 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
                 warnings.push("Vector store path does not exist".to_string());
 
                 // Check if parent is writable
-                if let Some(parent) = config.vector.store_path.parent() {
-                    if parent.exists()
-                        && parent
-                            .metadata()
-                            .map(|m| !m.permissions().readonly())
-                            .unwrap_or(false)
-                    {
-                        println!("   {} Parent directory is writable", "✓".green());
-                    }
+                if let Some(parent) = config.vector.store_path.parent()
+                    && parent.exists()
+                    && parent
+                        .metadata()
+                        .map(|m| !m.permissions().readonly())
+                        .unwrap_or(false)
+                {
+                    println!("   {} Parent directory is writable", "✓".green());
                 }
             }
         }
@@ -1194,11 +1190,8 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
                     Ok(store) => match store.health_check().await {
                         Ok(true) => {
                             println!("   {} Vector store healthy", "✓".green());
-                            match store.count().await {
-                                Ok(count) => {
-                                    println!("   {} Documents stored: {}", "✓".green(), count)
-                                }
-                                Err(_) => {}
+                            if let Ok(count) = store.count().await {
+                                println!("   {} Documents stored: {}", "✓".green(), count)
                             }
                         }
                         Ok(false) => {
@@ -1223,15 +1216,14 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
                 warnings.push("Vector store path does not exist".to_string());
 
                 // Check if parent is writable
-                if let Some(parent) = config.vector.store_path.parent() {
-                    if parent.exists()
-                        && parent
-                            .metadata()
-                            .map(|m| !m.permissions().readonly())
-                            .unwrap_or(false)
-                    {
-                        println!("   {} Parent directory is writable", "✓".green());
-                    }
+                if let Some(parent) = config.vector.store_path.parent()
+                    && parent.exists()
+                    && parent
+                        .metadata()
+                        .map(|m| !m.permissions().readonly())
+                        .unwrap_or(false)
+                {
+                    println!("   {} Parent directory is writable", "✓".green());
                 }
             }
         }
@@ -1274,7 +1266,7 @@ async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
             let (host, port) = authority
                 .rsplit_once(':')
                 .and_then(|(h, p)| p.parse::<u16>().ok().map(|port| (h.to_string(), port)))
-                .unwrap_or_else(|| (authority, 11434));
+                .unwrap_or((authority, 11434));
             let default_addr: std::net::SocketAddr = "127.0.0.1:11434"
                 .parse()
                 .expect("valid default Ollama address");
@@ -1797,7 +1789,7 @@ async fn run_index(
                 }
             }
             upsert_job(&job_id, "failed", err.to_string())?;
-            return Err(err.into());
+            return Err(err);
         }
     };
     pb.finish_and_clear();
@@ -2466,6 +2458,7 @@ struct SmellScanResult {
     smells: Vec<CodeSmell>,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_analyze_smells(
     config: &CortexConfig,
     path: &str,
@@ -2583,6 +2576,7 @@ fn run_analyze_refactoring(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_analyze_branch_diff(
     config: &CortexConfig,
     source: &str,
@@ -2725,6 +2719,7 @@ fn branch_head_commit(repo_path: &Path, branch: &str) -> Option<String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_analyze_review(
     config: &CortexConfig,
     base: Option<&str>,
@@ -3006,10 +3001,10 @@ fn parse_unified_diff_changed_ranges(patch: &str) -> HashMap<String, Vec<ReviewL
             current_path = None;
             continue;
         }
-        if line.starts_with("@@") {
-            if let (Some(path), Some(range)) = (current_path.as_ref(), parse_hunk_range(line)) {
-                out.entry(path.clone()).or_default().push(range);
-            }
+        if line.starts_with("@@")
+            && let (Some(path), Some(range)) = (current_path.as_ref(), parse_hunk_range(line))
+        {
+            out.entry(path.clone()).or_default().push(range);
         }
     }
     out
@@ -7200,8 +7195,10 @@ mod tests {
         let file = temp.join("sample.rs");
         std::fs::write(&file, "fn helper() {}\n").expect("write sample file");
 
-        let mut config = CortexConfig::default();
-        config.memgraph_uri = "invalid://memgraph".to_string();
+        let config = CortexConfig {
+            memgraph_uri: "invalid://memgraph".to_string(),
+            ..Default::default()
+        };
 
         let result = run_analyze_smells(
             &config,
@@ -7236,8 +7233,10 @@ mod tests {
         let file = temp.join("sample.py");
         std::fs::write(&file, "def helper():\n    return 1\n").expect("write sample file");
 
-        let mut config = CortexConfig::default();
-        config.memgraph_uri = "invalid://memgraph".to_string();
+        let config = CortexConfig {
+            memgraph_uri: "invalid://memgraph".to_string(),
+            ..Default::default()
+        };
 
         let result = run_analyze_smells(
             &config,

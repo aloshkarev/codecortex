@@ -683,41 +683,41 @@ impl SmellDetector {
             // Look for function definitions
             if self.is_function_signature(trimmed, lang) {
                 // Extract parameters from parentheses
-                if let Some(paren_start) = trimmed.find('(') {
-                    if let Some(local_paren_end) = trimmed[paren_start + 1..].find(')') {
-                        let paren_end = paren_start + 1 + local_paren_end;
-                        let params_str = &trimmed[paren_start + 1..paren_end];
+                if let Some(paren_start) = trimmed.find('(')
+                    && let Some(local_paren_end) = trimmed[paren_start + 1..].find(')')
+                {
+                    let paren_end = paren_start + 1 + local_paren_end;
+                    let params_str = &trimmed[paren_start + 1..paren_end];
 
-                        if !params_str.trim().is_empty() {
-                            // Count parameters (handle nested types)
-                            let param_count = self.count_parameters(params_str);
+                    if !params_str.trim().is_empty() {
+                        // Count parameters (handle nested types)
+                        let param_count = self.count_parameters(params_str);
 
-                            if param_count > self.config.max_parameters {
-                                let function_name = self.extract_function_name(trimmed);
-                                let severity = if param_count > self.config.max_parameters + 3 {
-                                    Severity::Error
-                                } else {
-                                    Severity::Warning
-                                };
+                        if param_count > self.config.max_parameters {
+                            let function_name = self.extract_function_name(trimmed);
+                            let severity = if param_count > self.config.max_parameters + 3 {
+                                Severity::Error
+                            } else {
+                                Severity::Warning
+                            };
 
-                                smells.push(CodeSmell {
-                                    smell_type: SmellType::TooManyParameters,
-                                    severity,
-                                    file_path: file_path.to_string(),
-                                    line_number: (i + 1) as u32,
-                                    symbol_name: function_name.clone(),
-                                    message: format!(
-                                        "Function '{}' has {} parameters (max: {})",
-                                        function_name, param_count, self.config.max_parameters
-                                    ),
-                                    metric_value: Some(param_count),
-                                    threshold: Some(self.config.max_parameters),
-                                    suggestion: Some(
-                                        "Consider using a configuration struct or builder pattern"
-                                            .to_string(),
-                                    ),
-                                });
-                            }
+                            smells.push(CodeSmell {
+                                smell_type: SmellType::TooManyParameters,
+                                severity,
+                                file_path: file_path.to_string(),
+                                line_number: (i + 1) as u32,
+                                symbol_name: function_name.clone(),
+                                message: format!(
+                                    "Function '{}' has {} parameters (max: {})",
+                                    function_name, param_count, self.config.max_parameters
+                                ),
+                                metric_value: Some(param_count),
+                                threshold: Some(self.config.max_parameters),
+                                suggestion: Some(
+                                    "Consider using a configuration struct or builder pattern"
+                                        .to_string(),
+                                ),
+                            });
                         }
                     }
                 }

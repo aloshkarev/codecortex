@@ -9,7 +9,8 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
 use cortex_mcp::{Document, TfIdfScorer};
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 
 fn generate_documents(count: usize) -> Vec<Document> {
     (0..count)

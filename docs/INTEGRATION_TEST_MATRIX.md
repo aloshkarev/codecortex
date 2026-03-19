@@ -53,13 +53,13 @@ Environment:
 Run all languages in strict one-by-one order:
 
 ```bash
-cargo test -p cortex-cli --test language_matrix_integration integration_all_languages_ordered_one_by_one -- --ignored --nocapture --test-threads=1
+nix develop -c cargo test -p cortex-cli --test language_matrix_integration integration_all_languages_ordered_one_by_one -- --ignored --nocapture --test-threads=1
 ```
 
 Run one language independently:
 
 ```bash
-cargo test -p cortex-cli --test language_matrix_integration integration_rust -- --ignored --nocapture --test-threads=1
+nix develop -c cargo test -p cortex-cli --test language_matrix_integration integration_rust -- --ignored --nocapture --test-threads=1
 ```
 
 Available per-language tests:
@@ -82,7 +82,7 @@ JSON and Shell are implemented with full parser/indexing/vector/MCP runtime supp
 Run explicit ordered full pass:
 
 ```bash
-cargo test -p cortex-cli --test language_matrix_integration integration_all_languages_ordered_one_by_one -- --ignored --nocapture --test-threads=1
+nix develop -c cargo test -p cortex-cli --test language_matrix_integration integration_all_languages_ordered_one_by_one -- --ignored --nocapture --test-threads=1
 ```
 
 ## Failure Triage
@@ -104,7 +104,7 @@ For every defect:
 
 Workflow: `.github/workflows/integration-language-matrix.yml`
 
-- `smoke` runs on PRs and pushes (tool-surface + fixture guards)
-- `real-matrix` runs only on manual dispatch with `run_real_matrix=true`
+- `smoke` runs on PRs and pushes and executes Nix-defined smoke checks (`mcpToolSurfaceGuard`, `integrationFixtureGuard`)
+- `real-matrix` runs only on manual dispatch with `run_real_matrix=true` inside `nix develop`
 - `target_language` input chooses either `all` or one explicit language test
 - real-matrix uploads log artifacts for debugging

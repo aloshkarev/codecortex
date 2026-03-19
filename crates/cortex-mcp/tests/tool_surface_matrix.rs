@@ -54,6 +54,10 @@ const FULL_SURFACE_PROFILES: &[CoverageProfile] = &[
         kind: CoverageKind::RequiresVectorStore,
     },
     CoverageProfile {
+        tool: "search_across_projects",
+        kind: CoverageKind::RequiresVectorStore,
+    },
+    CoverageProfile {
         tool: "vector_index_status",
         kind: CoverageKind::RequiresVectorStore,
     },
@@ -75,6 +79,38 @@ const FULL_SURFACE_PROFILES: &[CoverageProfile] = &[
     },
     CoverageProfile {
         tool: "analyze_code_relationships",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "go_to_definition",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "find_all_usages",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "quick_info",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "branch_structural_diff",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "pr_review",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "find_similar_across_projects",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "find_shared_dependencies",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "compare_api_surface",
         kind: CoverageKind::RequiresIndexedGraph,
     },
     CoverageProfile {

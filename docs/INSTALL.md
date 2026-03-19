@@ -4,23 +4,24 @@ This guide covers a practical setup for CodeCortex on macOS and Ubuntu/Debian.
 
 ## Requirements
 
-- Rust (stable)
+- Nix (flakes enabled, preferred)
 - Git
 - Memgraph (recommended via Docker)
 
 Optional:
 
 - Docker
+- Rust (stable, only needed for non-Nix fallback flow)
 
 ## Build and install
 
 ```bash
 git clone https://github.com/aloshkarev/codecortex.git
 cd codecortex
-cargo build --release -p cortex-cli
+nix build .#cortex
 ```
 
-For a guided install with dependency checks and retries (protoc/OpenSSL/build tools), use:
+For a guided install with dependency checks and retries, use:
 
 ```bash
 ./install.sh
@@ -34,12 +35,21 @@ For local development bootstrap with the same robustness checks:
 
 Binary:
 
-- `target/release/cortex-cli`
+- Nix build output: `result/bin/cortex`
+- Cargo fallback output: `target/release/cortex-cli`
 
 Install as `cortex`:
 
 ```bash
 mkdir -p ~/.local/bin
+cp result/bin/cortex ~/.local/bin/cortex
+chmod +x ~/.local/bin/cortex
+```
+
+Cargo fallback:
+
+```bash
+cargo build --release -p cortex-cli
 cp target/release/cortex-cli ~/.local/bin/cortex
 chmod +x ~/.local/bin/cortex
 ```
@@ -124,8 +134,8 @@ sudo apt update && sudo apt install -y build-essential
 
 ```bash
 git pull
-cargo build --release -p cortex-cli
-cp target/release/cortex-cli ~/.local/bin/cortex
+nix build .#cortex
+cp result/bin/cortex ~/.local/bin/cortex
 ```
 
 ## Uninstall

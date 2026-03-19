@@ -17,7 +17,7 @@ resolver = "2"
 [workspace.package]
 version = "1.0.1"
 edition = "2024"
-license = "MIT"
+license = "Apache-2.0"
 authors = ["Aleksandr Loskarev <mailbox@aloshkarev.com>"]
 description = "CodeCortex is a Rust code-graph service and AI productivity toolkit featuring: - **`cortex` CLI** for indexing, search, and analysis - **MCP server mode** for AI clients (Claude, Cursor, VSCode) - **Memgraph backend** (Bolt protocol) with Neo4j support - **Multi-language parsing** via tree-sitter (Rust, Python, Go, Kotlin, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Swift) - **Hybrid search** with vector embeddings - **Enhanced memory system** for AI context persistence"
 

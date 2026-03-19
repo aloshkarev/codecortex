@@ -233,33 +233,29 @@ impl GraphClient {
     /// Upsert a repository node
     pub async fn upsert_repository(&self, repository: &Repository) -> Result<()> {
         let repo_id = format!("repo:{}", repository.path);
-        let cypher = format!(
-            "MERGE (r:Repository {{path: $path}})
+        let cypher = "MERGE (r:Repository {path: $path})
              SET r:CodeNode,
                  r.id = $id,
                  r.kind = 'Repository',
                  r.name = $name,
                  r.path = $path,
-                 r.watched = toBoolean($watched)"
-        );
+                 r.watched = toBoolean($watched)";
         let params = vec![
             ("id", repo_id.clone()),
             ("path", repository.path.clone()),
             ("name", repository.name.clone()),
             ("watched", repository.watched.to_string()),
         ];
-        self.query_with_params(&cypher, params).await?;
+        self.query_with_params(cypher, params).await?;
         Ok(())
     }
 
     /// Upsert a call target node
     pub async fn upsert_call_target(&self, id: &str, name: &str) -> Result<()> {
-        let cypher = format!(
-            "MERGE (n:CallTarget {{id: $id}})
-             SET n:CodeNode, n.kind = 'CallTarget', n.name = $name"
-        );
+        let cypher = "MERGE (n:CallTarget {id: $id})
+             SET n:CodeNode, n.kind = 'CallTarget', n.name = $name";
         let params = vec![("id", id.to_string()), ("name", name.to_string())];
-        self.query_with_params(&cypher, params).await?;
+        self.query_with_params(cypher, params).await?;
         Ok(())
     }
 
@@ -303,12 +299,10 @@ impl GraphClient {
 
     /// Delete a repository and all its nodes
     pub async fn delete_repository(&self, repository_path: &str) -> Result<()> {
-        let cypher = format!(
-            "MATCH (r:Repository {{path: $path}})
+        let cypher = "MATCH (r:Repository {path: $path})
              OPTIONAL MATCH (r)-[:CONTAINS*]->(n)
-             DETACH DELETE n, r"
-        );
-        self.query_with_param(&cypher, "path", repository_path)
+             DETACH DELETE n, r";
+        self.query_with_param(cypher, "path", repository_path)
             .await?;
         Ok(())
     }

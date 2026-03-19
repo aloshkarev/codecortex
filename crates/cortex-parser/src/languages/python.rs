@@ -142,42 +142,6 @@ pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResu
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tree_sitter::Parser;
-
-    fn parse_python(source: &str) -> tree_sitter::Tree {
-        let mut parser = Parser::new();
-        parser
-            .set_language(&tree_sitter_python::LANGUAGE.into())
-            .expect("python language");
-        parser.parse(source, None).expect("python parse")
-    }
-
-    #[test]
-    fn test_parse_navigation_edges() {
-        let source = r#"
-class User:
-    id: int
-
-    def get_id(self) -> int:
-        return self.id
-"#;
-        let tree = parse_python(source);
-        let path = Path::new("user.py");
-        let result = extract(source, path, &tree);
-        assert!(result.edges.iter().any(|e| e.kind == EdgeKind::MemberOf));
-        assert!(
-            result
-                .edges
-                .iter()
-                .any(|e| e.kind == EdgeKind::TypeReference)
-        );
-        assert!(result.edges.iter().any(|e| e.kind == EdgeKind::FieldAccess));
-    }
-}
-
 fn augment_navigation_edges(
     source: &str,
     path: &Path,
@@ -283,5 +247,41 @@ fn push_edge(edges: &mut Vec<CodeEdge>, edge: CodeEdge) {
         .any(|e| e.from == edge.from && e.to == edge.to && e.kind == edge.kind);
     if !exists {
         edges.push(edge);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    fn parse_python(source: &str) -> tree_sitter::Tree {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .expect("python language");
+        parser.parse(source, None).expect("python parse")
+    }
+
+    #[test]
+    fn test_parse_navigation_edges() {
+        let source = r#"
+class User:
+    id: int
+
+    def get_id(self) -> int:
+        return self.id
+"#;
+        let tree = parse_python(source);
+        let path = Path::new("user.py");
+        let result = extract(source, path, &tree);
+        assert!(result.edges.iter().any(|e| e.kind == EdgeKind::MemberOf));
+        assert!(
+            result
+                .edges
+                .iter()
+                .any(|e| e.kind == EdgeKind::TypeReference)
+        );
+        assert!(result.edges.iter().any(|e| e.kind == EdgeKind::FieldAccess));
     }
 }

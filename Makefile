@@ -1,4 +1,4 @@
-.PHONY: all build install clean test release run-mcp run-memgraph status help mcp-bootstrap mcp-smoke measure-init measure-session-start measure-session-end measure-report measure-mcp-capture measure-bootstrap
+.PHONY: all build install clean test release run-mcp run-memgraph status help mcp-bootstrap mcp-smoke measure-init measure-session-start measure-session-end measure-report measure-mcp-capture measure-bootstrap fmt lint check nix-build nix-check
 
 # Directories
 BIN_DIR := $(HOME)/.local/bin
@@ -6,26 +6,43 @@ CONFIG_DIR := $(HOME)/.cortex
 
 # Binary
 CORTEX_BIN := $(BIN_DIR)/cortex
+NIX_BIN := $(shell command -v nix 2>/dev/null)
 
 # Default target
 all: build
 
 # Build debug binary
 build:
-	cargo build
+	@if [ -n "$(NIX_BIN)" ]; then \
+		nix build .#cortex; \
+	else \
+		cargo build; \
+	fi
 
 # Build release binary
 release:
-	cargo build --release
+	@if [ -n "$(NIX_BIN)" ]; then \
+		nix build .#cortex; \
+	else \
+		cargo build --release; \
+	fi
 
 # Run tests
 test:
-	cargo test --workspace
+	@if [ -n "$(NIX_BIN)" ]; then \
+		nix flake check --print-build-logs; \
+	else \
+		cargo test --workspace; \
+	fi
 
 # Install binary to local bin
 install: release
 	@mkdir -p $(BIN_DIR)
-	@cp target/release/cortex-cli $(CORTEX_BIN)
+	@if [ -n "$(NIX_BIN)" ]; then \
+		cp result/bin/cortex $(CORTEX_BIN); \
+	else \
+		cp target/release/cortex-cli $(CORTEX_BIN); \
+	fi
 	@chmod +x $(CORTEX_BIN)
 	@echo "Installed to $(CORTEX_BIN)"
 
@@ -139,14 +156,29 @@ status:
 
 # Format code
 fmt:
-	cargo fmt --all
+	@if [ -n "$(NIX_BIN)" ]; then \
+		nix develop -c cargo fmt --all; \
+	else \
+		cargo fmt --all; \
+	fi
 
 # Run linter
 lint:
-	cargo clippy --all-targets --all-features -- -D warnings
+	@if [ -n "$(NIX_BIN)" ]; then \
+		nix develop -c cargo clippy --all-targets --all-features -- -D warnings; \
+	else \
+		cargo clippy --all-targets --all-features -- -D warnings; \
+	fi
 
 # Run all checks (fmt, lint, test)
 check: fmt lint test
+
+# Explicit Nix build/check helpers
+nix-build:
+	nix build .#cortex
+
+nix-check:
+	nix flake check --print-build-logs
 
 # Development setup
 setup: install run-memgraph

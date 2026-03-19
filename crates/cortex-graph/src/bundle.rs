@@ -75,7 +75,7 @@ impl BundleStore {
                 edges.push(CodeEdge {
                     from,
                     to,
-                    kind: decode_edge_kind(&rel_type),
+                    kind: decode_edge_kind(rel_type),
                     properties,
                 });
             }
@@ -166,12 +166,12 @@ fn decode_node_from_json(node: &serde_json::Value) -> CodeNode {
         node
     };
     for key in &["branch", "repository_path"] {
-        if let Some(val) = src.get(*key).and_then(|v| v.as_str()) {
-            if !val.is_empty() {
-                properties
-                    .entry(key.to_string())
-                    .or_insert_with(|| val.to_string());
-            }
+        if let Some(val) = src.get(*key).and_then(|v| v.as_str())
+            && !val.is_empty()
+        {
+            properties
+                .entry(key.to_string())
+                .or_insert_with(|| val.to_string());
         }
     }
 

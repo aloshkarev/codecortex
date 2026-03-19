@@ -6,7 +6,8 @@
 //! - Cache hierarchy lookups
 
 use cortex_mcp::{CacheHierarchy, L1Cache};
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::time::Duration;
 
 fn bench_l1_cache_put(c: &mut Criterion) {

@@ -466,30 +466,30 @@ impl OllamaEmbedder {
     }
 
     fn apply_env_overrides(&mut self) {
-        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MAX_INPUT_CHARS") {
-            if let Ok(parsed) = v.parse::<usize>() {
-                self.max_input_chars = parsed.max(256);
-            }
+        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MAX_INPUT_CHARS")
+            && let Ok(parsed) = v.parse::<usize>()
+        {
+            self.max_input_chars = parsed.max(256);
         }
-        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MIN_RETRY_CHARS") {
-            if let Ok(parsed) = v.parse::<usize>() {
-                self.min_retry_chars = parsed.max(64);
-            }
+        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MIN_RETRY_CHARS")
+            && let Ok(parsed) = v.parse::<usize>()
+        {
+            self.min_retry_chars = parsed.max(64);
         }
-        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MAX_RETRY_ATTEMPTS") {
-            if let Ok(parsed) = v.parse::<usize>() {
-                self.max_retry_attempts = parsed.max(1);
-            }
+        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MAX_RETRY_ATTEMPTS")
+            && let Ok(parsed) = v.parse::<usize>()
+        {
+            self.max_retry_attempts = parsed.max(1);
         }
-        if let Ok(v) = std::env::var("CORTEX_OLLAMA_TARGET_DIMENSION") {
-            if let Ok(parsed) = v.parse::<usize>() {
-                self.target_dimension = parsed.max(1);
-            }
+        if let Ok(v) = std::env::var("CORTEX_OLLAMA_TARGET_DIMENSION")
+            && let Ok(parsed) = v.parse::<usize>()
+        {
+            self.target_dimension = parsed.max(1);
         }
-        if let Ok(v) = std::env::var("CORTEX_VECTOR_TARGET_DIM") {
-            if let Ok(parsed) = v.parse::<usize>() {
-                self.target_dimension = parsed.max(1);
-            }
+        if let Ok(v) = std::env::var("CORTEX_VECTOR_TARGET_DIM")
+            && let Ok(parsed) = v.parse::<usize>()
+        {
+            self.target_dimension = parsed.max(1);
         }
         if let Ok(v) = std::env::var("CORTEX_OLLAMA_ENABLE_BGE_QUERY_PREFIX") {
             let v = v.trim().to_ascii_lowercase();
