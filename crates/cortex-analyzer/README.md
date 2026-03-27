@@ -26,6 +26,25 @@
 - validation of glob syntax
 - include OR + exclude OR, excludes win
 
+## Profiling (smells + duplication, in-crate)
+
+The `profile_analyzer` binary mirrors the CLI’s **no-graph** smell pipeline (per file) and times `DuplicationDetector` work. Use a **release** build when measuring.
+
+```bash
+cargo run -p cortex-analyzer --release --bin profile_analyzer -- crates/cortex-analyzer/src
+```
+
+By default each file is truncated to **400 lines** for the timed phases (`CORTEX_PROFILE_MAX_LINES`); set `CORTEX_PROFILE_MAX_LINES=0` for full files (can be very slow on duplication paths).
+
+Optional bounded cross-file duplication timing:
+
+```bash
+CORTEX_PROFILE_CROSS_DUP=1 \
+  cargo run -p cortex-analyzer --release --bin profile_analyzer -- crates/cortex-analyzer/src
+```
+
+All knobs are documented in `src/bin/profile_analyzer.rs`. Use `perf` / Instruments on the hot phase before adding caches in the library.
+
 ## Smell detector notes
 
 Smell/refactoring analysis is language-aware and handles extension-specific boundaries, including Ruby `def ... end` patterns.

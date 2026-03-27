@@ -81,8 +81,9 @@ impl ProjectRegistry {
 
     /// Get the default state file path
     pub fn default_state_path() -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home)
+        std::env::var("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."))
             .join(".cortex")
             .join("project_registry.json")
     }

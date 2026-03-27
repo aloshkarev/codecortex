@@ -171,7 +171,7 @@ impl SmartDebouncer {
 
     /// Get all ready events (clearing them from the queue)
     pub fn get_ready_events(&mut self) -> Vec<DebouncedEvent> {
-        let mut ready = Vec::new();
+        let mut ready = Vec::with_capacity(self.event_queue.len());
         let now = Instant::now();
         let delay = self.calculate_delay();
 

@@ -90,23 +90,26 @@ fn start_memgraph_docker(port: u16) -> Result<()> {
     Ok(())
 }
 
-fn ollama_socket_addrs(base_url: &str) -> Option<Vec<std::net::SocketAddr>> {
-    let target = base_url
+fn ollama_resolve_target(base_url: &str) -> &str {
+    base_url
         .trim()
         .strip_prefix("http://")
         .or_else(|| base_url.trim().strip_prefix("https://"))
         .unwrap_or(base_url.trim())
-        .trim_end_matches('/');
+        .trim_end_matches('/')
+}
 
+fn ollama_socket_addrs(base_url: &str) -> Option<Vec<std::net::SocketAddr>> {
+    let target = ollama_resolve_target(base_url);
     target.to_socket_addrs().ok().map(|addrs| addrs.collect())
 }
 
 /// Check if Ollama is running by checking the configured base URL
 fn ollama_is_running(base_url: &str) -> bool {
     ollama_socket_addrs(base_url).is_some_and(|addrs| {
-        addrs.into_iter().any(|addr| {
-            TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok()
-        })
+        addrs
+            .iter()
+            .any(|addr| TcpStream::connect_timeout(addr, std::time::Duration::from_secs(2)).is_ok())
     })
 }
 

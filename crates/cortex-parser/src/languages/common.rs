@@ -26,6 +26,11 @@ pub fn entity_id(kind: &EntityKind, path: &Path, name: &str, line: u32) -> Strin
     )
 }
 
+/// Internal: entity_id from precomputed path display string to avoid repeated allocations.
+fn entity_id_display(kind: &EntityKind, path_display: &str, name: &str, line: u32) -> String {
+    format!("{}:{}:{}:{}", kind.cypher_label(), path_display, name, line)
+}
+
 pub fn node_text<'a>(node: Node<'_>, source: &'a [u8]) -> &'a str {
     std::str::from_utf8(&source[node.byte_range()]).unwrap_or_default()
 }
@@ -53,6 +58,33 @@ pub fn make_file_node(source: &str, path: &Path, lang: Language) -> CodeNode {
     }
 }
 
+/// Internal: use precomputed path_display for id and path field to avoid repeated allocations.
+fn make_file_node_display(
+    source: &str,
+    path: &Path,
+    path_display: &str,
+    lang: Language,
+) -> CodeNode {
+    let line_count = source.lines().count() as u32;
+    CodeNode {
+        id: format!("file:{path_display}"),
+        kind: EntityKind::File,
+        name: path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_string(),
+        path: Some(path_display.to_string()),
+        line_number: Some(1),
+        lang: Some(lang),
+        source: None,
+        docstring: None,
+        properties: [("line_count".into(), line_count.to_string())]
+            .into_iter()
+            .collect(),
+    }
+}
+
 fn truncate_source_snippet(source: &str, max_bytes: usize) -> String {
     if source.len() <= max_bytes {
         return source.to_string();
@@ -67,15 +99,30 @@ fn truncate_source_snippet(source: &str, max_bytes: usize) -> String {
     source[..cutoff].to_string()
 }
 
-fn make_entity_node(
+/// Inputs for [`make_entity_node_display`]; `path_display` is precomputed `path.display()` to avoid repeated allocations.
+struct EntityNodeDisplay<'a> {
     kind: EntityKind,
-    name: &str,
-    path: &Path,
+    name: &'a str,
+    path: &'a Path,
+    path_display: &'a str,
     line: u32,
     lang: Language,
-    source_snippet: Option<&str>,
+    source_snippet: Option<&'a str>,
     cyclomatic: Option<u32>,
-) -> CodeNode {
+}
+
+/// Build entity node; `path_display` is precomputed path.display() to avoid repeated allocations in hot path.
+fn make_entity_node_display(params: EntityNodeDisplay<'_>) -> CodeNode {
+    let EntityNodeDisplay {
+        kind,
+        name,
+        path,
+        path_display,
+        line,
+        lang,
+        source_snippet,
+        cyclomatic,
+    } = params;
     let mut props: HashMap<String, String> = HashMap::new();
     if let Some(cc) = cyclomatic {
         props.insert("cyclomatic_complexity".into(), cc.to_string());
@@ -88,10 +135,10 @@ fn make_entity_node(
     };
     props.insert("qualified_name".into(), qualified_name);
     CodeNode {
-        id: entity_id(&kind, path, name, line),
+        id: entity_id_display(&kind, path_display, name, line),
         kind,
         name: name.to_string(),
-        path: Some(path.display().to_string()),
+        path: Some(path_display.to_string()),
         line_number: Some(line),
         lang: Some(lang),
         source: source_snippet.map(|s| truncate_source_snippet(s, 4096)),
@@ -229,7 +276,8 @@ pub fn extract_all(
 ) -> ParseResult {
     let src = source.as_bytes();
     let root = tree.root_node();
-    let fid = file_id(path);
+    let path_display = path.display().to_string();
+    let fid = format!("file:{path_display}");
 
     let mut nodes: Vec<CodeNode> = Vec::new();
     let mut edges: Vec<CodeEdge> = Vec::new();
@@ -248,8 +296,10 @@ pub fn extract_all(
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(def_query, root, src);
         while let Some(match_) = matches.next() {
-            let caps: HashMap<u32, Node<'_>> =
-                match_.captures.iter().map(|c| (c.index, c.node)).collect();
+            let mut caps = HashMap::with_capacity(match_.captures.len());
+            for c in match_.captures.iter() {
+                caps.insert(c.index, c.node);
+            }
 
             for dc in def_capture_sets {
                 let Some(entity_node) = caps.get(&dc.entity).copied() else {
@@ -268,8 +318,16 @@ pub fn extract_all(
                 let cc = matches!(dc.kind, EntityKind::Function)
                     .then(|| cortex_core::compute_cyclomatic_complexity(snippet));
 
-                let node =
-                    make_entity_node(dc.kind.clone(), &name, path, line, lang, Some(snippet), cc);
+                let node = make_entity_node_display(EntityNodeDisplay {
+                    kind: dc.kind.clone(),
+                    name: &name,
+                    path,
+                    path_display: &path_display,
+                    line,
+                    lang,
+                    source_snippet: Some(snippet),
+                    cyclomatic: cc,
+                });
                 let nid = node.id.clone();
                 if seen_edge_ids.insert(format!("{fid}|CONTAINS|{nid}")) {
                     edges.push(contains_edge(&fid, &nid));
@@ -310,8 +368,10 @@ pub fn extract_all(
         cursor.set_byte_range(range.clone());
         let mut matches = cursor.matches(call_query, root, src);
         while let Some(m) = matches.next() {
-            let caps: HashMap<u32, Node<'_>> =
-                m.captures.iter().map(|c| (c.index, c.node)).collect();
+            let mut caps = HashMap::with_capacity(m.captures.len());
+            for c in m.captures.iter() {
+                caps.insert(c.index, c.node);
+            }
             let Some(call_node) = caps.get(&call_capture.call).copied() else {
                 continue;
             };
@@ -349,8 +409,10 @@ pub fn extract_all(
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(import_query, root, src);
         while let Some(m) = matches.next() {
-            let caps: HashMap<u32, Node<'_>> =
-                m.captures.iter().map(|c| (c.index, c.node)).collect();
+            let mut caps = HashMap::with_capacity(m.captures.len());
+            for c in m.captures.iter() {
+                caps.insert(c.index, c.node);
+            }
             let Some(mod_node) = caps.get(&import_capture.module).copied() else {
                 continue;
             };
@@ -390,8 +452,10 @@ pub fn extract_all(
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(inherit_q, root, src);
         while let Some(m) = matches.next() {
-            let caps: HashMap<u32, Node<'_>> =
-                m.captures.iter().map(|c| (c.index, c.node)).collect();
+            let mut caps = HashMap::with_capacity(m.captures.len());
+            for c in m.captures.iter() {
+                caps.insert(c.index, c.node);
+            }
             let Some(child_node) = caps.get(&inherit_cap.child).copied() else {
                 continue;
             };
@@ -435,8 +499,10 @@ pub fn extract_all(
             cursor.set_byte_range(range.clone());
             let mut matches = cursor.matches(param_q, root, src);
             while let Some(m) = matches.next() {
-                let caps: HashMap<u32, Node<'_>> =
-                    m.captures.iter().map(|c| (c.index, c.node)).collect();
+                let mut caps = HashMap::with_capacity(m.captures.len());
+                for c in m.captures.iter() {
+                    caps.insert(c.index, c.node);
+                }
                 let Some(param_node) = caps.get(&param_cap.param).copied() else {
                     continue;
                 };
@@ -451,7 +517,7 @@ pub fn extract_all(
                         id: param_id.clone(),
                         kind: EntityKind::Parameter,
                         name: param_name.clone(),
-                        path: Some(path.display().to_string()),
+                        path: Some(path_display.clone()),
                         line_number: Some(line),
                         lang: Some(lang),
                         source: None,
@@ -480,8 +546,10 @@ pub fn extract_all(
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(var_q, root, src);
         while let Some(m) = matches.next() {
-            let caps: HashMap<u32, Node<'_>> =
-                m.captures.iter().map(|c| (c.index, c.node)).collect();
+            let mut caps = HashMap::with_capacity(m.captures.len());
+            for c in m.captures.iter() {
+                caps.insert(c.index, c.node);
+            }
             let Some(var_node) = caps.get(&var_cap.var).copied() else {
                 continue;
             };
@@ -490,13 +558,13 @@ pub fn extract_all(
                 continue;
             }
             let line = var_node.start_position().row as u32 + 1;
-            let var_id = format!("var:{}:{}:{}", path.display(), var_name, line);
+            let var_id = format!("var:{}:{}:{}", path_display, var_name, line);
             if seen_node_ids.insert(var_id.clone()) {
                 nodes.push(CodeNode {
                     id: var_id.clone(),
                     kind: EntityKind::Variable,
                     name: var_name,
-                    path: Some(path.display().to_string()),
+                    path: Some(path_display.clone()),
                     line_number: Some(line),
                     lang: Some(lang),
                     source: None,
@@ -511,7 +579,7 @@ pub fn extract_all(
     }
 
     // Prepend file node
-    let mut all_nodes = vec![make_file_node(source, path, lang)];
+    let mut all_nodes = vec![make_file_node_display(source, path, &path_display, lang)];
     all_nodes.extend(nodes);
     ParseResult {
         nodes: all_nodes,

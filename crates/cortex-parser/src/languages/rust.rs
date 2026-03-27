@@ -6,6 +6,7 @@ use crate::parser_impl::ParseResult;
 use cortex_core::{CodeEdge, EdgeKind, EntityKind, Language};
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 use tree_sitter::{Query, QueryCursor, StreamingIterator};
 
 const DEF_QUERY: &str = r#"
@@ -98,100 +99,158 @@ const FIELD_ACCESS_QUERY: &str = r#"
   field: (field_identifier) @field)
 "#;
 
+fn rust_lang() -> &'static tree_sitter::Language {
+    static L: OnceLock<tree_sitter::Language> = OnceLock::new();
+    L.get_or_init(|| tree_sitter_rust::LANGUAGE.into())
+}
+
+fn def_query() -> &'static Query {
+    static Q: OnceLock<Query> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), DEF_QUERY).expect("rust def query"))
+}
+
+fn call_query() -> &'static Query {
+    static Q: OnceLock<Query> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), CALL_QUERY).expect("rust call query"))
+}
+
+fn import_query() -> &'static Query {
+    static Q: OnceLock<Query> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), IMPORT_QUERY).expect("rust import query"))
+}
+
+fn inherit_query() -> &'static Query {
+    static Q: OnceLock<Query> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), INHERIT_QUERY).expect("rust inherit query"))
+}
+
+fn param_query() -> &'static Query {
+    static Q: OnceLock<Query> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), PARAM_QUERY).expect("rust param query"))
+}
+
+fn variable_query() -> &'static Query {
+    static Q: OnceLock<Query> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), VARIABLE_QUERY).expect("rust var query"))
+}
+
+fn member_of_query() -> Option<&'static Query> {
+    static Q: OnceLock<Option<Query>> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), MEMBER_OF_QUERY).ok())
+        .as_ref()
+}
+
+fn type_ref_query() -> Option<&'static Query> {
+    static Q: OnceLock<Option<Query>> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), TYPE_REF_QUERY).ok())
+        .as_ref()
+}
+
+fn field_access_query() -> Option<&'static Query> {
+    static Q: OnceLock<Option<Query>> = OnceLock::new();
+    Q.get_or_init(|| Query::new(rust_lang(), FIELD_ACCESS_QUERY).ok())
+        .as_ref()
+}
+
+fn def_sets() -> &'static [DefCaptures] {
+    static SETS: OnceLock<Vec<DefCaptures>> = OnceLock::new();
+    SETS.get_or_init(|| {
+        let def_q = def_query();
+        vec![
+            DefCaptures {
+                entity: def_q.capture_index_for_name("entity").unwrap_or(0),
+                name: def_q.capture_index_for_name("name").unwrap_or(1),
+                kind: EntityKind::Function,
+            },
+            DefCaptures {
+                entity: def_q
+                    .capture_index_for_name("struct_entity")
+                    .unwrap_or(u32::MAX),
+                name: def_q.capture_index_for_name("name").unwrap_or(1),
+                kind: EntityKind::Struct,
+            },
+            DefCaptures {
+                entity: def_q
+                    .capture_index_for_name("enum_entity")
+                    .unwrap_or(u32::MAX),
+                name: def_q.capture_index_for_name("name").unwrap_or(1),
+                kind: EntityKind::Enum,
+            },
+            DefCaptures {
+                entity: def_q
+                    .capture_index_for_name("trait_entity")
+                    .unwrap_or(u32::MAX),
+                name: def_q.capture_index_for_name("name").unwrap_or(1),
+                kind: EntityKind::Trait,
+            },
+            DefCaptures {
+                entity: def_q
+                    .capture_index_for_name("impl_entity")
+                    .unwrap_or(u32::MAX),
+                name: def_q.capture_index_for_name("name").unwrap_or(1),
+                kind: EntityKind::Module,
+            },
+            DefCaptures {
+                entity: def_q
+                    .capture_index_for_name("type_alias_entity")
+                    .unwrap_or(u32::MAX),
+                name: def_q.capture_index_for_name("name").unwrap_or(1),
+                kind: EntityKind::TypeAlias,
+            },
+            DefCaptures {
+                entity: def_q
+                    .capture_index_for_name("const_entity")
+                    .unwrap_or(u32::MAX),
+                name: def_q.capture_index_for_name("name").unwrap_or(1),
+                kind: EntityKind::Constant,
+            },
+            DefCaptures {
+                entity: def_q
+                    .capture_index_for_name("macro_entity")
+                    .unwrap_or(u32::MAX),
+                name: def_q.capture_index_for_name("name").unwrap_or(1),
+                kind: EntityKind::Macro,
+            },
+        ]
+    })
+}
+
 pub fn extract(source: &str, path: &Path, tree: &tree_sitter::Tree) -> ParseResult {
-    let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
-
-    let def_q = Query::new(&lang, DEF_QUERY).expect("rust def query");
-    let call_q = Query::new(&lang, CALL_QUERY).expect("rust call query");
-    let import_q = Query::new(&lang, IMPORT_QUERY).expect("rust import query");
-    let inherit_q = Query::new(&lang, INHERIT_QUERY).expect("rust inherit query");
-    let param_q = Query::new(&lang, PARAM_QUERY).expect("rust param query");
-    let var_q = Query::new(&lang, VARIABLE_QUERY).expect("rust var query");
-
-    let def_sets = vec![
-        DefCaptures {
-            entity: def_q.capture_index_for_name("entity").unwrap_or(0),
-            name: def_q.capture_index_for_name("name").unwrap_or(1),
-            kind: EntityKind::Function,
-        },
-        DefCaptures {
-            entity: def_q
-                .capture_index_for_name("struct_entity")
-                .unwrap_or(u32::MAX),
-            name: def_q.capture_index_for_name("name").unwrap_or(1),
-            kind: EntityKind::Struct,
-        },
-        DefCaptures {
-            entity: def_q
-                .capture_index_for_name("enum_entity")
-                .unwrap_or(u32::MAX),
-            name: def_q.capture_index_for_name("name").unwrap_or(1),
-            kind: EntityKind::Enum,
-        },
-        DefCaptures {
-            entity: def_q
-                .capture_index_for_name("trait_entity")
-                .unwrap_or(u32::MAX),
-            name: def_q.capture_index_for_name("name").unwrap_or(1),
-            kind: EntityKind::Trait,
-        },
-        DefCaptures {
-            entity: def_q
-                .capture_index_for_name("impl_entity")
-                .unwrap_or(u32::MAX),
-            name: def_q.capture_index_for_name("name").unwrap_or(1),
-            kind: EntityKind::Module,
-        },
-        DefCaptures {
-            entity: def_q
-                .capture_index_for_name("type_alias_entity")
-                .unwrap_or(u32::MAX),
-            name: def_q.capture_index_for_name("name").unwrap_or(1),
-            kind: EntityKind::TypeAlias,
-        },
-        DefCaptures {
-            entity: def_q
-                .capture_index_for_name("const_entity")
-                .unwrap_or(u32::MAX),
-            name: def_q.capture_index_for_name("name").unwrap_or(1),
-            kind: EntityKind::Constant,
-        },
-        DefCaptures {
-            entity: def_q
-                .capture_index_for_name("macro_entity")
-                .unwrap_or(u32::MAX),
-            name: def_q.capture_index_for_name("name").unwrap_or(1),
-            kind: EntityKind::Macro,
-        },
-    ];
+    let def_q = def_query();
+    let call_q = call_query();
+    let import_q = import_query();
+    let inherit_q = inherit_query();
+    let param_q = param_query();
+    let var_q = variable_query();
+    let def_sets = def_sets();
 
     let mut result = extract_all(
         source,
         path,
         Language::Rust,
         tree,
-        &def_q,
-        &def_sets,
-        &call_q,
+        def_q,
+        def_sets,
+        call_q,
         &CallCaptures {
             call: call_q.capture_index_for_name("call").unwrap_or(0),
         },
-        &import_q,
+        import_q,
         &ImportCaptures {
             module: import_q.capture_index_for_name("module").unwrap_or(0),
             method_filter: None,
         },
-        Some(&inherit_q),
+        Some(inherit_q),
         Some(&InheritCaptures {
             child: inherit_q.capture_index_for_name("child").unwrap_or(0),
             parent: inherit_q.capture_index_for_name("parent").unwrap_or(1),
             edge_kind: EdgeKind::Implements,
         }),
-        Some(&param_q),
+        Some(param_q),
         Some(&ParamCaptures {
             param: param_q.capture_index_for_name("param").unwrap_or(0),
         }),
-        Some(&var_q),
+        Some(var_q),
         Some(&VariableCaptures {
             var: var_q.capture_index_for_name("var").unwrap_or(0),
         }),
@@ -207,15 +266,14 @@ fn augment_navigation_edges(
     tree: &tree_sitter::Tree,
     result: &mut ParseResult,
 ) {
-    let lang: tree_sitter::Language = tree_sitter_rust::LANGUAGE.into();
     let src = source.as_bytes();
     let root = tree.root_node();
     let fid = file_id(path);
 
     // MEMBER_OF edges from impl methods to parent type.
-    if let Ok(member_q) = Query::new(&lang, MEMBER_OF_QUERY) {
+    if let Some(member_q) = member_of_query() {
         let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&member_q, root, src);
+        let mut matches = cursor.matches(member_q, root, src);
         while let Some(m) = matches.next() {
             let mut parent_name = None::<String>;
             let mut method_name = None::<String>;
@@ -266,9 +324,9 @@ fn augment_navigation_edges(
     }
 
     // TYPE_REFERENCE edges from file node to placeholder targets.
-    if let Ok(type_q) = Query::new(&lang, TYPE_REF_QUERY) {
+    if let Some(type_q) = type_ref_query() {
         let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&type_q, root, src);
+        let mut matches = cursor.matches(type_q, root, src);
         while let Some(m) = matches.next() {
             for cap in m.captures.iter() {
                 let name = super::common::node_text(cap.node, src).trim().to_string();
@@ -289,9 +347,9 @@ fn augment_navigation_edges(
     }
 
     // FIELD_ACCESS edges from file node to placeholder targets.
-    if let Ok(field_q) = Query::new(&lang, FIELD_ACCESS_QUERY) {
+    if let Some(field_q) = field_access_query() {
         let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(&field_q, root, src);
+        let mut matches = cursor.matches(field_q, root, src);
         while let Some(m) = matches.next() {
             for cap in m.captures.iter() {
                 let name = super::common::node_text(cap.node, src).trim().to_string();

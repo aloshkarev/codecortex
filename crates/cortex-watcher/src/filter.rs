@@ -99,8 +99,6 @@ impl FilterRule {
                 let prefix = parts[0].trim_end_matches('/');
                 let suffix = parts[1].trim_start_matches('/');
 
-                let path_str = path_str.to_string();
-
                 // Check prefix
                 if !prefix.is_empty() && !path_str.starts_with(prefix) {
                     // Check if any path component matches
@@ -119,7 +117,7 @@ impl FilterRule {
                     return path_str.ends_with(suffix)
                         || path
                             .extension()
-                            .map(|e| suffix.contains(&e.to_string_lossy().to_string()))
+                            .map(|e| suffix.contains(e.to_string_lossy().as_ref()))
                             .unwrap_or(false);
                 }
 

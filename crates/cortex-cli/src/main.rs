@@ -83,7 +83,7 @@ use owo_colors::OwoColorize;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -3039,15 +3039,19 @@ fn parse_hunk_range(line: &str) -> Option<ReviewLineRange> {
 }
 
 fn encode_path_component(input: &str) -> String {
-    input
-        .bytes()
-        .map(|b| match b {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(input.len());
+    for b in input.bytes() {
+        match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (b as char).to_string()
+                out.push(b as char);
             }
-            _ => format!("%{b:02X}"),
-        })
-        .collect::<String>()
+            _ => {
+                let _ = write!(&mut out, "%{b:02X}");
+            }
+        }
+    }
+    out
 }
 
 fn resolve_analysis_repo_path(path: Option<&Path>) -> anyhow::Result<PathBuf> {
@@ -3381,13 +3385,19 @@ async fn build_project_context(config: &CortexConfig) -> anyhow::Result<ProjectA
         .map_err(|e| anyhow::anyhow!(e.to_string()))
 }
 
+fn path_for_filter_match(path: &Path) -> std::borrow::Cow<'_, str> {
+    path.to_str()
+        .map(std::borrow::Cow::Borrowed)
+        .unwrap_or_else(|| path.display().to_string().into())
+}
+
 fn collect_analyzable_files(
     root: &Path,
     max_files: usize,
     filters: &AnalyzePathFilters,
 ) -> anyhow::Result<Vec<PathBuf>> {
     if root.is_file() {
-        if is_analyzable_file(root) && filters.matches_path(&root.display().to_string()) {
+        if is_analyzable_file(root) && filters.matches_path(path_for_filter_match(root).as_ref()) {
             return Ok(vec![root.to_path_buf()]);
         }
         return Ok(Vec::new());
@@ -3411,7 +3421,8 @@ fn collect_analyzable_files(
         }
 
         if metadata.is_file() {
-            if is_analyzable_file(&current) && filters.matches_path(&current.display().to_string())
+            if is_analyzable_file(&current)
+                && filters.matches_path(path_for_filter_match(&current).as_ref())
             {
                 files.push(current);
             }
@@ -3448,15 +3459,20 @@ fn should_skip_dir(path: &Path, filters: &AnalyzePathFilters) -> bool {
         .and_then(|name| name.to_str())
         .map(|name| ANALYZE_SKIP_DIRS.contains(&name))
         .unwrap_or(false);
-    built_in_skip || filters.is_excluded_path(&path.display().to_string())
+    let excluded = match path.to_str() {
+        Some(s) => filters.is_excluded_path(s),
+        None => filters.is_excluded_path(&path.display().to_string()),
+    };
+    built_in_skip || excluded
 }
 
 fn is_analyzable_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| {
-            let lower = ext.to_ascii_lowercase();
-            ANALYZE_EXTENSIONS.contains(&lower.as_str())
+            ANALYZE_EXTENSIONS
+                .iter()
+                .any(|&cand| ext.eq_ignore_ascii_case(cand))
         })
         .unwrap_or(false)
 }
@@ -4738,13 +4754,14 @@ fn print_objects_as_table(items: &[serde_json::Value]) -> anyhow::Result<()> {
     table.load_preset(UTF8_FULL);
     table.set_content_arrangement(ContentArrangement::Dynamic);
 
-    // Collect all unique keys from all objects
+    // Collect all unique keys from all objects (O(n) vs O(n²) with Vec::contains)
+    let mut seen = HashSet::new();
     let mut headers: Vec<&str> = Vec::new();
     for item in items {
         if let serde_json::Value::Object(map) = item {
             for key in map.keys() {
-                if !headers.contains(&key.as_str()) {
-                    headers.push(key);
+                if seen.insert(key.as_str()) {
+                    headers.push(key.as_str());
                 }
             }
         }

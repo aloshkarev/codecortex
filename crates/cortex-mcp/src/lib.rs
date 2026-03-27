@@ -1,6 +1,6 @@
 //! # CodeCortex MCP Server Library
 //!
-//! Model Context Protocol server implementation with 46 production-ready tools.
+//! Model Context Protocol server implementation with a broad set of production-ready tools.
 //!
 //! ## Overview
 //!
@@ -50,7 +50,7 @@
 //! // Tools are automatically registered and available to MCP clients
 //! let tools = cortex_mcp::tool_names();
 //! assert!(!tools.is_empty());
-//! assert_eq!(tools.len(), 46);
+//! assert_eq!(tools.len(), cortex_mcp::tool_catalog::TOOL_NAMES.len());
 //! ```
 //!
 //! ## Quality Metrics
@@ -98,6 +98,7 @@ pub mod quality;
 mod server;
 mod telemetry;
 mod tfidf;
+pub mod tool_catalog;
 mod vector_service;
 
 pub use cache::{CacheHierarchy, CacheStats, L1Cache, L2Cache};
@@ -131,71 +132,10 @@ pub use telemetry::{TelemetryCollector, TelemetryRegistry, ToolTelemetry};
 pub use tfidf::{Document, TfIdfScorer, tokenize};
 pub use vector_service::{VectorIndexResult, VectorService};
 
-/// Names of all tools this server exposes.
+/// Names of all tools this server exposes (alphabetically sorted; same as MCP registration).
+#[must_use]
 pub fn tool_names() -> &'static [&'static str] {
-    &[
-        "add_code_to_graph",
-        "watch_directory",
-        "get_context_capsule",
-        "get_impact_graph",
-        "search_logic_flow",
-        "get_skeleton",
-        "get_signature",
-        "find_tests",
-        "explain_result",
-        "analyze_refactoring",
-        "diagnose",
-        "find_patterns",
-        "index_status",
-        "workspace_setup",
-        "submit_lsp_edges",
-        "save_observation",
-        "get_session_context",
-        "search_memory",
-        "find_code",
-        "analyze_code_relationships",
-        "execute_cypher_query",
-        "find_dead_code",
-        "go_to_definition",
-        "find_all_usages",
-        "quick_info",
-        "branch_structural_diff",
-        "pr_review",
-        "find_similar_across_projects",
-        "find_shared_dependencies",
-        "compare_api_surface",
-        "calculate_cyclomatic_complexity",
-        "vector_index_repository",
-        "vector_index_file",
-        "vector_search",
-        "vector_search_hybrid",
-        "search_across_projects",
-        "vector_index_status",
-        "vector_delete_repository",
-        "list_indexed_repositories",
-        "delete_repository",
-        "check_job_status",
-        "list_jobs",
-        "list_watched_paths",
-        "unwatch_directory",
-        "load_bundle",
-        "export_bundle",
-        "get_repository_stats",
-        "check_health",
-        // Project management tools
-        "list_projects",
-        "add_project",
-        "remove_project",
-        "set_current_project",
-        "get_current_project",
-        "list_branches",
-        "refresh_project",
-        "project_status",
-        "project_sync",
-        "project_branch_diff",
-        "project_queue_status",
-        "project_metrics",
-    ]
+    tool_catalog::TOOL_NAMES
 }
 
 #[cfg(test)]
@@ -226,5 +166,104 @@ mod tests {
         assert!(tools.contains(&"vector_search"));
         assert!(tools.contains(&"vector_search_hybrid"));
         assert!(tools.contains(&"vector_index_status"));
+    }
+}
+
+#[cfg(test)]
+mod tool_metadata_contract {
+    use super::tool_catalog::{self, ToolHints};
+    use crate::handler::CortexHandler;
+    use cortex_core::config::CortexConfig;
+    use rmcp::{ServerHandler, model::Tool};
+
+    #[test]
+    fn initialize_instructions_include_resource_uri() {
+        let h = CortexHandler::new(CortexConfig::default());
+        let info = h.get_info();
+        let inst = info
+            .instructions
+            .as_ref()
+            .expect("server should expose instructions");
+        assert!(inst.len() > 200, "instructions should be substantive");
+        assert!(
+            inst.contains(tool_catalog::TOOL_ROUTING_RESOURCE_URI),
+            "instructions should point agents at the routing resource"
+        );
+    }
+
+    #[test]
+    fn tool_definitions_align_with_catalog() {
+        let h = CortexHandler::new(CortexConfig::default());
+        let mut tools: Vec<Tool> = h.tool_definitions_for_test();
+        tools.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(
+            tools.len(),
+            tool_catalog::TOOL_NAMES.len(),
+            "handler and catalog must expose the same tool count"
+        );
+        for (tool, expected_name) in tools.iter().zip(tool_catalog::TOOL_NAMES.iter()) {
+            assert_eq!(
+                tool.name.as_ref(),
+                *expected_name,
+                "tool list ordering / membership drift"
+            );
+            let desc = tool.description.as_deref().unwrap_or("");
+            assert!(
+                desc.len() >= 48,
+                "tool {:?} should have a substantive description",
+                tool.name
+            );
+            let hints: ToolHints = tool_catalog::hints_for(expected_name)
+                .unwrap_or_else(|| panic!("catalog missing hints for {expected_name}"));
+            let ann = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("tool {:?} missing annotations", tool.name));
+            assert_eq!(
+                ann.read_only_hint,
+                Some(hints.read_only),
+                "read_only_hint mismatch for {:?}",
+                tool.name
+            );
+            assert_eq!(
+                ann.open_world_hint,
+                Some(hints.open_world),
+                "open_world_hint mismatch for {:?}",
+                tool.name
+            );
+            if hints.destructive {
+                assert_eq!(
+                    ann.destructive_hint,
+                    Some(true),
+                    "expected destructive for {:?}",
+                    tool.name
+                );
+            } else {
+                assert_ne!(
+                    ann.destructive_hint,
+                    Some(true),
+                    "unexpected destructive for {:?}",
+                    tool.name
+                );
+            }
+            // idempotent_hint is only meaningful when read_only_hint is false (per MCP notes).
+            if !hints.read_only {
+                if hints.idempotent {
+                    assert_eq!(
+                        ann.idempotent_hint,
+                        Some(true),
+                        "expected idempotent for {:?}",
+                        tool.name
+                    );
+                } else {
+                    assert_ne!(
+                        ann.idempotent_hint,
+                        Some(true),
+                        "unexpected idempotent for {:?}",
+                        tool.name
+                    );
+                }
+            }
+        }
     }
 }

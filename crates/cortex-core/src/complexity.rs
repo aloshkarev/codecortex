@@ -1,12 +1,23 @@
-pub fn compute_cyclomatic_complexity(source: &str) -> u32 {
-    const TOKENS: &[&str] = &[
-        "if ", "else if", "for ", "while ", "match ", "case ", "&&", "||", "?",
-    ];
+/// Prefixes that add one to cyclomatic complexity when scanned byte-by-byte.
+/// Order matters: longer tokens (e.g. `else if`) must precede shorter ones (`if `).
+const CYCLOMATIC_TOKEN_PREFIXES: &[&str] = &[
+    "else if", "if ", "for ", "while ", "match ", "case ", "&&", "||",
+];
 
+pub fn compute_cyclomatic_complexity(source: &str) -> u32 {
     let mut complexity = 1u32;
-    for token in TOKENS {
-        let count = source.matches(token).count() as u32;
-        complexity = complexity.saturating_add(count);
+    let mut i = 0;
+    let bytes = source.as_bytes();
+    while i < bytes.len() {
+        let rest = &source[i..];
+        if CYCLOMATIC_TOKEN_PREFIXES
+            .iter()
+            .any(|prefix| rest.starts_with(prefix))
+            || rest.starts_with('?')
+        {
+            complexity = complexity.saturating_add(1);
+        }
+        i += 1;
     }
     complexity
 }
@@ -23,29 +34,20 @@ pub fn compute_cyclomatic_complexity(source: &str) -> u32 {
 pub fn compute_cognitive_complexity(source: &str) -> u32 {
     let mut complexity = 0u32;
     let mut nesting_level = 0u32;
-    let chars: Vec<char> = source.chars().collect();
+    let mut char_indices = source.char_indices().peekable();
 
-    let mut i = 0;
-    while i < chars.len() {
+    while let Some((byte_start, ch)) = char_indices.next() {
+        let trimmed = source[byte_start..].trim_start();
+
         // Check for control structures that increase complexity
-        let remaining: String = chars[i..].iter().collect();
-        let trimmed = remaining.trim_start();
-
-        // Check for if statements
         if trimmed.starts_with("if ") || trimmed.starts_with("if(") {
             complexity += 1 + nesting_level;
             nesting_level += 1;
-        }
-        // Check for else if (don't double count)
-        else if trimmed.starts_with("else if") {
-            complexity += 1; // No nesting increment for else-if chain
-        }
-        // Check for else (without "if") - no complexity increment, just avoid matching elsewhere
-        else if trimmed.starts_with("else") && !trimmed.starts_with("else if") {
-            // else alone doesn't add complexity, but we track for nesting
-        }
-        // Check for loops
-        else if trimmed.starts_with("for ")
+        } else if trimmed.starts_with("else if") {
+            complexity += 1;
+        } else if trimmed.starts_with("else") && !trimmed.starts_with("else if") {
+            // else alone doesn't add complexity
+        } else if trimmed.starts_with("for ")
             || trimmed.starts_with("for(")
             || trimmed.starts_with("while ")
             || trimmed.starts_with("while(")
@@ -60,33 +62,24 @@ pub fn compute_cognitive_complexity(source: &str) -> u32 {
             nesting_level += 1;
         } else if trimmed.starts_with("case ") {
             complexity += 1;
-        }
-        // Check for try (not counted, but starts a block)
-        else if trimmed.starts_with("try ") || trimmed.starts_with("try{") {
+        } else if trimmed.starts_with("try ") || trimmed.starts_with("try{") {
             nesting_level += 1;
         }
 
-        // Track nesting level via braces
-        if chars[i] == '}' && nesting_level > 0 {
+        if ch == '}' && nesting_level > 0 {
             nesting_level = nesting_level.saturating_sub(1);
         }
-        // '{' is already accounted for in control structure handling above
 
-        // Check for logical operators (add complexity for && and ||)
-        if i + 1 < chars.len()
-            && ((chars[i] == '&' && chars[i + 1] == '&')
-                || (chars[i] == '|' && chars[i + 1] == '|'))
+        if let Some(&(_, next_ch)) = char_indices.peek()
+            && ((ch == '&' && next_ch == '&') || (ch == '|' && next_ch == '|'))
         {
             complexity += 1;
-            i += 1; // Skip next char
+            char_indices.next();
         }
 
-        // Check for ternary operator
-        if chars[i] == '?' {
+        if ch == '?' {
             complexity += 1 + nesting_level;
         }
-
-        i += 1;
     }
 
     complexity

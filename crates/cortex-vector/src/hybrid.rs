@@ -11,7 +11,7 @@
 
 use crate::{Embedder, MetadataValue, SearchResult, VectorStore};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// Search type for hybrid queries
@@ -231,6 +231,7 @@ impl HybridSearch {
                     .await?
             }
             Some(repos) => {
+                let repo_set: HashSet<&str> = repos.iter().map(|s| s.as_str()).collect();
                 let all_results = self
                     .vector_store
                     .search(embedding, k * 3 * repos.len())
@@ -244,7 +245,7 @@ impl HybridSearch {
                                 MetadataValue::String(s) => Some(s.as_str()),
                                 _ => None,
                             })
-                            .is_some_and(|repo| repos.iter().any(|r| r == repo))
+                            .is_some_and(|repo| repo_set.contains(repo))
                     })
                     .collect()
             }

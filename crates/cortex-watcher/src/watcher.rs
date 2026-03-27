@@ -68,7 +68,12 @@ impl WatchSession {
     pub async fn run(self, indexer: Indexer) -> Result<()> {
         info!("Starting file watcher");
         let (tx, mut rx) = mpsc::channel::<PathBuf>(128);
-        let watched_roots: Vec<PathBuf> = self.list().into_iter().map(canonicalize_lossy).collect();
+        let watched_paths = self.list();
+        let watched_roots: Vec<PathBuf> = watched_paths
+            .iter()
+            .cloned()
+            .map(canonicalize_lossy)
+            .collect();
         let mut branch_state: HashMap<PathBuf, (String, String)> = HashMap::new();
 
         let mut debouncer = new_debouncer(
@@ -86,7 +91,7 @@ impl WatchSession {
             CortexError::Io(e.to_string())
         })?;
 
-        for path in self.list() {
+        for path in watched_paths {
             debouncer
                 .watcher()
                 .watch(path.as_path(), RecursiveMode::Recursive)
@@ -451,7 +456,12 @@ impl SmartWatchSession {
     pub async fn run(self, indexer: Indexer) -> Result<()> {
         info!("Starting smart file watcher");
         let (tx, mut rx) = mpsc::channel::<PathBuf>(128);
-        let watched_roots: Vec<PathBuf> = self.list().into_iter().map(canonicalize_lossy).collect();
+        let watched_paths = self.list();
+        let watched_roots: Vec<PathBuf> = watched_paths
+            .iter()
+            .cloned()
+            .map(canonicalize_lossy)
+            .collect();
         let mut branch_state: HashMap<PathBuf, (String, String)> = HashMap::new();
 
         let mut debouncer = new_debouncer(
@@ -469,7 +479,7 @@ impl SmartWatchSession {
             CortexError::Io(e.to_string())
         })?;
 
-        for path in self.list() {
+        for path in watched_paths {
             debouncer
                 .watcher()
                 .watch(path.as_path(), RecursiveMode::Recursive)

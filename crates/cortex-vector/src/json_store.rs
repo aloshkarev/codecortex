@@ -22,7 +22,7 @@ use crate::{
     MetadataValue, SearchResult, VectorDocument, VectorError, VectorMetadata, VectorStore,
 };
 use async_trait::async_trait;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -96,9 +96,18 @@ impl JsonStore {
             return 0.0;
         }
 
-        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-        let mag_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-        let mag_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let mut dot = 0.0f32;
+        let mut mag_a = 0.0f32;
+        let mut mag_b = 0.0f32;
+        for i in 0..a.len() {
+            let x = a[i];
+            let y = b[i];
+            dot += x * y;
+            mag_a += x * x;
+            mag_b += y * y;
+        }
+        let mag_a = mag_a.sqrt();
+        let mag_b = mag_b.sqrt();
 
         if mag_a == 0.0 || mag_b == 0.0 {
             return 0.0;
@@ -223,8 +232,8 @@ impl VectorStore for JsonStore {
         let mut data = self.data.write().await;
 
         // Remove existing documents with same IDs
-        let ids: Vec<&str> = documents.iter().map(|d| d.id.as_str()).collect();
-        data.retain(|d| !ids.contains(&d.id.as_str()));
+        let ids: HashSet<&str> = documents.iter().map(|d| d.id.as_str()).collect();
+        data.retain(|d| !ids.contains(d.id.as_str()));
 
         // Add new documents
         let count = documents.len();

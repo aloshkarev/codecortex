@@ -79,10 +79,12 @@ impl std::str::FromStr for EmbeddingProvider {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "openai" => Ok(Self::OpenAI),
-            "ollama" => Ok(Self::Ollama),
-            _ => Err(format!("Unknown embedding provider: {}", s)),
+        if s.eq_ignore_ascii_case("openai") {
+            Ok(Self::OpenAI)
+        } else if s.eq_ignore_ascii_case("ollama") {
+            Ok(Self::Ollama)
+        } else {
+            Err(format!("Unknown embedding provider: {}", s))
         }
     }
 }
@@ -409,13 +411,13 @@ impl OllamaEmbedder {
     }
 
     /// Pad embedding to target dimension
-    fn pad_embedding(&self, embedding: Vec<f32>) -> Vec<f32> {
+    fn pad_embedding(&self, mut embedding: Vec<f32>) -> Vec<f32> {
         if embedding.len() >= self.target_dimension {
-            embedding[..self.target_dimension].to_vec()
+            embedding.truncate(self.target_dimension);
+            embedding
         } else {
-            let mut padded = embedding;
-            padded.resize(self.target_dimension, 0.0);
-            padded
+            embedding.resize(self.target_dimension, 0.0);
+            embedding
         }
     }
 
@@ -428,9 +430,10 @@ impl OllamaEmbedder {
     }
 
     fn is_bge_m3_model_name(model: &str) -> bool {
-        model
-            .to_ascii_lowercase()
-            .starts_with(Self::BGE_M3_MODEL_PREFIX)
+        let m = model.trim_start();
+        let prefix = Self::BGE_M3_MODEL_PREFIX.as_bytes();
+        let b = m.as_bytes();
+        b.len() >= prefix.len() && b[..prefix.len()].eq_ignore_ascii_case(prefix)
     }
 
     fn is_bge_m3_model(&self) -> bool {

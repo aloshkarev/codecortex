@@ -1,7 +1,15 @@
 use crate::{CortexError, Result};
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
+
+/// Resolve config base directory (HOME or ".") without allocating a String for HOME.
+fn config_home() -> PathBuf {
+    env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
 
 /// Connection pool configuration
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -173,8 +181,7 @@ impl Default for CortexConfig {
 impl CortexConfig {
     /// Get the configuration file path
     pub fn config_path() -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".cortex/config.toml")
+        config_home().join(".cortex/config.toml")
     }
 
     /// Ensure the parent directory exists

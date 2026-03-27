@@ -22,16 +22,19 @@ enum SourceLanguage {
 
 impl SourceLanguage {
     fn from_file_path(path: &str) -> Self {
-        let ext = Path::new(path)
-            .extension()
-            .and_then(|s| s.to_str())
-            .map(|s| s.to_ascii_lowercase());
-        match ext.as_deref() {
-            Some("py") => Self::Python,
-            Some("rb") => Self::Ruby,
-            Some("php") => Self::Php,
-            Some("sh") | Some("bash") | Some("zsh") => Self::Shell,
-            Some("json") => Self::Json,
+        let ext = Path::new(path).extension().and_then(|s| s.to_str());
+        match ext {
+            Some(e) if e.eq_ignore_ascii_case("py") => Self::Python,
+            Some(e) if e.eq_ignore_ascii_case("rb") => Self::Ruby,
+            Some(e) if e.eq_ignore_ascii_case("php") => Self::Php,
+            Some(e)
+                if e.eq_ignore_ascii_case("sh")
+                    || e.eq_ignore_ascii_case("bash")
+                    || e.eq_ignore_ascii_case("zsh") =>
+            {
+                Self::Shell
+            }
+            Some(e) if e.eq_ignore_ascii_case("json") => Self::Json,
             _ => Self::Unknown,
         }
     }

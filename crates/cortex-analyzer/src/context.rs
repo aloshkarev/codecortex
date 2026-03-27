@@ -109,7 +109,14 @@ impl ProjectAnalysisContext {
     ) -> Result<ProjectSymbolIndex> {
         let mut index = ProjectSymbolIndex::default();
 
-        let definitions_rows = query_definitions(graph, repository_path, branch).await?;
+        let (definitions_rows, type_rows, call_rows, import_rows, module_rows) = tokio::try_join!(
+            query_definitions(graph, repository_path, branch),
+            query_type_definitions(graph, repository_path, branch),
+            query_calls(graph, repository_path, branch),
+            query_imports(graph, repository_path, branch),
+            query_module_dependencies(graph, repository_path, branch),
+        )?;
+
         for row in definitions_rows {
             let Some(name) = row.get("name").and_then(|v| v.as_str()) else {
                 continue;
@@ -143,7 +150,6 @@ impl ProjectAnalysisContext {
             }
         }
 
-        let type_rows = query_type_definitions(graph, repository_path, branch).await?;
         for row in type_rows {
             let Some(name) = row.get("name").and_then(|v| v.as_str()) else {
                 continue;
@@ -153,7 +159,6 @@ impl ProjectAnalysisContext {
             }
         }
 
-        let call_rows = query_calls(graph, repository_path, branch).await?;
         for row in call_rows {
             let Some(caller_name) = row.get("caller_name").and_then(|v| v.as_str()) else {
                 continue;
@@ -174,7 +179,6 @@ impl ProjectAnalysisContext {
                 .insert(callee_name.to_string());
         }
 
-        let import_rows = query_imports(graph, repository_path, branch).await?;
         for row in import_rows {
             let Some(file_path) = row.get("file_path").and_then(|v| v.as_str()) else {
                 continue;
@@ -190,7 +194,6 @@ impl ProjectAnalysisContext {
                 .push(module_name.to_string());
         }
 
-        let module_rows = query_module_dependencies(graph, repository_path, branch).await?;
         for row in module_rows {
             let Some(from_module) = row.get("from_module").and_then(|v| v.as_str()) else {
                 continue;

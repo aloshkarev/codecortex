@@ -377,7 +377,7 @@ impl MemgraphClient {
 
     /// Convert a Memgraph record to JSON
     fn record_to_json(columns: &[String], record: &Record) -> JsonValue {
-        let mut obj = serde_json::Map::new();
+        let mut obj = serde_json::Map::with_capacity(columns.len());
         for (i, col) in columns.iter().enumerate() {
             let value = if i < record.values.len() {
                 Self::mg_value_to_json(&record.values[i])

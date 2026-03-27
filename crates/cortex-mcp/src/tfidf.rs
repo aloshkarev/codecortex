@@ -8,12 +8,36 @@
 use std::collections::{HashMap, HashSet};
 
 /// Tokenize text into terms
+///
+/// For all-ASCII input, lowercases per character (no full-string `to_lowercase`
+/// allocation). Non-ASCII text uses `str::to_lowercase()` so Unicode special-case
+/// rules (e.g. Greek final sigma) match `str` semantics.
 pub fn tokenize(text: &str) -> Vec<String> {
-    text.to_lowercase()
-        .split(|c: char| !c.is_alphanumeric() && c != '_')
-        .filter(|s| !s.is_empty() && s.len() > 1)
-        .map(|s| s.to_string())
-        .collect()
+    if text.is_ascii() {
+        let mut out = Vec::new();
+        let mut token = String::new();
+        for c in text.chars() {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                token.push(c.to_ascii_lowercase());
+            } else if !token.is_empty() {
+                if token.len() > 1 {
+                    out.push(std::mem::take(&mut token));
+                } else {
+                    token.clear();
+                }
+            }
+        }
+        if token.len() > 1 {
+            out.push(token);
+        }
+        out
+    } else {
+        text.to_lowercase()
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|s| !s.is_empty() && s.len() > 1)
+            .map(|s| s.to_string())
+            .collect()
+    }
 }
 
 /// Calculate term frequency for a document

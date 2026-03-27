@@ -157,7 +157,7 @@ impl ConnectionPool {
         }
 
         // Try to get an idle connection
-        let conn = {
+        {
             let mut idle = self.idle.lock().await;
             while let Some(mut conn) = idle.pop() {
                 // Check if connection is still valid
@@ -181,15 +181,6 @@ impl ConnectionPool {
                 stats.connections_closed += 1;
                 stats.idle_connections = idle.len();
             }
-            None
-        };
-
-        if conn.is_some() {
-            return Ok(PoolConnectionGuard {
-                conn,
-                permit,
-                pool: self,
-            });
         }
 
         // Create a new connection

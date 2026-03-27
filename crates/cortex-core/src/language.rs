@@ -36,21 +36,43 @@ impl FromStr for Language {
     type Err = ParseLanguageError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "rust" => Ok(Self::Rust),
-            "c" => Ok(Self::C),
-            "cpp" | "c++" | "cc" => Ok(Self::Cpp),
-            "python" | "py" => Ok(Self::Python),
-            "go" | "golang" => Ok(Self::Go),
-            "typescript" | "ts" => Ok(Self::TypeScript),
-            "javascript" | "js" => Ok(Self::JavaScript),
-            "java" => Ok(Self::Java),
-            "php" => Ok(Self::Php),
-            "ruby" | "rb" => Ok(Self::Ruby),
-            "kotlin" | "kt" | "kts" => Ok(Self::Kotlin),
-            "swift" => Ok(Self::Swift),
-            "json" => Ok(Self::Json),
-            "shell" | "sh" | "bash" | "zsh" => Ok(Self::Shell),
+        match () {
+            () if s.eq_ignore_ascii_case("rust") => Ok(Self::Rust),
+            () if s.eq_ignore_ascii_case("c") => Ok(Self::C),
+            () if s.eq_ignore_ascii_case("cpp")
+                || s.eq_ignore_ascii_case("c++")
+                || s.eq_ignore_ascii_case("cc") =>
+            {
+                Ok(Self::Cpp)
+            }
+            () if s.eq_ignore_ascii_case("python") || s.eq_ignore_ascii_case("py") => {
+                Ok(Self::Python)
+            }
+            () if s.eq_ignore_ascii_case("go") || s.eq_ignore_ascii_case("golang") => Ok(Self::Go),
+            () if s.eq_ignore_ascii_case("typescript") || s.eq_ignore_ascii_case("ts") => {
+                Ok(Self::TypeScript)
+            }
+            () if s.eq_ignore_ascii_case("javascript") || s.eq_ignore_ascii_case("js") => {
+                Ok(Self::JavaScript)
+            }
+            () if s.eq_ignore_ascii_case("java") => Ok(Self::Java),
+            () if s.eq_ignore_ascii_case("php") => Ok(Self::Php),
+            () if s.eq_ignore_ascii_case("ruby") || s.eq_ignore_ascii_case("rb") => Ok(Self::Ruby),
+            () if s.eq_ignore_ascii_case("kotlin")
+                || s.eq_ignore_ascii_case("kt")
+                || s.eq_ignore_ascii_case("kts") =>
+            {
+                Ok(Self::Kotlin)
+            }
+            () if s.eq_ignore_ascii_case("swift") => Ok(Self::Swift),
+            () if s.eq_ignore_ascii_case("json") => Ok(Self::Json),
+            () if s.eq_ignore_ascii_case("shell")
+                || s.eq_ignore_ascii_case("sh")
+                || s.eq_ignore_ascii_case("bash")
+                || s.eq_ignore_ascii_case("zsh") =>
+            {
+                Ok(Self::Shell)
+            }
             _ => Err(ParseLanguageError),
         }
     }
@@ -58,22 +80,45 @@ impl FromStr for Language {
 
 impl Language {
     pub fn from_path(path: &Path) -> Option<Self> {
-        let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-        match extension.as_str() {
-            "rs" => Some(Self::Rust),
-            "c" | "h" => Some(Self::C),
-            "cc" | "cpp" | "cxx" | "hpp" | "hh" | "hxx" => Some(Self::Cpp),
-            "py" => Some(Self::Python),
-            "go" => Some(Self::Go),
-            "ts" | "tsx" => Some(Self::TypeScript),
-            "js" | "jsx" | "mjs" | "cjs" => Some(Self::JavaScript),
-            "java" => Some(Self::Java),
-            "php" => Some(Self::Php),
-            "rb" => Some(Self::Ruby),
-            "kt" | "kts" => Some(Self::Kotlin),
-            "swift" => Some(Self::Swift),
-            "json" => Some(Self::Json),
-            "sh" | "bash" | "zsh" => Some(Self::Shell),
+        let ext = path.extension()?.to_str()?;
+        match () {
+            () if ext.eq_ignore_ascii_case("rs") => Some(Self::Rust),
+            () if ext.eq_ignore_ascii_case("c") || ext.eq_ignore_ascii_case("h") => Some(Self::C),
+            () if ext.eq_ignore_ascii_case("cc")
+                || ext.eq_ignore_ascii_case("cpp")
+                || ext.eq_ignore_ascii_case("cxx")
+                || ext.eq_ignore_ascii_case("hpp")
+                || ext.eq_ignore_ascii_case("hh")
+                || ext.eq_ignore_ascii_case("hxx") =>
+            {
+                Some(Self::Cpp)
+            }
+            () if ext.eq_ignore_ascii_case("py") => Some(Self::Python),
+            () if ext.eq_ignore_ascii_case("go") => Some(Self::Go),
+            () if ext.eq_ignore_ascii_case("ts") || ext.eq_ignore_ascii_case("tsx") => {
+                Some(Self::TypeScript)
+            }
+            () if ext.eq_ignore_ascii_case("js")
+                || ext.eq_ignore_ascii_case("jsx")
+                || ext.eq_ignore_ascii_case("mjs")
+                || ext.eq_ignore_ascii_case("cjs") =>
+            {
+                Some(Self::JavaScript)
+            }
+            () if ext.eq_ignore_ascii_case("java") => Some(Self::Java),
+            () if ext.eq_ignore_ascii_case("php") => Some(Self::Php),
+            () if ext.eq_ignore_ascii_case("rb") => Some(Self::Ruby),
+            () if ext.eq_ignore_ascii_case("kt") || ext.eq_ignore_ascii_case("kts") => {
+                Some(Self::Kotlin)
+            }
+            () if ext.eq_ignore_ascii_case("swift") => Some(Self::Swift),
+            () if ext.eq_ignore_ascii_case("json") => Some(Self::Json),
+            () if ext.eq_ignore_ascii_case("sh")
+                || ext.eq_ignore_ascii_case("bash")
+                || ext.eq_ignore_ascii_case("zsh") =>
+            {
+                Some(Self::Shell)
+            }
             _ => None,
         }
     }

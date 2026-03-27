@@ -301,8 +301,12 @@ impl GitOperations {
             let content = std::fs::read_to_string(&packed_refs)
                 .map_err(|e| GitError::FileReadError(e.to_string()))?;
 
+            const REFS_HEADS: &str = "refs/heads/";
+            let suffix_len = REFS_HEADS.len() + branch.len();
             for line in content.lines() {
-                if line.ends_with(&format!("refs/heads/{}", branch))
+                if line.len() >= suffix_len
+                    && line[line.len() - branch.len()..] == branch
+                    && line[line.len() - suffix_len..line.len() - branch.len()] == *REFS_HEADS
                     && let Some(hash) = line.split_whitespace().next()
                 {
                     return Ok(hash.to_string());

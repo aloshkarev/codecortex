@@ -2,7 +2,7 @@ use crate::contracts::{
     WARNING_EMBEDDER_TIMEOUT, WARNING_FALLBACK_TO_LEXICAL, WARNING_VECTOR_STORE_UNAVAILABLE,
     error as envelope_error, feature_flag_enabled, success as envelope_success,
 };
-use crate::jobs::JobRegistry;
+use crate::jobs::{JobRegistry, JobState};
 use crate::metrics::global_metrics;
 use crate::vector_service::{VectorSearchFilters, VectorSearchRequest, VectorService};
 use cortex_analyzer::{
@@ -21,7 +21,7 @@ use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::*,
-    service::ServerInitializeError,
+    service::{RequestContext, RoleServer, ServerInitializeError},
     tool, tool_handler, tool_router,
     transport::stdio,
 };
@@ -210,9 +210,9 @@ pub struct FindCodeReq {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RelationshipReq {
-    /// One of: find_callers | find_callees | find_all_callers | find_all_callees |
-    ///         class_hierarchy | dead_code | overrides | module_deps | variable_scope |
-    ///         call_chain | find_importers | find_by_decorator | find_by_argument | find_complexity
+    /// Graph query mode: `find_callers`, `find_callees`, `find_all_callers`, `find_all_callees`,
+    /// `call_chain`, `class_hierarchy`, `dead_code`, `overrides`, `module_deps`, `variable_scope`,
+    /// `find_importers`, `find_by_decorator`, `find_by_argument`, `find_complexity`.
     pub query_type: String,
     pub target: Option<String>,
     pub target2: Option<String>,
@@ -636,7 +636,14 @@ impl CortexHandler {
     // ── indexing ─────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Index a directory or file into the code graph (and optionally vector store). Use when the user asks to index a repo, add code to the graph, or (re)build the index. Run before graph/vector tools can return results. Returns graph and optional vector indexing stats."
+        title = "Index path into graph",
+        description = "Indexes a directory or file into the code graph and optionally the vector store. Use when: indexing a repo, rebuilding the graph, or before graph/vector queries. Prerequisite: Memgraph reachable. Pair with find_code or vector_search after. Returns graph job info plus optional vector stats.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     async fn add_code_to_graph(
         &self,
@@ -758,7 +765,14 @@ impl CortexHandler {
     // ── watching ─────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Watch a directory for file changes and reindex automatically. Use when the user wants to keep the index up to date as they edit. Starts a watcher; combine with list_watched_paths and unwatch_directory to manage."
+        title = "Watch directory for reindex",
+        description = "Watches a path and reindexes on changes. Use when: keeping the graph fresh during editing. Prerequisite: valid path. Pair with list_watched_paths / unwatch_directory. Not a substitute for add_code_to_graph on cold start.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     async fn watch_directory(
         &self,
@@ -805,7 +819,11 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "List all currently watched paths")]
+    #[tool(
+        title = "List watched paths",
+        description = "Lists directories under watch-based reindexing. Use when: checking watcher scope. Read-only. Pair with watch_directory and unwatch_directory.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn list_watched_paths(&self) -> Result<CallToolResult, McpError> {
         let cfg = self.current_watch_config();
         let paths = WatchSession::new(&cfg).list();
@@ -814,7 +832,16 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Stop watching a directory")]
+    #[tool(
+        title = "Unwatch directory",
+        description = "Stops watching a path and updates persisted config. Use when: removing a watcher entry. Prerequisite: path was watched.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
     async fn unwatch_directory(
         &self,
         Parameters(req): Parameters<PathReq>,
@@ -833,7 +860,9 @@ impl CortexHandler {
     // ── search / analysis ─────────────────────────────────────────────────────
 
     #[tool(
-        description = "Search the code graph by symbol name, pattern, type, or content. Use when the user asks to find a function/class by name, list symbols matching a pattern, or search by code type (e.g. function, class). Returns matching symbols with file paths and signatures."
+        title = "Search code graph",
+        description = "Graph search by symbol name, regex pattern, type, or content. Use when: locating symbols before navigation or analysis. Prerequisite: indexed graph. Prefer vector_search for fuzzy natural-language question if vector index exists. Returns matches with paths and signatures.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn find_code(
         &self,
@@ -855,7 +884,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Analyze code relationships: callers, callees, class hierarchy, dead code, overrides, module deps, call chains. Use when the user asks for 'who calls X', 'what does Y call', 'class hierarchy', 'dead code', or 'call chain from A to B'. Pass query_type (e.g. find_callers, find_callees, dead_code), target symbol(s), and optional include/exclude path/file/glob filters."
+        title = "Graph relationships",
+        description = "Callers, callees, hierarchy, dead_code, call_chain, importers, complexity, etc. Use when: impact, structure, or reachability questions. Prerequisite: indexed graph; pass query_type and targets; optional path/glob filters. Prefer find_dead_code shortcut for unused-code only.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn analyze_code_relationships(
         &self,
@@ -905,7 +936,14 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Execute a raw Cypher query against the code graph. Use only when the user needs a custom graph query (e.g. custom traversal, aggregation). Prefer get_impact_graph, find_code, or analyze_code_relationships for common tasks. Returns query result rows."
+        title = "Run Cypher query",
+        description = "Runs arbitrary Cypher on the code graph. Use when: higher-level tools cannot express the traversal. Prerequisite: indexed graph; avoid destructive queries unless intended. Prefer analyze_code_relationships for standard callers/callees.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     async fn execute_cypher_query(
         &self,
@@ -923,7 +961,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Find functions or symbols that are never called (dead code). Use when the user asks to find unused code, dead code, or candidates for removal. Returns symbols with no callers."
+        title = "Find dead code",
+        description = "Lists symbols with no callers in the graph. Use when: cleanup or coverage audits. Prerequisite: indexed graph. For scoped dead code use analyze_code_relationships with filters.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn find_dead_code(&self) -> Result<CallToolResult, McpError> {
         let rows = Analyzer::new(self.graph_client().await?)
@@ -936,7 +976,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Find similar functions or symbols across multiple indexed repositories. Use when comparing codebases or finding duplicated functionality."
+        title = "Similar symbols cross-repo",
+        description = "Similar symbols across indexed repositories. Use when: duplication or convergence analysis across projects. Prerequisite: multiple indexed repos.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn find_similar_across_projects(
         &self,
@@ -954,7 +996,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Find shared dependencies between indexed projects. Shows modules imported by multiple repositories."
+        title = "Shared dependencies",
+        description = "Modules shared across indexed projects. Use when: comparing dependency overlap. Prerequisite: indexed multi-repo graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn find_shared_dependencies(
         &self,
@@ -977,7 +1021,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Compare public API surfaces between two repositories. Shows shared functions, unique functions, and a similarity score."
+        title = "Compare API surfaces",
+        description = "Public API diff between two indexed repos (overlap, uniqueness, score). Use when: breaking-change or fork comparison.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn compare_api_surface(
         &self,
@@ -995,7 +1041,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Go to the definition of a symbol. Uses qualified-name and import-context disambiguation when possible."
+        title = "Go to definition",
+        description = "Resolves definition for a symbol with disambiguation. Use when: jump-to-definition tasks. Prerequisite: current project set; indexed graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn go_to_definition(
         &self,
@@ -1018,7 +1066,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Find all usages of a symbol across the current project (calls, imports, type references, inheritance, and references)."
+        title = "Find all usages",
+        description = "Usages of a symbol (calls, imports, types, inheritance). Use when: rename/refactor impact in current project. Prerequisite: set_current_project; indexed graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn find_all_usages(
         &self,
@@ -1039,7 +1089,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Get quick information about a symbol: signature, docs, definition location, and usage metrics."
+        title = "Quick info",
+        description = "Hover-like summary: signature, docs, definition location. Use when: fast orientation on a symbol. Prerequisite: current project; indexed graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn quick_info(
         &self,
@@ -1058,7 +1110,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Compare two branches at the symbol level (added/removed/modified symbols plus impact). Both branches should be indexed."
+        title = "Branch structural diff",
+        description = "Symbol-level diff between branches plus impact hints. Use when: branch or release review. Prerequisite: current project; both sides indexed.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn branch_structural_diff(
         &self,
@@ -1077,7 +1131,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Run review analysis with graph intelligence (impact warnings + potential new dead code)."
+        title = "PR-style review",
+        description = "Review findings with graph signals (impact, possible new dead code). Use when: PR/branch review. Prerequisite: current project and indexed refs.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn pr_review(
         &self,
@@ -1096,7 +1152,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Calculate cyclomatic complexity of symbols, ranked by highest complexity. Use when the user asks for 'complex code', 'most complex functions', or 'complexity analysis'. Supports optional include/exclude path/file/glob filters to scope results."
+        title = "Cyclomatic complexity",
+        description = "Ranks symbols by cyclomatic complexity. Use when: hotspots or maintainability scans. Prerequisite: indexed graph; optional path/glob filters.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn calculate_cyclomatic_complexity(
         &self,
@@ -1121,7 +1179,14 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Index all code files in a repository into vector storage for semantic search. Use when the user wants to enable natural-language code search (vector_search) or before asking 'code related to X'. Returns indexed_documents, scanned_files, skipped_files."
+        title = "Vector index repository",
+        description = "Indexes repo files into the vector store for semantic search. Use when: enabling vector_search / hybrid. Prerequisite: configured embedder and vector backend. Pair with vector_index_status.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     async fn vector_index_repository(
         &self,
@@ -1197,7 +1262,14 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Index a single file into vector storage. Use when the user wants to add one file to the semantic index without re-indexing the whole repo. Returns indexed_documents for that file."
+        title = "Vector index file",
+        description = "Indexes one file into the vector store. Use when: patching semantic index incrementally. Prerequisite: vector stack configured.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
     )]
     async fn vector_index_file(
         &self,
@@ -1260,7 +1332,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Semantic search over indexed code. Use when the user asks in natural language for 'code that does X', 'where is Y handled', or 'code related to Z'. Requires vector_index_repository first. Returns relevant code snippets with paths and scores."
+        title = "Vector semantic search",
+        description = "Semantic search over the vector index. Use when: natural-language code discovery. Prerequisite: vector_index_repository (or file) completed. Not a substitute for exact symbol lookup (find_code).",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn vector_search(
         &self,
@@ -1332,7 +1406,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Hybrid search over indexed code: combines semantic (vector) and structural (graph) signals. Use when the user wants 'code like X' with better precision than vector_search alone, or when filtering by path/repo/kind. Returns snippets with hybrid scores."
+        title = "Hybrid vector search",
+        description = "Semantic plus structural signals. Use when: NL query needs graph grounding. Prerequisite: vector + indexed graph. Delegates to vector_search with hybrid mode.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn vector_search_hybrid(
         &self,
@@ -1346,7 +1422,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Search code across all indexed repositories using vector embeddings. Returns results grouped by repository."
+        title = "Vector search multi-repo",
+        description = "Semantic search across repositories with embeddings. Use when: same as vector_search but scoped to many repos. Prerequisite: embeddings and Lance/vector path configured.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn search_across_projects(
         &self,
@@ -1378,7 +1456,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Return vector index health and document counts per repository. Use when the user asks if semantic search is ready, how much is indexed, or to debug vector_search returning no results. Returns status and document counts."
+        title = "Vector index status",
+        description = "Health and document counts for vector index. Use when: debugging empty vector_search or planning (re)index. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn vector_index_status(
         &self,
@@ -1424,7 +1504,16 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Delete all vector entries belonging to a repository")]
+    #[tool(
+        title = "Delete vector index for repo",
+        description = "Removes all vector documents for a repository id. Use when: wiping stale semantic index. Destructive to vector store only.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
     async fn vector_delete_repository(
         &self,
         Parameters(req): Parameters<VectorDeleteRepositoryReq>,
@@ -1465,7 +1554,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Get a token-budgeted set of relevant code items for a task. Use when the user describes a coding task (e.g. 'refactor auth', 'find bug in login') and you need ranked, bounded context. Combines graph and optional vector search; returns snippets with ranking explanations."
+        title = "Context capsule",
+        description = "Bounded, ranked snippets for a task query (graph + optional vector). Use when: assembling working set for a prompt. Prerequisite: index; vector improves relevance if enabled.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn get_context_capsule(
         &self,
@@ -1683,7 +1774,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Get the impact graph for a symbol: who calls it, what it calls, and dependents. Use when the user asks 'what calls X?', 'what does X affect?', or 'show callers/callees of X'. Returns nodes and edges with file paths and relationship types."
+        title = "Impact graph",
+        description = "Callers/callees/importers summary around a symbol. Use when: blast radius or dependency questions. Prerequisite: indexed graph. For deep edges prefer analyze_code_relationships.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn get_impact_graph(
         &self,
@@ -1755,7 +1848,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Find control/data flow paths between two symbols (e.g. from entry to a function). Use when the user asks 'how does A reach B?', 'path from X to Y', or 'logic flow between two functions'. Pass from_symbol and to_symbol; returns paths with intermediate nodes."
+        title = "Logic flow paths",
+        description = "Call paths between two functions via graph query. Use when: tracing execution flow. Prerequisite: indexed CALLS graph; may return empty if paths not modeled.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn search_logic_flow(
         &self,
@@ -1804,7 +1899,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Get a file skeleton: high-level structure (functions, classes, exports) without full body. Use when the user wants an overview of a file, 'what's in this file', or to navigate structure. Pass path; returns outline with names and locations."
+        title = "File skeleton",
+        description = "Outline of a file from disk (symbols/structure). Use when: quick file map without full source. Prerequisite: readable path; does not require graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn get_skeleton(
         &self,
@@ -1838,7 +1935,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Unified health and status for indexing, watcher, and jobs. Use when the user asks 'is indexing done?', 'what's the index status?', or 'are there running jobs?'. Returns repo index status, watcher state, and job list."
+        title = "Index and job status",
+        description = "Aggregate MCP-side view of health, watcher, and job counters. Use when: quick session health check. Pair with diagnose for deeper graph checks.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn index_status(
         &self,
@@ -1879,16 +1978,16 @@ impl CortexHandler {
                     "repositories": stats.len()
                 },
                 "indexing": {
-                    "progress_pct": if job_list.iter().any(|j| serde_json::to_value(j).ok().and_then(|v| v.get("state").cloned()).and_then(|v| v.as_str().map(str::to_string)) == Some("running".to_string())) { 50 } else { 100 }
+                    "progress_pct": if job_list.iter().any(|j| j.state == JobState::Running) { 50 } else { 100 }
                 },
                 "watcher": {
                     "running": !watched.is_empty(),
                     "watched_paths": watched
                 },
                 "jobs": {
-                    "running": job_list.iter().filter(|j| serde_json::to_value(j).ok().and_then(|v| v.get("state").cloned()).and_then(|v| v.as_str().map(str::to_string)) == Some("running".to_string())).count(),
-                    "completed": job_list.iter().filter(|j| serde_json::to_value(j).ok().and_then(|v| v.get("state").cloned()).and_then(|v| v.as_str().map(str::to_string)) == Some("completed".to_string())).count(),
-                    "failed": job_list.iter().filter(|j| serde_json::to_value(j).ok().and_then(|v| v.get("state").cloned()).and_then(|v| v.as_str().map(str::to_string)) == Some("failed".to_string())).count()
+                    "running": job_list.iter().filter(|j| j.state == JobState::Running).count(),
+                    "completed": job_list.iter().filter(|j| j.state == JobState::Completed).count(),
+                    "failed": job_list.iter().filter(|j| j.state == JobState::Failed).count()
                 }
             }),
             started,
@@ -1897,7 +1996,16 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Detect workspace agents and generate bootstrap config safely")]
+    #[tool(
+        title = "Workspace MCP bootstrap",
+        description = "Detects AI-agent dirs and can write mcp.json / hooks under repo. Use when: onboarding CodeCortex into a workspace. May write files; confirm overwrite behavior.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
     async fn workspace_setup(
         &self,
         Parameters(req): Parameters<WorkspaceSetupReq>,
@@ -1985,7 +2093,16 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Submit LSP-derived call edges with dedup and rejection stats")]
+    #[tool(
+        title = "Ingest LSP call edges",
+        description = "Merges LSP CALLS edges into the graph with dedup/rejection stats. Use when: enriching graph from IDE/LSP. Prerequisite: connected graph; writes relationships.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
     async fn submit_lsp_edges(
         &self,
         Parameters(req): Parameters<SubmitLspEdgesReq>,
@@ -2076,7 +2193,14 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Save a session observation (fact or decision) with optional symbol links. Use when the user or agent wants to persist something for later (e.g. 'remember we decided to use approach X'). Observations are searchable via search_memory."
+        title = "Save observation",
+        description = "Persists a short session note with optional symbol links. Use when: durable memory across turns. Search later with search_memory.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     async fn save_observation(
         &self,
@@ -2185,7 +2309,11 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Get session observations with stale/fresh metadata")]
+    #[tool(
+        title = "Session context",
+        description = "Reads recent observations for a session/repo. Use when: reloading prior decisions. Read-only storage read.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn get_session_context(
         &self,
         Parameters(req): Parameters<SessionContextReq>,
@@ -2226,7 +2354,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Search saved session observations/memory by query. Use when the user asks 'what did we decide about X?', 'recall earlier context', or to find past observations. Returns matching observations with scores."
+        title = "Search memory",
+        description = "Lexical/semantic search over saved observations. Use when: recalling decisions. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn search_memory(
         &self,
@@ -2335,7 +2465,9 @@ impl CortexHandler {
     // ── repository management ─────────────────────────────────────────────────
 
     #[tool(
-        description = "List all repositories currently indexed in the graph. Use when the user asks 'what repos are indexed?', 'which projects are in the graph?', or to verify indexing before running graph tools."
+        title = "List indexed repositories",
+        description = "Repositories present in the graph. Use when: verifying scope before analysis. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn list_indexed_repositories(&self) -> Result<CallToolResult, McpError> {
         let repos = self
@@ -2350,7 +2482,14 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Delete a repository and all its nodes from the graph. Use when the user wants to remove a repo from the index (e.g. after deleting the repo or to free space). Destructive; graph data for that repo is removed."
+        title = "Delete repository from graph",
+        description = "Removes a repository subtree from Memgraph. Use when: purging obsolete index. Destructive; confirm with user.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     async fn delete_repository(
         &self,
@@ -2364,7 +2503,11 @@ impl CortexHandler {
         Ok(Self::ok(format!("Deleted: {}", req.path)))
     }
 
-    #[tool(description = "Get node-count statistics for all indexed repositories")]
+    #[tool(
+        title = "Repository graph stats",
+        description = "Node counts per indexed repository. Use when: capacity or coverage snapshots. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn get_repository_stats(&self) -> Result<CallToolResult, McpError> {
         let stats = Analyzer::new(self.graph_client().await?)
             .repository_stats()
@@ -2377,7 +2520,11 @@ impl CortexHandler {
 
     // ── jobs ──────────────────────────────────────────────────────────────────
 
-    #[tool(description = "Check status of a background indexing job by ID")]
+    #[tool(
+        title = "Job status",
+        description = "Looks up a background job by id from the in-process job table. Use when: polling async index/watch jobs.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn check_job_status(
         &self,
         Parameters(req): Parameters<JobStatusReq>,
@@ -2387,7 +2534,11 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "List all background jobs")]
+    #[tool(
+        title = "List background jobs",
+        description = "Lists MCP-tracked jobs (index/watch). Use when: operator visibility. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn list_jobs(&self) -> Result<CallToolResult, McpError> {
         Ok(Self::ok(
             serde_json::to_string_pretty(&self.jobs.list()).unwrap_or_default(),
@@ -2396,7 +2547,16 @@ impl CortexHandler {
 
     // ── bundles ───────────────────────────────────────────────────────────────
 
-    #[tool(description = "Load a .ccx graph bundle file into memory")]
+    #[tool(
+        title = "Load graph bundle",
+        description = "Imports a .ccx bundle for in-process inspection (not full DB load). Use when: offline bundle review.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
     async fn load_bundle(
         &self,
         Parameters(req): Parameters<PathReq>,
@@ -2410,7 +2570,16 @@ impl CortexHandler {
         )))
     }
 
-    #[tool(description = "Export a repository graph to a .ccx bundle file")]
+    #[tool(
+        title = "Export graph bundle",
+        description = "Writes a .ccx snapshot for a repo from the live graph. Use when: sharing graph offline. Writes output_path.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
     async fn export_bundle(
         &self,
         Parameters(req): Parameters<ExportBundleReq>,
@@ -2436,7 +2605,9 @@ impl CortexHandler {
     // ── health ────────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Get rich signature information for a symbol (function, method, struct, enum). Returns parameters, return type, visibility, async status, generics, and related symbols."
+        title = "Get signature",
+        description = "Structured signature for graph-matched symbol(s). Use when: API shape before edit. Prerequisite: indexed graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn get_signature(
         &self,
@@ -2617,7 +2788,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Find tests related to a symbol. Returns unit tests, integration tests, and test coverage information."
+        title = "Find related tests",
+        description = "Heuristic test lookup for a symbol via graph patterns. Use when: planning validation. Prerequisite: indexed graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn find_tests(
         &self,
@@ -2805,7 +2978,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Explain how a query would be processed. Shows interpretation, search strategy, and why results would be included. Useful for debugging and understanding the codebase."
+        title = "Explain search strategy",
+        description = "Describes how a textual query would be interpreted (no live graph hit). Use when: teaching/debugging retrieval behavior.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn explain_result(
         &self,
@@ -2967,7 +3142,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Analyze the impact of refactoring a symbol. Shows affected files, tests, breaking changes, and suggested steps for safe refactoring."
+        title = "Refactoring impact",
+        description = "Graph-derived impact and steps for a proposed refactor type. Use when: safe-change planning. Prerequisite: indexed repo graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn analyze_refactoring(
         &self,
@@ -3337,7 +3514,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Run diagnostics on the CodeCortex system. Checks index health, graph connectivity, and system status. Returns issues and suggested actions."
+        title = "System diagnose",
+        description = "Connectivity, index sanity, cache hints with suggested actions. Use when: cortex looks broken. Read-only checks.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn diagnose(
         &self,
@@ -3489,7 +3668,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Find code patterns in the codebase. Detects architectural patterns like Builder, Factory, Singleton, Repository, Service, etc."
+        title = "Detect architecture patterns",
+        description = "Heuristic pattern hints (builder, repository, etc.) via name/source cues. Use when: architecture reconnaissance. Prerequisite: indexed graph.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn find_patterns(
         &self,
@@ -3764,7 +3945,9 @@ impl CortexHandler {
     // ── health ────────────────────────────────────────────────────────────────
 
     #[tool(
-        description = "Check Memgraph (graph DB) connectivity and report server health. Use when the user sees graph-related errors, or asks 'is the database up?'. Returns connection status and basic server info."
+        title = "Graph health",
+        description = "Pings Memgraph connectivity and returns analyzer capability flags. Use when: first failure triage. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn check_health(&self) -> Result<CallToolResult, McpError> {
         let ok = self.graph_client().await.is_ok();
@@ -3780,7 +3963,11 @@ impl CortexHandler {
 
     // ── project management ────────────────────────────────────────────────────
 
-    #[tool(description = "List all registered projects with their Git branch status")]
+    #[tool(
+        title = "List projects",
+        description = "Registered projects and current selection. Use when: multi-repo scope. Read-only registry view.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn list_projects(&self) -> Result<CallToolResult, McpError> {
         let projects = self.projects.list_projects();
         let current = self.projects.get_current_project();
@@ -3801,7 +3988,16 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Add a project to the registry for Git-aware indexing")]
+    #[tool(
+        title = "Add project",
+        description = "Registers a filesystem path with optional branch tracking. Use when: expanding multi-project workspace.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
     async fn add_project(
         &self,
         Parameters(req): Parameters<AddProjectReq>,
@@ -3836,7 +4032,16 @@ impl CortexHandler {
         }
     }
 
-    #[tool(description = "Remove a project from the registry")]
+    #[tool(
+        title = "Remove project",
+        description = "Drops a project from the local registry (not the graph). Use when: unregistering stale roots. Destructive to registry entry.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
+    )]
     async fn remove_project(
         &self,
         Parameters(req): Parameters<RemoveProjectReq>,
@@ -3862,7 +4067,16 @@ impl CortexHandler {
         }
     }
 
-    #[tool(description = "Set the current active project and optionally switch branch")]
+    #[tool(
+        title = "Set current project",
+        description = "Selects active project (optional git branch). Use when: scoping navigation tools. Required before go_to_definition and similar.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
     async fn set_current_project(
         &self,
         Parameters(req): Parameters<SetProjectReq>,
@@ -3892,7 +4106,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Get the current project context: path, branch, Git status. Use when the user asks 'what project am I in?', 'current branch', or to confirm scope for indexing and search."
+        title = "Current project",
+        description = "Shows selected project path/branch/commit. Use when: confirming MCP scope. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn get_current_project(&self) -> Result<CallToolResult, McpError> {
         let current = self.projects.get_current_project();
@@ -3916,7 +4132,11 @@ impl CortexHandler {
         Ok(Self::ok(result.to_string()))
     }
 
-    #[tool(description = "List all branches for a project with index status")]
+    #[tool(
+        title = "List branches",
+        description = "Git branches and index coverage for a project. Use when: branch-aware workflows. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn list_branches(
         &self,
         Parameters(req): Parameters<ListBranchesReq>,
@@ -3967,7 +4187,16 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Refresh Git info for a project (detect branch changes)")]
+    #[tool(
+        title = "Refresh project Git",
+        description = "Refreshes git metadata for a registered project. Use when: branch drift suspected.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true,
+            open_world_hint = false
+        )
+    )]
     async fn refresh_project(
         &self,
         Parameters(req): Parameters<PathReq>,
@@ -3997,7 +4226,11 @@ impl CortexHandler {
         }
     }
 
-    #[tool(description = "Get project freshness, branch health, and queue status")]
+    #[tool(
+        title = "Project status",
+        description = "Freshness, branch health, optional watcher queue slice. Use when: daemon/branch monitoring. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn project_status(
         &self,
         Parameters(req): Parameters<ProjectStatusReq>,
@@ -4053,7 +4286,14 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Sync project state (refresh -> detect switch -> enqueue index -> cleanup)"
+        title = "Project sync",
+        description = "Refresh git, enqueue daemon index when possible, optional branch cleanup. Use when: one-shot align repo+index.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false,
+            open_world_hint = false
+        )
     )]
     async fn project_sync(
         &self,
@@ -4162,7 +4402,9 @@ impl CortexHandler {
     }
 
     #[tool(
-        description = "Compare two branches for a project (ahead/behind commits and changed files)"
+        title = "Git branch diff",
+        description = "Ahead/behind commits and changed files between refs. Use when: pre-merge insight. Read-only git.",
+        annotations(read_only_hint = true, open_world_hint = false)
     )]
     async fn project_branch_diff(
         &self,
@@ -4248,7 +4490,11 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Get daemon queue status for project indexing jobs")]
+    #[tool(
+        title = "Index job queue",
+        description = "Lists daemon index jobs (optionally filtered by repo path). Use when: backlog visibility. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn project_queue_status(
         &self,
         Parameters(req): Parameters<ProjectQueueStatusReq>,
@@ -4275,7 +4521,11 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(description = "Get project daemon metrics for watch/index orchestration")]
+    #[tool(
+        title = "Daemon metrics",
+        description = "Counters and derived averages for watch/index daemon. Use when: performance triage. Read-only.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
     async fn project_metrics(
         &self,
         Parameters(req): Parameters<ProjectMetricsReq>,
@@ -4332,6 +4582,12 @@ impl CortexHandler {
             .to_string(),
         ))
     }
+
+    /// Test-only: all registered MCP tools (for contract tests).
+    #[cfg(test)]
+    pub(crate) fn tool_definitions_for_test(&self) -> Vec<Tool> {
+        self.tool_router.list_all()
+    }
 }
 
 // ── ServerHandler ─────────────────────────────────────────────────────────────
@@ -4339,11 +4595,122 @@ impl CortexHandler {
 #[tool_handler]
 impl ServerHandler for CortexHandler {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
-            .with_instructions(
-                "CodeCortex: index codebases, query call graphs, find dead code & complexity.",
+        ServerInfo::new(
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_resources()
+                .enable_prompts()
+                .build(),
+        )
+        .with_instructions(crate::tool_catalog::server_instructions_markdown())
+        .with_server_info(Implementation::new("cortex", env!("CARGO_PKG_VERSION")))
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
+        let resource = RawResource {
+            uri: crate::tool_catalog::TOOL_ROUTING_RESOURCE_URI.to_string(),
+            name: "tool-routing-guide".to_string(),
+            title: Some("CodeCortex tool routing guide".to_string()),
+            description: Some(
+                "Full markdown playbook: prerequisites, intent→tool map, disambiguation."
+                    .to_string(),
+            ),
+            mime_type: Some("text/markdown".to_string()),
+            size: None,
+            icons: None,
+            meta: None,
+        }
+        .no_annotation();
+        std::future::ready(Ok(ListResourcesResult::with_all_items(vec![resource])))
+    }
+
+    fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ReadResourceResult, McpError>> + Send + '_ {
+        let uri = request.uri;
+        std::future::ready(if uri == crate::tool_catalog::TOOL_ROUTING_RESOURCE_URI {
+            Ok(ReadResourceResult::new(vec![
+                ResourceContents::text(
+                    crate::tool_catalog::resource_tool_guide_markdown(),
+                    crate::tool_catalog::TOOL_ROUTING_RESOURCE_URI,
+                )
+                .with_mime_type("text/markdown"),
+            ]))
+        } else {
+            Err(McpError::invalid_params(
+                format!("unknown resource URI: {uri}"),
+                None,
+            ))
+        })
+    }
+
+    fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListPromptsResult, McpError>> + Send + '_ {
+        let prompts = vec![
+            Prompt::new(
+                crate::tool_catalog::PROMPT_ROUTE_TOOLS,
+                Some(
+                    "Plan which CodeCortex tools to call for a user goal (order + prerequisites).",
+                ),
+                Some(vec![
+                    PromptArgument::new("user_goal")
+                        .with_title("User goal")
+                        .with_description("What the user wants to do in the codebase")
+                        .with_required(false),
+                ]),
             )
-            .with_server_info(Implementation::new("cortex", env!("CARGO_PKG_VERSION")))
+            .with_title("Route tools from goal"),
+            Prompt::new(
+                crate::tool_catalog::PROMPT_SESSION_BOOTSTRAP,
+                Some("Health → project → index → search/navigation checklist."),
+                None,
+            )
+            .with_title("Session bootstrap"),
+        ];
+        std::future::ready(Ok(ListPromptsResult::with_all_items(prompts)))
+    }
+
+    fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<GetPromptResult, McpError>> + Send + '_ {
+        let name = request.name.clone();
+        let args = request.arguments;
+        std::future::ready(match name.as_str() {
+            crate::tool_catalog::PROMPT_ROUTE_TOOLS => {
+                let goal = args
+                    .as_ref()
+                    .and_then(|m| m.get("user_goal"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(describe the user's coding goal)");
+                Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+                    PromptMessageRole::User,
+                    crate::tool_catalog::prompt_route_tools_body(goal),
+                )])
+                .with_description("Plan CodeCortex MCP tool usage for this goal"))
+            }
+            crate::tool_catalog::PROMPT_SESSION_BOOTSTRAP => {
+                Ok(GetPromptResult::new(vec![PromptMessage::new_text(
+                    PromptMessageRole::User,
+                    crate::tool_catalog::prompt_session_bootstrap_body(),
+                )])
+                .with_description("Suggested first steps when using CodeCortex MCP"))
+            }
+            _ => Err(McpError::invalid_params(
+                format!("unknown prompt: {name}"),
+                None,
+            )),
+        })
     }
 }
 

@@ -6,6 +6,7 @@ use crate::{ReviewAnalyzer, ReviewInput, ReviewReport};
 use cortex_core::{CortexError, Result, SearchKind};
 use cortex_graph::GraphClient;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::path::Path;
 
 #[derive(Clone)]
@@ -52,20 +53,20 @@ impl AnalyzePathFilters {
         if self.is_empty() {
             return true;
         }
-
-        let candidate = normalize_path(candidate);
+        let candidate_cow = normalize_path(candidate);
+        let candidate = candidate_cow.as_ref();
         let include_match = if self.has_includes() {
             self.include_paths
                 .iter()
-                .any(|p| path_prefix_match(candidate.as_str(), p.as_str()))
+                .any(|p| path_prefix_match_normalized(candidate, p.as_str()))
                 || self
                     .include_files
                     .iter()
-                    .any(|f| file_match(candidate.as_str(), f.as_str()))
+                    .any(|f| file_match_normalized(candidate, f.as_str()))
                 || self
                     .include_globs
                     .iter()
-                    .any(|g| glob_match(candidate.as_str(), g.as_str()))
+                    .any(|g| glob_match_normalized(candidate, g.as_str()))
         } else {
             true
         };
@@ -77,32 +78,33 @@ impl AnalyzePathFilters {
         let excluded = self
             .exclude_paths
             .iter()
-            .any(|p| path_prefix_match(candidate.as_str(), p.as_str()))
+            .any(|p| path_prefix_match_normalized(candidate, p.as_str()))
             || self
                 .exclude_files
                 .iter()
-                .any(|f| file_match(candidate.as_str(), f.as_str()))
+                .any(|f| file_match_normalized(candidate, f.as_str()))
             || self
                 .exclude_globs
                 .iter()
-                .any(|g| glob_match(candidate.as_str(), g.as_str()));
+                .any(|g| glob_match_normalized(candidate, g.as_str()));
 
         !excluded
     }
 
     pub fn is_excluded_path(&self, candidate: &str) -> bool {
         let candidate = normalize_path(candidate);
+        let candidate = candidate.as_ref();
         self.exclude_paths
             .iter()
-            .any(|p| path_prefix_match(candidate.as_str(), p.as_str()))
+            .any(|p| path_prefix_match_normalized(candidate, p.as_str()))
             || self
                 .exclude_files
                 .iter()
-                .any(|f| file_match(candidate.as_str(), f.as_str()))
+                .any(|f| file_match_normalized(candidate, f.as_str()))
             || self
                 .exclude_globs
                 .iter()
-                .any(|g| glob_match(candidate.as_str(), g.as_str()))
+                .any(|g| glob_match_normalized(candidate, g.as_str()))
     }
 
     pub fn matches_any_path<'a, I>(&self, paths: I) -> bool
@@ -116,12 +118,13 @@ impl AnalyzePathFilters {
         let mut saw_include = false;
         for path in paths {
             saw_any_path = true;
-            let normalized_path = normalize_path(path);
+            let normalized_cow = normalize_path(path);
+            let normalized_path = normalized_cow.as_ref();
             if !self.exclude_paths.is_empty()
                 && self
                     .exclude_paths
                     .iter()
-                    .any(|p| path_prefix_match(normalized_path.as_str(), p.as_str()))
+                    .any(|p| path_prefix_match_normalized(normalized_path, p.as_str()))
             {
                 return false;
             }
@@ -129,7 +132,7 @@ impl AnalyzePathFilters {
                 && self
                     .exclude_files
                     .iter()
-                    .any(|f| file_match(normalized_path.as_str(), f.as_str()))
+                    .any(|f| file_match_normalized(normalized_path, f.as_str()))
             {
                 return false;
             }
@@ -137,12 +140,12 @@ impl AnalyzePathFilters {
                 && self
                     .exclude_globs
                     .iter()
-                    .any(|g| glob_match(normalized_path.as_str(), g.as_str()))
+                    .any(|g| glob_match_normalized(normalized_path, g.as_str()))
             {
                 return false;
             }
 
-            if !self.has_includes() || self.matches_path(normalized_path.as_str()) {
+            if !self.has_includes() || self.matches_path(normalized_path) {
                 saw_include = true;
             }
         }
@@ -158,37 +161,78 @@ impl AnalyzePathFilters {
     }
 }
 
-fn normalize_path(path: &str) -> String {
-    path.replace('\\', "/")
+/// Normalize path for comparison. Returns `Cow::Borrowed` when no change is needed to avoid allocation.
+fn normalize_path(path: &str) -> Cow<'_, str> {
+    let need_replace = path.contains('\\');
+    let trimmed = path.trim();
+    let need_trim = trimmed.as_ptr() != path.as_ptr() || trimmed.len() != path.len();
+    let no_leading_dot_slash = !trimmed.starts_with("./");
+    let no_trailing_slash = !trimmed.ends_with('/') || trimmed.len() <= 1;
+    if !need_replace && !need_trim && no_leading_dot_slash && no_trailing_slash {
+        return Cow::Borrowed(trimmed);
+    }
+    let s = path
+        .replace('\\', "/")
         .trim()
         .trim_start_matches("./")
         .trim_end_matches('/')
-        .to_string()
+        .to_string();
+    Cow::Owned(s)
 }
 
-fn path_prefix_match(candidate: &str, filter: &str) -> bool {
-    let candidate = normalize_path(candidate);
-    let filter = normalize_path(filter);
+/// Path prefix match when candidate is already normalized. Normalizes only filter.
+fn path_prefix_match_normalized(candidate: &str, filter: &str) -> bool {
+    let filter = match normalize_path(filter) {
+        Cow::Borrowed(s) => s,
+        Cow::Owned(s) => return path_prefix_match_normalized(candidate, &s),
+    };
     if filter.is_empty() {
         return true;
     }
-    if candidate == filter || candidate.starts_with(format!("{filter}/").as_str()) {
+    if candidate == filter {
         return true;
     }
-    let seg = format!("/{filter}/");
-    candidate.contains(seg.as_str()) || candidate.ends_with(format!("/{filter}").as_str())
+    if let Some(rest) = candidate.strip_prefix(filter)
+        && (rest.is_empty() || rest.starts_with('/'))
+    {
+        return true;
+    }
+    let mut buf = String::with_capacity(filter.len() + 2);
+    buf.push('/');
+    buf.push_str(filter);
+    buf.push('/');
+    let slash_filter_slash = buf.as_str();
+    let slash_filter = &buf[..buf.len() - 1];
+    candidate.contains(slash_filter_slash) || candidate.ends_with(slash_filter)
 }
 
-fn file_match(candidate: &str, file_filter: &str) -> bool {
-    let candidate = normalize_path(candidate);
-    let file_filter = normalize_path(file_filter);
+/// `s` starts with `prefix` followed by `::` (Rust module qualifier).
+fn starts_with_qualified_prefix(s: &str, prefix: &str) -> bool {
+    s.len() >= prefix.len() + 2
+        && s.starts_with(prefix)
+        && s[prefix.len()..prefix.len() + 2] == *"::"
+}
+
+/// File match when candidate is already normalized.
+fn file_match_normalized(candidate: &str, file_filter: &str) -> bool {
+    let file_filter = match normalize_path(file_filter) {
+        Cow::Borrowed(s) => s,
+        Cow::Owned(s) => return file_match_normalized(candidate, &s),
+    };
     if file_filter.is_empty() {
         return false;
     }
     if file_filter.contains('/') {
-        candidate == file_filter || candidate.ends_with(format!("/{file_filter}").as_str())
+        if candidate == file_filter {
+            return true;
+        }
+        if !candidate.ends_with(file_filter) {
+            return false;
+        }
+        let prefix_len = candidate.len() - file_filter.len();
+        prefix_len > 0 && candidate[..prefix_len].ends_with('/')
     } else {
-        Path::new(candidate.as_str())
+        Path::new(candidate)
             .file_name()
             .and_then(|name| name.to_str())
             .map(|name| name == file_filter)
@@ -196,12 +240,12 @@ fn file_match(candidate: &str, file_filter: &str) -> bool {
     }
 }
 
-fn glob_match(candidate: &str, pattern: &str) -> bool {
-    let candidate = normalize_path(candidate);
-    let Ok(pattern) = glob::Pattern::new(pattern) else {
+/// Glob match when candidate is already normalized.
+fn glob_match_normalized(candidate: &str, pattern: &str) -> bool {
+    let Ok(pat) = glob::Pattern::new(pattern) else {
         return false;
     };
-    pattern.matches(candidate.as_str()) || pattern.matches_path(Path::new(candidate.as_str()))
+    pat.matches(candidate) || pat.matches_path(Path::new(candidate))
 }
 
 fn collect_paths(value: &Value, out: &mut Vec<String>) {
@@ -226,23 +270,29 @@ fn collect_paths(value: &Value, out: &mut Vec<String>) {
     }
 }
 
-fn row_matches_filters(row: &Value, filters: &AnalyzePathFilters) -> bool {
+fn row_matches_filters(
+    row: &Value,
+    filters: &AnalyzePathFilters,
+    path_buf: &mut Vec<String>,
+) -> bool {
     if filters.is_empty() {
         return true;
     }
-    let mut paths = Vec::new();
-    collect_paths(row, &mut paths);
-    filters.matches_any_path(paths.iter().map(String::as_str))
+    path_buf.clear();
+    collect_paths(row, path_buf);
+    filters.matches_any_path(path_buf.iter().map(String::as_str))
 }
 
 fn apply_row_filters(rows: Vec<Value>, filters: Option<&AnalyzePathFilters>) -> Vec<Value> {
     match filters {
         None => rows,
         Some(f) if f.is_empty() => rows,
-        Some(f) => rows
-            .into_iter()
-            .filter(|row| row_matches_filters(row, f))
-            .collect(),
+        Some(f) => {
+            let mut path_buf = Vec::new();
+            rows.into_iter()
+                .filter(|row| row_matches_filters(row, f, &mut path_buf))
+                .collect()
+        }
     }
 }
 
@@ -278,21 +328,21 @@ fn import_path_matches_module(import_path: &str, module: &str) -> bool {
     }
 
     if import_path == module
-        || import_path.starts_with(format!("{module}::").as_str())
-        || module.starts_with(format!("{import_path}::").as_str())
+        || starts_with_qualified_prefix(import_path, module)
+        || starts_with_qualified_prefix(module, import_path)
     {
         return true;
     }
 
     if let Some((prefix, items)) = grouped_rust_import(import_path) {
-        if module == prefix || module.starts_with(format!("{prefix}::").as_str()) {
+        if module == prefix || starts_with_qualified_prefix(module, &prefix) {
             return true;
         }
         for item in items {
             let full = format!("{prefix}::{item}");
             if module == full
-                || module.starts_with(format!("{full}::").as_str())
-                || full.starts_with(format!("{module}::").as_str())
+                || starts_with_qualified_prefix(module, &full)
+                || starts_with_qualified_prefix(&full, module)
             {
                 return true;
             }

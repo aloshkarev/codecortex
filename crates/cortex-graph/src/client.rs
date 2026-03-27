@@ -146,7 +146,7 @@ impl GraphClient {
                     warn!(error = %e.to_string(), "Raw query failed");
                     CortexError::Database(e.to_string())
                 })?;
-                let mut rows = Vec::new();
+                let mut rows = Vec::with_capacity(64);
                 loop {
                     match result.next().await {
                         Ok(Some(row)) => match row.to::<Value>() {
@@ -181,7 +181,7 @@ impl GraphClient {
                     .execute(query(cypher).param(param_name, param_value.to_string()))
                     .await
                     .map_err(|e| CortexError::Database(e.to_string()))?;
-                let mut rows = Vec::new();
+                let mut rows = Vec::with_capacity(64);
                 loop {
                     match result.next().await {
                         Ok(Some(row)) => match row.to::<Value>() {
@@ -214,7 +214,7 @@ impl GraphClient {
                     .execute(q)
                     .await
                     .map_err(|e| CortexError::Database(e.to_string()))?;
-                let mut rows = Vec::new();
+                let mut rows = Vec::with_capacity(64);
                 loop {
                     match result.next().await {
                         Ok(Some(row)) => match row.to::<Value>() {
@@ -269,7 +269,7 @@ impl GraphClient {
             )
             .await?;
 
-        let mut repos = Vec::new();
+        let mut repos = Vec::with_capacity(rows.len());
         for row in rows {
             let path: String = row
                 .get("path")
@@ -440,12 +440,10 @@ impl GraphClient {
 
         let rows = self.query_with_params(&cypher, params).await?;
 
-        let mut resolved = 0usize;
-        for row in rows {
-            if let Some(count) = row.get("resolved").and_then(|v| v.as_u64()) {
-                resolved += count as usize;
-            }
-        }
+        let resolved = rows
+            .iter()
+            .filter_map(|row| row.get("resolved").and_then(|v| v.as_u64()))
+            .sum::<u64>() as usize;
 
         // Cleanup orphaned call targets
         self.run(
@@ -490,12 +488,10 @@ impl GraphClient {
         }
         let rows = self.query_with_params(&cypher, params).await?;
 
-        let mut resolved = 0usize;
-        for row in rows {
-            if let Some(count) = row.get("resolved").and_then(|v| v.as_u64()) {
-                resolved += count as usize;
-            }
-        }
+        let resolved = rows
+            .iter()
+            .filter_map(|row| row.get("resolved").and_then(|v| v.as_u64()))
+            .sum::<u64>() as usize;
         Ok(resolved)
     }
 
@@ -531,12 +527,10 @@ impl GraphClient {
         }
         let rows = self.query_with_params(&cypher, params).await?;
 
-        let mut resolved = 0usize;
-        for row in rows {
-            if let Some(count) = row.get("resolved").and_then(|v| v.as_u64()) {
-                resolved += count as usize;
-            }
-        }
+        let resolved = rows
+            .iter()
+            .filter_map(|row| row.get("resolved").and_then(|v| v.as_u64()))
+            .sum::<u64>() as usize;
         Ok(resolved)
     }
 }

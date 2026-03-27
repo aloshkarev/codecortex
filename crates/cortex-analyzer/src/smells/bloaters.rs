@@ -17,6 +17,7 @@ use super::language::{
     is_python_function_end, is_python_style_function, is_ruby_style_function, ruby_block_delta,
 };
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
+use std::collections::HashSet;
 
 /// Detect functions that are too long
 pub fn detect_long_functions(
@@ -347,8 +348,9 @@ pub fn detect_data_clumps(source: &str, file_path: &str, config: &SmellConfig) -
             let (_, params1, line1) = &param_groups[i];
             let (func2, params2, _line2) = &param_groups[j];
 
-            // Calculate Jaccard similarity
-            let intersection = params1.iter().filter(|p| params2.contains(p)).count();
+            // Calculate Jaccard similarity (HashSet avoids O(|p1|×|p2|) `contains` scans)
+            let params2_set: HashSet<&String> = params2.iter().collect();
+            let intersection = params1.iter().filter(|p| params2_set.contains(p)).count();
             let union = params1.len() + params2.len() - intersection;
             let similarity = intersection as f64 / union as f64;
 
