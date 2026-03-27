@@ -1,6 +1,6 @@
 use crate::contracts::{
     WARNING_EMBEDDER_TIMEOUT, WARNING_FALLBACK_TO_LEXICAL, WARNING_VECTOR_STORE_UNAVAILABLE,
-    error as envelope_error, feature_flag_enabled, success as envelope_success,
+    error as envelope_error, success as envelope_success,
 };
 use crate::jobs::{JobRegistry, JobState};
 use crate::metrics::global_metrics;
@@ -55,6 +55,11 @@ pub struct McpServeOptions {
     pub allow_remote: bool,
     pub max_clients: usize,
     pub idle_timeout_secs: u64,
+    /// Feature flags controlling which optional MCP tools are active.
+    /// Constructed from environment variables; CLI `--enable` args layer on top.
+    /// Skipped from serialization — flags are resolved at runtime, not persisted.
+    #[serde(skip)]
+    pub feature_flags: crate::FeatureFlags,
 }
 
 impl Default for McpServeOptions {
@@ -66,6 +71,7 @@ impl Default for McpServeOptions {
             allow_remote: false,
             max_clients: 64,
             idle_timeout_secs: 600,
+            feature_flags: crate::FeatureFlags::from_env(),
         }
     }
 }
@@ -588,6 +594,7 @@ pub struct CortexHandler {
     jobs: JobRegistry,
     projects: Arc<ProjectRegistry>,
     tool_router: ToolRouter<Self>,
+    feature_flags: crate::FeatureFlags,
 }
 
 #[tool_router]
@@ -598,6 +605,18 @@ impl CortexHandler {
             jobs: JobRegistry::default(),
             projects: Arc::new(ProjectRegistry::new()),
             tool_router: Self::tool_router(),
+            feature_flags: crate::FeatureFlags::from_env(),
+        }
+    }
+
+    /// Create a handler with a pre-built `FeatureFlags` (e.g. from CLI `--enable` args).
+    pub fn new_with_flags(config: CortexConfig, feature_flags: crate::FeatureFlags) -> Self {
+        Self {
+            config,
+            jobs: JobRegistry::default(),
+            projects: Arc::new(ProjectRegistry::new()),
+            tool_router: Self::tool_router(),
+            feature_flags,
         }
     }
 
@@ -611,9 +630,8 @@ impl CortexHandler {
         CallToolResult::success(vec![Content::text(text)])
     }
 
-    fn tool_enabled(&self, key: &str, default_value: bool) -> bool {
-        let _ = &self.config;
-        feature_flag_enabled(key, default_value)
+    fn tool_enabled(&self, key: &str, _default_value: bool) -> bool {
+        self.feature_flags.is_enabled(key)
     }
 
     fn current_watch_config(&self) -> CortexConfig {
@@ -4716,8 +4734,14 @@ impl ServerHandler for CortexHandler {
 
 // ── public entry point ────────────────────────────────────────────────────────
 
-pub async fn start_stdio(config: CortexConfig) -> anyhow::Result<()> {
-    let service = match CortexHandler::new(config).serve(stdio()).await {
+pub async fn start_stdio(
+    config: CortexConfig,
+    feature_flags: crate::FeatureFlags,
+) -> anyhow::Result<()> {
+    let service = match CortexHandler::new_with_flags(config, feature_flags)
+        .serve(stdio())
+        .await
+    {
         Ok(s) => s,
         Err(e) => {
             if matches!(e, ServerInitializeError::ConnectionClosed(_)) {
@@ -4756,7 +4780,7 @@ pub async fn start_with_options(
 ) -> anyhow::Result<()> {
     validate_serve_options(&options)?;
     match options.transport {
-        McpTransport::Stdio => start_stdio(config).await,
+        McpTransport::Stdio => start_stdio(config, options.feature_flags).await,
         McpTransport::HttpSse | McpTransport::WebSocket | McpTransport::Multi => {
             crate::network_server::start_network(config, options).await
         }

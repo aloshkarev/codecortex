@@ -103,11 +103,16 @@ MCP serve flags:
 | `--token-env <ENV_NAME>` | — | Bearer token from environment variable |
 | `--max-clients <N>` | — | Maximum concurrent network clients |
 | `--idle-timeout-secs <N>` | — | Disconnect idle clients after N seconds |
+| `--enable <TOOL>` | — | Enable an optional tool (repeat for multiple) |
+
+**`--enable` values:** `context-capsule`, `impact-graph`, `logic-flow`, `index-status`, `skeleton`, `workspace-setup`, `lsp-ingest`, `memory`, `memory-read`, `memory-write`
 
 ```bash
 cortex mcp start                                          # stdio (default)
 cortex mcp start --transport http-sse --listen 127.0.0.1:3001
 cortex mcp start --transport multi --listen 0.0.0.0:3001 --allow-remote --token "$CORTEX_MCP_TOKEN"
+cortex mcp start --enable memory --enable context-capsule
+cortex mcp start --enable memory --enable impact-graph --enable skeleton
 ```
 
 ### Operations
@@ -170,7 +175,8 @@ cortex analyze branch-diff feature/nav main --structural
 cortex goto "GraphClient::connect"
 cortex usages "GraphClient"
 cortex mcp tools
-CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=true cortex mcp start
+cortex mcp start --enable memory --enable context-capsule
+cortex mcp start --enable memory --enable impact-graph --enable skeleton
 ```
 
 ## Integration tests

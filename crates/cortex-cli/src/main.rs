@@ -119,6 +119,58 @@ enum McpTransportArg {
     Multi,
 }
 
+/// Optional MCP tools that are disabled by default and can be activated with `--enable`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum McpEnableFlag {
+    /// get_context_capsule — hybrid graph+vector context retrieval
+    #[value(name = "context-capsule")]
+    ContextCapsule,
+    /// get_impact_graph — blast-radius analysis for a symbol
+    #[value(name = "impact-graph")]
+    ImpactGraph,
+    /// search_logic_flow — logic path search between symbols
+    #[value(name = "logic-flow")]
+    LogicFlow,
+    /// index_status — current indexing state for a repository
+    #[value(name = "index-status")]
+    IndexStatus,
+    /// get_skeleton, get_signature, find_tests, explain_result, find_patterns
+    #[value(name = "skeleton")]
+    Skeleton,
+    /// workspace_setup — one-time workspace bootstrap tool
+    #[value(name = "workspace-setup")]
+    WorkspaceSetup,
+    /// submit_lsp_edges — ingest LSP-derived edges into the graph
+    #[value(name = "lsp-ingest")]
+    LspIngest,
+    /// save_observation + get_session_context + search_memory (all memory tools)
+    #[value(name = "memory")]
+    Memory,
+    /// save_observation only (write side of memory)
+    #[value(name = "memory-write")]
+    MemoryWrite,
+    /// get_session_context + search_memory only (read side of memory)
+    #[value(name = "memory-read")]
+    MemoryRead,
+}
+
+impl McpEnableFlag {
+    fn as_flag_name(self) -> &'static str {
+        match self {
+            Self::ContextCapsule => "context_capsule",
+            Self::ImpactGraph => "impact_graph",
+            Self::LogicFlow => "logic_flow",
+            Self::IndexStatus => "index_status",
+            Self::Skeleton => "skeleton",
+            Self::WorkspaceSetup => "workspace_setup",
+            Self::LspIngest => "lsp_ingest",
+            Self::Memory => "memory",
+            Self::MemoryWrite => "memory_write",
+            Self::MemoryRead => "memory_read",
+        }
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "cortex", version, about = "CodeCortex CLI toolkit")]
 struct Cli {
@@ -358,6 +410,12 @@ enum McpCommand {
         /// Idle timeout for websocket clients.
         #[arg(long = "idle-timeout-secs", default_value_t = 600)]
         idle_timeout_secs: u64,
+        /// Enable optional tools that are off by default.
+        /// Repeat to enable multiple: --enable memory --enable context-capsule
+        /// Environment variables (CORTEX_FLAG_MCP_*_ENABLED) are still respected and
+        /// combined with these flags (either source can enable a tool).
+        #[arg(long = "enable", value_enum, value_name = "TOOL")]
+        enable: Vec<McpEnableFlag>,
     },
     Tools,
 }
@@ -1394,6 +1452,7 @@ async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
             allow_remote,
             max_clients,
             idle_timeout_secs,
+            enable,
         } => {
             let effective_token = if let Some(value) = token {
                 Some(value)
@@ -1428,6 +1487,13 @@ async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
                 );
             }
 
+            // Build feature flags: start from env vars, then layer CLI --enable args on top.
+            let enable_names: Vec<String> = enable
+                .iter()
+                .map(|f| f.as_flag_name().to_string())
+                .collect();
+            let feature_flags = cortex_mcp::FeatureFlags::from_env_with_overrides(&enable_names);
+
             let options = cortex_mcp::McpServeOptions {
                 transport,
                 listen,
@@ -1435,6 +1501,7 @@ async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
                 allow_remote,
                 max_clients,
                 idle_timeout_secs,
+                feature_flags,
             };
             cortex_mcp::start_with_options(config.clone(), options).await?;
         }
@@ -7947,6 +8014,7 @@ index 123..456 100644
                         allow_remote,
                         max_clients,
                         idle_timeout_secs,
+                        enable,
                     },
             } => {
                 assert_eq!(transport, McpTransportArg::Stdio);
@@ -7956,6 +8024,7 @@ index 123..456 100644
                 assert!(!allow_remote);
                 assert_eq!(max_clients, 64);
                 assert_eq!(idle_timeout_secs, 600);
+                assert!(enable.is_empty());
             }
             _ => panic!("expected mcp start defaults"),
         }
@@ -7992,6 +8061,7 @@ index 123..456 100644
                         allow_remote,
                         max_clients,
                         idle_timeout_secs,
+                        enable: _,
                     },
             } => {
                 assert_eq!(transport, McpTransportArg::Multi);

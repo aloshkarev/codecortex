@@ -159,7 +159,44 @@ cortex mcp start
 
 ## Feature flags
 
-Several MCP tools are disabled by default and must be explicitly enabled before starting the server. Set environment variables before calling `cortex mcp start`.
+Several MCP tools are disabled by default because they are resource-intensive, have persistent side effects, or require additional setup. Enable them with `--enable` CLI args (preferred) or environment variables. Both sources are combined — either can activate a tool.
+
+### `--enable` flags (preferred — no env vars needed)
+
+```bash
+cortex mcp start --enable memory --enable context-capsule
+cortex mcp start --enable memory --enable impact-graph --enable skeleton
+```
+
+| `--enable` value | Default | Tool(s) controlled |
+|-----------------|---------|-------------------|
+| `context-capsule` | off | `get_context_capsule` |
+| `impact-graph` | off | `get_impact_graph`, `analyze_refactoring` |
+| `logic-flow` | off | `search_logic_flow` |
+| `index-status` | off | `index_status` |
+| `skeleton` | off | `get_skeleton`, `get_signature`, `find_tests`, `explain_result`, `find_patterns` |
+| `workspace-setup` | off | `workspace_setup` |
+| `lsp-ingest` | off | `submit_lsp_edges` |
+| `memory` | off | `save_observation`, `get_session_context`, `search_memory` |
+| `memory-write` | off | `save_observation` only |
+| `memory-read` | off | `get_session_context`, `search_memory` only |
+
+For Cursor, pass `--enable` in `args`:
+
+```json
+{
+  "mcpServers": {
+    "codecortex": {
+      "command": "cortex",
+      "args": ["mcp", "start", "--enable", "memory", "--enable", "context-capsule"]
+    }
+  }
+}
+```
+
+### Environment variable overrides
+
+Tools can also be toggled with environment variables. These are combined with `--enable` args.
 
 | Tool | Environment variable | Default |
 |------|---------------------|---------|
@@ -179,32 +216,7 @@ Several MCP tools are disabled by default and must be explicitly enabled before 
 | TF-IDF reranking | `CORTEX_FLAG_MCP_TFIDF_SCORING_ENABLED` | `true` |
 | Graph centrality scoring | `CORTEX_FLAG_MCP_CENTRALITY_SCORING_ENABLED` | `true` |
 
-Example — enable memory and context capsule tools:
-
-```bash
-CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=true \
-CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED=true \
-CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED=true \
-cortex mcp start
-```
-
-For Cursor, pass env vars in the MCP config:
-
-```json
-{
-  "mcpServers": {
-    "codecortex": {
-      "command": "cortex",
-      "args": ["mcp", "start"],
-      "env": {
-        "CORTEX_FLAG_MCP_MEMORY_READ_ENABLED": "true",
-        "CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED": "true",
-        "CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED": "true"
-      }
-    }
-  }
-}
-```
+Accepted env values: `1`, `true`, `yes`, `on` (enable); `0`, `false`, `no`, `off` (disable).
 
 ## How MCP requests map to data
 

@@ -173,6 +173,46 @@ impl FeatureFlags {
         flags
     }
 
+    /// Create from environment variables, then enable any flags named in `enabled`.
+    ///
+    /// Names accept either `snake_case` or `kebab-case` (dashes are normalised to underscores).
+    ///
+    /// Supported override names:
+    /// - `context_capsule` / `context-capsule`
+    /// - `impact_graph` / `impact-graph`
+    /// - `logic_flow` / `logic-flow`
+    /// - `index_status` / `index-status`
+    /// - `skeleton`
+    /// - `workspace_setup` / `workspace-setup`
+    /// - `lsp_ingest` / `lsp-ingest`
+    /// - `memory` (enables both `memory_read` and `memory_write`)
+    /// - `memory_read` / `memory-read`
+    /// - `memory_write` / `memory-write`
+    pub fn from_env_with_overrides(enabled: &[String]) -> Self {
+        let mut flags = Self::from_env();
+        for name in enabled {
+            match name.replace('-', "_").to_ascii_lowercase().as_str() {
+                "context_capsule" => flags.context_capsule = true,
+                "impact_graph" => flags.impact_graph = true,
+                "logic_flow" => flags.logic_flow = true,
+                "index_status" => flags.index_status = true,
+                "skeleton" => flags.skeleton = true,
+                "workspace_setup" => flags.workspace_setup = true,
+                "lsp_ingest" => flags.lsp_ingest = true,
+                "memory" => {
+                    flags.memory_read = true;
+                    flags.memory_write = true;
+                }
+                "memory_read" => flags.memory_read = true,
+                "memory_write" => flags.memory_write = true,
+                other => {
+                    tracing::warn!("Unknown --enable flag ignored: {other}");
+                }
+            }
+        }
+        flags
+    }
+
     /// Create a new instance with all flags enabled (for testing)
     pub fn all_enabled() -> Self {
         Self {

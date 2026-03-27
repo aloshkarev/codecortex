@@ -62,14 +62,15 @@ Run `cortex mcp tools` to verify the server lists tools. Check the client config
 Re-index the repository (`cortex index /path/to/repo`) and restart the MCP process. For automatic updates, use `cortex watch`.
 
 **Q: How do I enable memory / context capsule / impact graph tools?**
-These are off by default. Set the corresponding feature flag before starting the MCP server:
+These are off by default. Use `--enable` args on `cortex mcp start` (preferred):
 ```bash
-CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=true \
-CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED=true \
-CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED=true \
-cortex mcp start
+cortex mcp start --enable memory --enable context-capsule --enable impact-graph
 ```
-See the [Feature flags section in README.md](README.md#feature-flags) for the full list.
+Or set environment variables before starting (both sources are combined):
+```bash
+CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=true cortex mcp start
+```
+See the [Feature flags section in README.md](README.md#feature-flags) for the full list of `--enable` values and env vars.
 
 **Q: How do I expose the MCP server over the network?**
 Use `--transport http-sse` or `--transport multi` with `--listen`, `--allow-remote`, and `--token-env`. Always set a bearer token and terminate TLS at a reverse proxy. See [SECURITY.md](SECURITY.md) for hardening guidance.

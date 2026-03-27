@@ -280,7 +280,39 @@ See [docs/INTEGRATION.md](docs/INTEGRATION.md) for client setup (Cursor, Claude 
 
 ## Feature flags
 
-MCP tools that are resource-intensive or optional are disabled by default. Enable them with environment variables before starting the MCP server:
+Several MCP tools are disabled by default because they are resource-intensive, have side effects, or require additional setup. Enable them with `--enable` args on `cortex mcp start`, or with environment variables. Both sources are combined — either can activate a tool.
+
+### `--enable` flags (recommended)
+
+```bash
+cortex mcp start --enable memory --enable context-capsule
+```
+
+| `--enable` value | Default | Tool(s) controlled |
+|-----------------|---------|-------------------|
+| `context-capsule` | off | `get_context_capsule` |
+| `impact-graph` | off | `get_impact_graph`, `analyze_refactoring` |
+| `logic-flow` | off | `search_logic_flow` |
+| `index-status` | off | `index_status` |
+| `skeleton` | off | `get_skeleton`, `get_signature`, `find_tests`, `explain_result`, `find_patterns` |
+| `workspace-setup` | off | `workspace_setup` |
+| `lsp-ingest` | off | `submit_lsp_edges` |
+| `memory` | off | `save_observation`, `get_session_context`, `search_memory` |
+| `memory-write` | off | `save_observation` only |
+| `memory-read` | off | `get_session_context`, `search_memory` only |
+
+Repeat `--enable` to activate multiple tools:
+
+```bash
+cortex mcp start \
+  --enable memory \
+  --enable context-capsule \
+  --enable impact-graph
+```
+
+### Environment variable overrides
+
+All tools can also be toggled with environment variables. These are combined with `--enable` — either source can activate a tool.
 
 | Environment variable | Default | Tool(s) controlled |
 |---------------------|---------|-------------------|
@@ -300,14 +332,7 @@ MCP tools that are resource-intensive or optional are disabled by default. Enabl
 | `CORTEX_FLAG_MCP_TFIDF_SCORING_ENABLED` | `true` | TF-IDF reranking |
 | `CORTEX_FLAG_MCP_CENTRALITY_SCORING_ENABLED` | `true` | Graph centrality scoring |
 
-Accepted values: `1`, `true`, `yes`, `on` to enable; `0`, `false`, `no`, `off` to disable.
-
-```bash
-CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED=true \
-CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=true \
-CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED=true \
-cortex mcp start
-```
+Accepted env values: `1`, `true`, `yes`, `on` to enable; `0`, `false`, `no`, `off` to disable.
 
 ## Comparison with alternatives
 

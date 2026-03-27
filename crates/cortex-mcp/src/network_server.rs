@@ -1,3 +1,4 @@
+use crate::FeatureFlags;
 use crate::handler::{CortexHandler, McpServeOptions, McpTransport};
 use axum::extract::Extension;
 use axum::extract::Request;
@@ -26,6 +27,7 @@ struct NetworkState {
     max_clients: usize,
     idle_timeout_secs: u64,
     ws_clients: Arc<AtomicUsize>,
+    feature_flags: FeatureFlags,
 }
 
 fn unauthorized_response() -> Response {
@@ -99,7 +101,7 @@ async fn websocket_loop(socket: WebSocket, state: NetworkState) {
             future::ready(text.map(|text| Message::Text(text.into())))
         });
 
-    let handler = CortexHandler::new(state.config.clone());
+    let handler = CortexHandler::new_with_flags(state.config.clone(), state.feature_flags.clone());
     let service = match handler.serve::<_, io::Error, _>((outgoing, incoming)).await {
         Ok(svc) => svc,
         Err(err) => {
@@ -120,6 +122,7 @@ pub async fn start_network(config: CortexConfig, options: McpServeOptions) -> an
         max_clients: options.max_clients,
         idle_timeout_secs: options.idle_timeout_secs,
         ws_clients: Arc::new(AtomicUsize::new(0)),
+        feature_flags: options.feature_flags.clone(),
     };
 
     let mut app = Router::new();
@@ -129,9 +132,15 @@ pub async fn start_network(config: CortexConfig, options: McpServeOptions) -> an
         McpTransport::HttpSse | McpTransport::Multi
     ) {
         let cfg_for_factory = config.clone();
+        let flags_for_factory = options.feature_flags.clone();
         let http_service: StreamableHttpService<CortexHandler, LocalSessionManager> =
             StreamableHttpService::new(
-                move || Ok(CortexHandler::new(cfg_for_factory.clone())),
+                move || {
+                    Ok(CortexHandler::new_with_flags(
+                        cfg_for_factory.clone(),
+                        flags_for_factory.clone(),
+                    ))
+                },
                 Default::default(),
                 StreamableHttpServerConfig::default(),
             );

@@ -103,7 +103,28 @@ AI agents can fetch the routing guide via MCP resource reads to understand which
 
 ## Feature flags
 
-Several tools are disabled by default to avoid resource consumption or require explicit opt-in. Set the corresponding environment variable before starting the MCP server.
+Several tools are disabled by default because they are resource-intensive, have persistent side effects, or require additional setup. Enable them via `--enable` CLI args (preferred) or environment variables. Both sources are combined.
+
+### `--enable` (preferred)
+
+```bash
+cortex mcp start --enable memory --enable context-capsule --enable impact-graph
+```
+
+| `--enable` value | Default | Controls |
+|-----------------|---------|---------|
+| `context-capsule` | off | `get_context_capsule` |
+| `impact-graph` | off | `get_impact_graph`, `analyze_refactoring` |
+| `logic-flow` | off | `search_logic_flow` |
+| `index-status` | off | `index_status` |
+| `skeleton` | off | `get_skeleton`, `get_signature`, `find_tests`, `explain_result`, `find_patterns` |
+| `workspace-setup` | off | `workspace_setup` |
+| `lsp-ingest` | off | `submit_lsp_edges` |
+| `memory` | off | `save_observation`, `get_session_context`, `search_memory` |
+| `memory-write` | off | `save_observation` only |
+| `memory-read` | off | `get_session_context`, `search_memory` only |
+
+### Environment variables
 
 | Environment variable | Default | Controls |
 |---------------------|---------|---------|
@@ -123,14 +144,7 @@ Several tools are disabled by default to avoid resource consumption or require e
 | `CORTEX_FLAG_MCP_TFIDF_SCORING_ENABLED` | `true` | TF-IDF reranking |
 | `CORTEX_FLAG_MCP_CENTRALITY_SCORING_ENABLED` | `true` | Graph centrality scoring |
 
-Accepted values: `1`, `true`, `yes`, `on` (enable); `0`, `false`, `no`, `off` (disable).
-
-```bash
-CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED=true \
-CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=true \
-CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED=true \
-cortex mcp start
-```
+Accepted env values: `1`, `true`, `yes`, `on` (enable); `0`, `false`, `no`, `off` (disable).
 
 ## Transports
 
