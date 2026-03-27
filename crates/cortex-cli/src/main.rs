@@ -192,16 +192,21 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 #[allow(clippy::large_enum_variant)]
 enum Commands {
+    /// Interactive first-run setup wizard (configure graph backend, LLM provider, MCP client)
     Setup,
+    /// Verify connectivity to the graph backend and validate configuration
     Doctor,
+    /// Manage the background indexing daemon
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
     },
+    /// MCP server commands (start server or list available tools)
     Mcp {
         #[command(subcommand)]
         command: McpCommand,
     },
+    /// Parse and index a repository into the graph database
     Index {
         path: String,
         #[arg(long)]
@@ -213,41 +218,46 @@ enum Commands {
         #[arg(long)]
         base_branch: Option<String>,
     },
-    Watch {
-        path: String,
-    },
-    Unwatch {
-        path: String,
-    },
+    /// Watch a path for file changes and trigger automatic re-indexing
+    Watch { path: String },
+    /// Stop watching a previously watched path
+    Unwatch { path: String },
+    /// Search for code entities (name, pattern, type, content, decorator, argument)
     Find {
         #[command(subcommand)]
         command: FindCommand,
     },
+    /// Run structural analysis (callers, callees, deps, complexity, smells, and more)
     Analyze {
         #[command(subcommand)]
         command: AnalyzeCommand,
     },
+    /// Export or import graph data as a portable bundle (.ccx)
     Bundle {
         #[command(subcommand)]
         command: BundleCommand,
     },
+    /// Show or modify the CodeCortex configuration
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
     },
+    /// Remove stale and orphaned graph data from the database
     Clean,
+    /// List all indexed repositories
     List,
-    Delete {
-        path: String,
-    },
+    /// Remove a repository from the graph index
+    Delete { path: String },
+    /// Show indexed file and node counts for repositories
     Stats,
-    Query {
-        cypher: String,
-    },
+    /// Execute a raw Cypher query against the graph database
+    Query { cypher: String },
+    /// Inspect background job queue (list or show status of indexing jobs)
     Jobs {
         #[command(subcommand)]
         command: JobsCommand,
     },
+    /// Debug internals (capsule, cache, trace, validate)
     Debug {
         #[command(subcommand)]
         command: DebugCommand,

@@ -15,7 +15,7 @@ set -euo pipefail
 # Configuration
 # ═══════════════════════════════════════════════════════════════════════════════
 
-CORTEX_VERSION="1.0.0"
+CORTEX_VERSION="1.0.1"
 CORTEX_BIN_NAME="cortex"
 REPO_URL="https://github.com/aloshkarev/codecortex"
 CORTEX_CONFIG_DIR="${HOME}/.cortex"
@@ -39,7 +39,8 @@ NC='\033[0m' # No Color
 NON_INTERACTIVE=false
 INSTALL_METHOD=""
 START_SERVICES=true
-INSTALL_MEMGRAPH=true
+INSTALL_MEMGRAPH=false   # opt-in: use --memgraph or answer yes at the prompt
+INSTALL_DOCKER=false     # opt-in: use --docker to also install Docker
 PREFER_NIX=true
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -236,17 +237,14 @@ check_dependencies() {
         fi
     fi
 
-    # Check for Docker (for Memgraph)
+    # Check for Docker (informational only — Memgraph setup is opt-in)
     if command_exists docker; then
         log_success "Docker found: $(docker --version)"
     else
-        log_warning "Docker not found - Memgraph installation will be limited"
-        if [ "$INSTALL_MEMGRAPH" = true ]; then
-            if ! confirm "Continue without Docker? (Memgraph will not be available)" "n"; then
-                exit 1
-            fi
-            INSTALL_MEMGRAPH=false
-        fi
+        log_info "Docker not found — skipping Docker-based Memgraph setup"
+        log_info "  Use --memgraph to install Memgraph, or point CodeCortex at your existing server"
+        # Don't abort; user may have a dedicated/remote Memgraph server
+        INSTALL_MEMGRAPH=false
     fi
 
     # Build-time preflight dependencies (source build path)
@@ -680,9 +678,28 @@ install_memgraph_native() {
 }
 
 setup_memgraph() {
-    if [ "$INSTALL_MEMGRAPH" = false ]; then
-        log_info "Skipping Memgraph installation"
+    # If user explicitly skipped with --no-memgraph, honour it silently.
+    if [ "$INSTALL_MEMGRAPH" = "skip" ]; then
+        log_info "Skipping Memgraph installation (--no-memgraph)"
         return 0
+    fi
+
+    # If not explicitly requested, ask in interactive mode.
+    if [ "$INSTALL_MEMGRAPH" = false ]; then
+        if [ "$NON_INTERACTIVE" = true ]; then
+            log_info "Skipping Memgraph setup (use --memgraph to install, or configure manually)"
+            return 0
+        fi
+        echo ""
+        log_info "Graph backend setup (optional)"
+        echo "  CodeCortex requires a Memgraph or Neo4j server."
+        echo "  If you already have one running (local or remote), answer 'n' and"
+        echo "  update memgraph_uri in ~/.cortex/config.toml after install."
+        if ! confirm "Install Memgraph via Docker now?" "n"; then
+            log_info "Skipping Memgraph setup — update ~/.cortex/config.toml with your server URI"
+            return 0
+        fi
+        INSTALL_MEMGRAPH=true
     fi
 
     log_step "Setting up Memgraph"
@@ -720,8 +737,10 @@ setup_config() {
 
     local config_file="${CORTEX_CONFIG_DIR}/config.toml"
 
-    if [ -f "$config_file" ]; then
-        log_info "Configuration file already exists at ${config_file}"
+    # Never overwrite an existing config (regular file, symlink, etc.).
+    # Use -L so a dangling symlink is still treated as "exists" and we do not clobber.
+    if [ -e "$config_file" ] || [ -L "$config_file" ]; then
+        log_info "Configuration file already exists — leaving unchanged: ${config_file}"
         return 0
     fi
 
@@ -1173,14 +1192,22 @@ print_summary() {
     esac
 
     echo ""
-    echo -e "  ${YELLOW}Memgraph:${NC}"
-    echo ""
-    echo "    # Check Memgraph status (Docker)"
-    echo "    docker ps | grep ${CONTAINER_NAME}"
-    echo ""
-    echo "    # Start Memgraph if stopped"
-    echo "    docker start ${CONTAINER_NAME}"
-    echo ""
+    if [ "$INSTALL_MEMGRAPH" = true ]; then
+        echo -e "  ${YELLOW}Memgraph:${NC}"
+        echo ""
+        echo "    # Check Memgraph status (Docker)"
+        echo "    docker ps | grep ${CONTAINER_NAME}"
+        echo ""
+        echo "    # Start Memgraph if stopped"
+        echo "    docker start ${CONTAINER_NAME}"
+        echo ""
+    else
+        echo -e "  ${YELLOW}Graph backend:${NC}"
+        echo ""
+        echo "    Update memgraph_uri in ~/.cortex/config.toml to point at your server."
+        echo "    Then run: cortex doctor"
+        echo ""
+    fi
 
     if [ "$NON_INTERACTIVE" = true ]; then
         echo -e "  ${YELLOW}Note:${NC} Run 'cortex setup' for interactive configuration"
@@ -1203,15 +1230,23 @@ show_help() {
     echo "Options:"
     echo "  --non-interactive    Run without prompts (use defaults)"
     echo "  --no-nix             Do not use Nix even if installed"
-    echo "  --no-memgraph        Skip Memgraph installation"
-    echo "  --no-service         Skip service setup"
+    echo "  --memgraph           Install and start Memgraph via Docker (opt-in, default: off)"
+    echo "  --no-memgraph        Explicitly skip Memgraph setup (suppresses interactive prompt)"
+    echo "  --no-service         Skip launchd/systemd service setup"
     echo "  --help               Show this help message"
     echo ""
+    echo "Memgraph / Docker behaviour:"
+    echo "  By default the installer does NOT install Docker or Memgraph."
+    echo "  If you have an existing Memgraph or Neo4j server (local or remote),"
+    echo "  skip this step and update memgraph_uri in ~/.cortex/config.toml."
+    echo "  Use --memgraph to have the installer pull and start a Memgraph container."
+    echo ""
     echo "Examples:"
-    echo "  $0                           # Interactive installation"
-    echo "  $0 --non-interactive         # Non-interactive with defaults"
+    echo "  $0                           # Interactive installation (asks about Memgraph)"
+    echo "  $0 --non-interactive         # Non-interactive, skips Memgraph (configure manually)"
+    echo "  $0 --memgraph                # Also install Memgraph via Docker"
+    echo "  $0 --no-memgraph             # Suppress the Memgraph prompt entirely"
     echo "  $0 --no-nix                  # Force Cargo/binary installer path"
-    echo "  $0 --no-memgraph             # Skip Memgraph setup"
     echo ""
 }
 
@@ -1231,8 +1266,14 @@ main() {
                 PREFER_NIX=false
                 shift
                 ;;
+            --memgraph)
+                # Explicitly requested: install Memgraph via Docker
+                INSTALL_MEMGRAPH=true
+                shift
+                ;;
             --no-memgraph)
-                INSTALL_MEMGRAPH=false
+                # Explicitly skipped: suppress the interactive prompt too
+                INSTALL_MEMGRAPH="skip"
                 shift
                 ;;
             --no-service)

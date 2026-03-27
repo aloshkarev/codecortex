@@ -6,10 +6,10 @@ const CYCLOMATIC_TOKEN_PREFIXES: &[&str] = &[
 
 pub fn compute_cyclomatic_complexity(source: &str) -> u32 {
     let mut complexity = 1u32;
-    let mut i = 0;
-    let bytes = source.as_bytes();
-    while i < bytes.len() {
-        let rest = &source[i..];
+    // Iterate over valid char boundaries so multi-byte Unicode never causes a
+    // panic when slicing `source[byte_pos..]`.
+    for (byte_pos, _ch) in source.char_indices() {
+        let rest = &source[byte_pos..];
         if CYCLOMATIC_TOKEN_PREFIXES
             .iter()
             .any(|prefix| rest.starts_with(prefix))
@@ -17,7 +17,6 @@ pub fn compute_cyclomatic_complexity(source: &str) -> u32 {
         {
             complexity = complexity.saturating_add(1);
         }
-        i += 1;
     }
     complexity
 }
@@ -315,5 +314,23 @@ mod tests {
         assert_eq!(ComplexityRating::Moderate.as_str(), "moderate");
         assert_eq!(ComplexityRating::Complex.as_str(), "complex");
         assert_eq!(ComplexityRating::VeryComplex.as_str(), "very_complex");
+    }
+
+    /// Regression: source containing multi-byte Unicode characters (em-dash, arrow, etc.)
+    /// must not panic when computing cyclomatic complexity.
+    #[test]
+    fn complexity_unicode_in_source_does_not_panic() {
+        let sources = [
+            "fn f() { // — em-dash in comment\n if x { 1 } else { 2 } }",
+            "fn g() { /* → arrow */ for i in 0..n { } }",
+            "let s = \"≈ approximate\"; if ok { return s; }",
+            "// ▲ ● ‑ … · – multi-byte chars everywhere\nwhile cond { }",
+            "fn h() { match x { Some(v) => v, None => 0 } }",
+        ];
+        for src in &sources {
+            // Must not panic; we don't assert a specific value.
+            let _ = compute_cyclomatic_complexity(src);
+            let _ = compute_cognitive_complexity(src);
+        }
     }
 }
