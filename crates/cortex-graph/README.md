@@ -1,24 +1,65 @@
 # cortex-graph
 
-Graph database client and query engine for code intelligence.
+> `cortex-graph` is the graph database client and Cypher query engine for CodeCortex. It stores and retrieves code relationships in Memgraph, Neo4j, or AWS Neptune using type-safe, parameterized queries, and supports export/import of graph snapshots as compressed MessagePack bundles.
 
-## Overview
+## What it does
 
-This crate provides graph database integration for storing and querying code relationships.
+- Connects to and queries Memgraph, Neo4j, or AWS Neptune via the Bolt protocol
+- Provides a type-safe Cypher query builder for all relationship traversal patterns
+- Manages a connection pool with health checks and configurable timeouts
+- Runs versioned schema migrations (indexes and constraints) on startup
+- Exports and imports graph data as `.ccx` MessagePack bundles for offline use or transfer
 
 ## Features
 
-- **Graph Client**: Connection to Neo4j/Memgraph databases
-- **Query Engine**: Type-safe Cypher query building
-- **Bundle Store**: Export/import graph data in MessagePack format
-- **Schema Management**: Versioned migrations for indexes and constraints
-- **Connection Pool**: Managed database connections with health checks
-- **Multiple Backends**: Neo4j, Memgraph, and Neptune support
-- **Query Timeouts**: Configurable timeout handling with retry logic
+| Feature | Description |
+|---------|-------------|
+| `GraphClient` | Primary connection entry point supporting all three backends |
+| `QueryEngine` | Type-safe Cypher builder for callers, callees, deps, hierarchy, and more |
+| `ConnectionPool` | Managed pool via `deadpool` with configurable size and timeout |
+| `MigrationManager` | Versioned schema migrations for indexes and constraints |
+| `BundleStore` | Export/import graph data in MessagePack format |
+| `CrossProjectQueryBuilder` | Multi-repository query composition and filtering |
+| Parameterized queries | All query paths use parameters — Cypher injection is not possible |
+
+## Supported backends
+
+| Backend | `backend_type` value | URI format | Notes |
+|---------|---------------------|-----------|-------|
+| Memgraph | `memgraph` | `memgraph://host:7687` or `bolt://host:7687` | Default; recommended for local use |
+| Neo4j | `neo4j` | `bolt://host:7687` or `neo4j://host:7687` | Enterprise-compatible |
+| AWS Neptune | `neo4j` | `bolt://your.neptune.endpoint:8182` | Use Neo4j driver with Neptune Bolt endpoint |
+
+## Graph schema
+
+### Node labels
+
+| Label | Properties |
+|-------|-----------|
+| `Repository` | `path`, `name`, `language` |
+| `Directory` | `path`, `name` |
+| `File` | `path`, `name`, `language`, `hash` |
+| `Function` / `Method` | `name`, `qualified_name`, `visibility`, `file`, `line` |
+| `Class` / `Struct` / `Enum` / `Trait` | `name`, `qualified_name`, `visibility`, `file`, `line` |
+
+### Relationship types
+
+| Type | Source → Target | Description |
+|------|----------------|-------------|
+| `CONTAINS` | Directory/File → child | Hierarchical containment |
+| `CALLS` | Function → Function | Function or method call |
+| `IMPORTS` | File → Symbol | Import or `use` statement |
+| `INHERITS` | Class → Class | Inheritance |
+| `IMPLEMENTS` | Class/Struct → Trait | Trait or interface implementation |
+| `MEMBER_OF` | Method/Field → Type | Member-to-parent type relationship |
+| `TYPE_REFERENCE` | Symbol → Type | Type used in a type-position |
+| `FIELD_ACCESS` | Expression → Field | Field access expression |
+
+Schema indexes are maintained on `qualified_name` for fast symbol resolution during navigation queries.
 
 ## Usage
 
-### Connecting to Database
+### Connect to database
 
 ```rust
 use cortex_graph::GraphClient;
@@ -26,21 +67,20 @@ use cortex_core::CortexConfig;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let config = CortexConfig::default();
+    let config = CortexConfig::load()?;
     let client = GraphClient::connect(&config).await?;
-    // Execute queries...
     Ok(())
 }
 ```
 
-### Connection Pooling
+### Connection pooling
 
 ```rust
 use cortex_graph::pool::{ConnectionPool, PoolConfig};
 use cortex_core::CortexConfig;
 use std::time::Duration;
 
-let db_config = CortexConfig::default();
+let db_config = CortexConfig::load()?;
 let pool_config = PoolConfig {
     max_connections: 10,
     min_idle: 2,
@@ -51,20 +91,22 @@ let pool = ConnectionPool::new(db_config, pool_config);
 let conn = pool.get().await?;
 ```
 
-### Exporting Data
+### Export and import bundles
 
 ```rust
 use cortex_graph::{GraphClient, BundleStore};
 use std::path::Path;
 
-async fn export_example(client: &GraphClient) -> Result<(), Box<dyn std::error::Error>> {
-    let bundle = BundleStore::export_from_graph(client, "/path/to/repo").await?;
-    BundleStore::export(Path::new("export.ccx"), &bundle)?;
-    Ok(())
-}
+// Export
+let bundle = BundleStore::export_from_graph(&client, "/path/to/repo").await?;
+BundleStore::export(Path::new("export.ccx"), &bundle)?;
+
+// Import
+let bundle = BundleStore::import(Path::new("export.ccx"))?;
+BundleStore::import_to_graph(&client, &bundle).await?;
 ```
 
-### Schema Migrations
+### Schema migration
 
 ```rust
 use cortex_graph::migration::{MigrationManager, CURRENT_VERSION};
@@ -74,59 +116,32 @@ let result = manager.migrate(&client).await?;
 println!("Migrated to version {}", result.version);
 ```
 
-## Schema
+### Security: parameterized queries
 
-The graph uses the following node labels:
+All query methods use parameterized queries to prevent Cypher injection:
 
-- `Repository` - Root repository nodes
-- `Directory` - Directory structure
-- `File` - Source files
-- `Function`, `Class`, `Struct`, `Enum`, `Trait` - Code entities
+```rust
+// Safe: parameterized query
+let results = engine.callers("user_input").await?;
 
-Relationship types:
-
-- `CONTAINS` - Hierarchical containment
-- `CALLS` - Function calls
-- `IMPORTS` - Import statements
-- `INHERITS` - Class inheritance
-- `IMPLEMENTS` - Trait implementations
-- `MEMBER_OF` - Member-to-parent type relationship
-- `TYPE_REFERENCE` - Type-position references
-- `FIELD_ACCESS` - Field access expressions
-
-## Recent updates
-
-- Added `CrossProjectQueryBuilder` for multi-repository query composition and filtering.
-- Added navigation-oriented schema indexes on `qualified_name` for fast symbol resolution.
-- `GraphClient` now includes type-reference resolution and promotes key node properties (`qualified_name`, `visibility`) for query efficiency.
+// Also safe: explicit parameter binding
+let results = client
+    .query_with_param("MATCH (n) WHERE n.name = $name RETURN n", "name", user_input)
+    .await?;
+```
 
 ## Dependencies
 
-- `neo4rs` - Neo4j driver
-- `deadpool` - Connection pooling
-- `rmp-serde` - MessagePack serialization
-- `serde` - Serialization
+- `neo4rs` — Neo4j/Memgraph Bolt driver
+- `rsmgclient` — Memgraph native client
+- `deadpool` — Async connection pooling
+- `rmp-serde` — MessagePack serialization (bundle format)
+- `serde` / `serde_json` — Serialization
 
 ## Tests
-
-Run tests with:
 
 ```bash
 cargo test -p cortex-graph -- --test-threads=1
 ```
 
 Current test count: **84 tests**
-
-## Security
-
-All query methods use parameterized queries to prevent Cypher injection:
-
-```rust
-// Safe: uses parameterized query
-let results = engine.callers("user_input").await?;
-
-// Also safe: GraphClient methods
-let results = client
-    .query_with_param("MATCH (n) WHERE n.name = $name RETURN n", "name", user_input)
-    .await?;
-```

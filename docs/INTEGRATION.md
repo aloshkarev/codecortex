@@ -1,69 +1,70 @@
 # Integrations
 
-This guide explains how to connect MCP-capable clients to CodeCortex.
+> This guide explains how to connect MCP-capable AI clients to CodeCortex and how to configure the MCP server for different deployment scenarios.
 
-For the multi-language real integration test runbook, see:
+For the multi-language real integration test runbook, see [docs/INTEGRATION_TEST_MATRIX.md](INTEGRATION_TEST_MATRIX.md).
 
-- `docs/INTEGRATION_TEST_MATRIX.md`
-
-Runtime language support includes Rust, Python, Go, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Kotlin, Swift, JSON, and Shell.
+Runtime language support: Rust, Python, Go, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Kotlin, Swift, JSON, Shell (14 languages).
 
 ## Recommended runtime flow
 
 Use one shared runtime per repository:
 
-1. index graph data (`cortex index`)
-2. index vector data (`cortex vector-index`)
-3. run MCP server (`cortex mcp start`)
+```bash
+# 1. Index graph data
+cortex index /path/to/repo
+
+# 2. Index vector data (optional, enables semantic search)
+cortex vector-index /path/to/repo
+
+# 3. Start MCP server
+cortex mcp start
+```
+
+One-command bootstrap:
+
+```bash
+cortex doctor && cortex index "/path/to/repo" && cortex vector-index "/path/to/repo" && cortex mcp start
+```
 
 ## Scope and context model
 
-CodeCortex now runs in two default modes:
+CodeCortex uses two default scopes:
 
-- inside a known project: operations are project-scoped and use branch-aware graph context
-- outside known projects: `find`/`search` default to all-project scope unless `--project` is provided
+| Context | Default scope |
+|---------|--------------|
+| Inside a known project (registered via `cortex project add`) | Single-project, branch-aware graph context |
+| Outside known projects | `find`/`search` default to all-project scope |
 
-Common scope flags:
-
-- `--all-projects`: force cross-project mode
-- `--project <path>`: force explicit single-project mode
-
-## Bootstrap command
-
-```bash
-cortex doctor && cortex index "<repo>" && cortex vector-index "<repo>" && cortex mcp start
-```
+Override flags:
+- `--all-projects` — force cross-project mode
+- `--project <path>` — force single-project mode
 
 ## MCP transports
 
-Default behavior remains stdio:
+The default transport is stdio. All transports use the same `CortexHandler` routing path, so tool behavior and schemas are identical.
 
 ```bash
-cortex mcp start
+cortex mcp start                          # stdio (default)
 ```
 
 Network options:
 
-- `--transport http-sse` for Streamable HTTP-style SSE responses on `POST /mcp`
-- `--transport websocket` for JSON-RPC over `GET /ws`
-- `--transport multi` to expose both endpoints
-- `--listen <addr:port>` to set bind address (default `127.0.0.1:3001`)
-- `--allow-remote` required for non-loopback bind
-- `--token` or `--token-env` for optional bearer token auth
+| Flag | Description |
+|------|-------------|
+| `--transport http-sse` | HTTP+SSE responses on `POST /mcp` |
+| `--transport websocket` | JSON-RPC over `GET /ws` |
+| `--transport multi` | Expose both HTTP+SSE and WebSocket simultaneously |
+| `--listen <addr:port>` | Bind address (default `127.0.0.1:3001`) |
+| `--allow-remote` | Required for non-loopback bind |
+| `--token <value>` | Static bearer token |
+| `--token-env <ENV>` | Bearer token from environment variable |
+| `--max-clients <N>` | Maximum concurrent network clients |
+| `--idle-timeout-secs <N>` | Disconnect idle clients after N seconds |
 
-All transports use the same `CortexHandler` routing path, so tool contracts and behavior remain aligned between stdio and network clients.
+## Client setup
 
-Example remote-safe setup:
-
-```bash
-cortex mcp start \
-  --transport multi \
-  --listen 0.0.0.0:3001 \
-  --allow-remote \
-  --token-env CORTEX_MCP_TOKEN
-```
-
-## Cursor
+### Cursor
 
 `~/.cursor/mcp.json`:
 
@@ -78,19 +79,47 @@ cortex mcp start \
 }
 ```
 
-## Claude Code
+### VS Code (with MCP-capable extension)
+
+`.vscode/mcp.json` or user-level MCP config:
+
+```json
+{
+  "mcpServers": {
+    "codecortex": {
+      "command": "cortex",
+      "args": ["mcp", "start"]
+    }
+  }
+}
+```
+
+For network transport (e.g., remote dev container):
+
+```json
+{
+  "mcpServers": {
+    "codecortex": {
+      "command": "cortex",
+      "args": ["mcp", "start", "--transport", "http-sse", "--listen", "127.0.0.1:3001"]
+    }
+  }
+}
+```
+
+### Claude Code
 
 ```bash
 claude mcp add cortex -- cortex mcp start
 ```
 
-## Codex CLI
+### Codex CLI
 
 ```bash
 codex mcp add cortex -- cortex mcp start
 ```
 
-## Gemini CLI
+### Gemini CLI
 
 `~/.gemini/settings.json`:
 
@@ -105,7 +134,7 @@ codex mcp add cortex -- cortex mcp start
 }
 ```
 
-## Zed
+### Zed
 
 ```json
 {
@@ -120,43 +149,96 @@ codex mcp add cortex -- cortex mcp start
 }
 ```
 
-## Neovim
+### Neovim
 
-Configure your MCP-capable plugin/client to run:
+Configure your MCP-capable plugin to run:
 
 ```bash
 cortex mcp start
 ```
 
+## Feature flags
+
+Several MCP tools are disabled by default and must be explicitly enabled before starting the server. Set environment variables before calling `cortex mcp start`.
+
+| Tool | Environment variable | Default |
+|------|---------------------|---------|
+| `get_context_capsule` | `CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED` | `false` |
+| `get_impact_graph` | `CORTEX_FLAG_MCP_IMPACT_GRAPH_ENABLED` | `false` |
+| `search_logic_flow` | `CORTEX_FLAG_MCP_LOGIC_FLOW_ENABLED` | `false` |
+| `index_status` | `CORTEX_FLAG_MCP_INDEX_STATUS_ENABLED` | `false` |
+| `get_skeleton` | `CORTEX_FLAG_MCP_SKELETON_ENABLED` | `false` |
+| `workspace_setup` | `CORTEX_FLAG_MCP_WORKSPACE_SETUP_ENABLED` | `false` |
+| `submit_lsp_edges` | `CORTEX_FLAG_MCP_LSP_INGEST_ENABLED` | `false` |
+| `get_session_context`, `search_memory` | `CORTEX_FLAG_MCP_MEMORY_READ_ENABLED` | `false` |
+| `save_observation` | `CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED` | `false` |
+| `vector_search`, `vector_search_hybrid`, `search_across_projects` | `CORTEX_FLAG_MCP_VECTOR_READ_ENABLED` | `true` |
+| `vector_index_repository`, `vector_index_file` | `CORTEX_FLAG_MCP_VECTOR_WRITE_ENABLED` | `true` |
+| Query result caching | `CORTEX_FLAG_MCP_CACHE_ENABLED` | `true` |
+| Telemetry | `CORTEX_FLAG_MCP_TELEMETRY_ENABLED` | `true` |
+| TF-IDF reranking | `CORTEX_FLAG_MCP_TFIDF_SCORING_ENABLED` | `true` |
+| Graph centrality scoring | `CORTEX_FLAG_MCP_CENTRALITY_SCORING_ENABLED` | `true` |
+
+Example — enable memory and context capsule tools:
+
+```bash
+CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=true \
+CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED=true \
+CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED=true \
+cortex mcp start
+```
+
+For Cursor, pass env vars in the MCP config:
+
+```json
+{
+  "mcpServers": {
+    "codecortex": {
+      "command": "cortex",
+      "args": ["mcp", "start"],
+      "env": {
+        "CORTEX_FLAG_MCP_MEMORY_READ_ENABLED": "true",
+        "CORTEX_FLAG_MCP_MEMORY_WRITE_ENABLED": "true",
+        "CORTEX_FLAG_MCP_CONTEXT_CAPSULE_ENABLED": "true"
+      }
+    }
+  }
+}
+```
+
 ## How MCP requests map to data
 
-- graph tools query Memgraph/Neo4j-backed code graph
-- vector tools query vector index data
-- hybrid paths combine both
+| Tool area | Data source |
+|-----------|------------|
+| Graph tools (`find_code`, `analyze_*`, navigation) | Memgraph/Neo4j/Neptune graph |
+| Vector tools (`vector_search`, `vector_search_hybrid`) | LanceDB/Qdrant vector index |
+| Hybrid paths (`get_context_capsule`, `search_logic_flow`) | Graph + vector combined |
+| Memory tools | SQLite session store (`~/.cortex/memory.db`) |
 
 Typical request lifecycle:
 
-1. client discovers tools via `tools/list`
-2. client calls a tool with arguments
-3. tool executes on indexed data
-4. JSON response returns to the client
+1. AI client discovers tools via `tools/list`
+2. AI client calls a tool with arguments
+3. `CortexHandler` routes to the appropriate crate
+4. Tool executes on indexed data
+5. JSON response returns to the client
 
-## Navigation and review-aware MCP tools
+## Navigation and review tools
 
-Adds navigation-oriented tools backed by graph context:
+Navigation tools require indexed graph data with resolved navigation edges:
 
-- `go_to_definition`
-- `find_all_usages`
-- `quick_info`
-- `branch_structural_diff`
-- `pr_review`
-
-These tools require indexed graph data for the target repository/branch and return best results when both compared branches are indexed for structural diff.
+| Tool | Requires |
+|------|---------|
+| `go_to_definition` | Indexed repo with `MEMBER_OF` + `TYPE_REFERENCE` edges |
+| `find_all_usages` | Indexed repo with `CALLS` + `TYPE_REFERENCE` edges |
+| `quick_info` | Indexed repo |
+| `branch_structural_diff` | Both branches indexed for best results |
+| `pr_review` | Indexed repo or local diff input |
 
 CLI equivalents:
 
 ```bash
-cortex goto "main"
+cortex goto "GraphClient::connect"
 cortex usages "GraphClient"
 cortex info "GraphClient"
 cortex analyze branch-diff feature/nav main --structural
@@ -164,44 +246,55 @@ cortex analyze branch-diff feature/nav main --structural
 
 ## Analyze scope filters
 
-CLI flags:
+CLI flags and MCP payload fields are 1:1:
 
-- `--file` (same as include-file)
-- `--folder` (same as include-path; aliases: `--dir`, `--directory`)
-- `--include-path`
-- `--include-file`
-- `--include-glob`
-- `--exclude-path`
-- `--exclude-file`
-- `--exclude-glob`
+| CLI flag | MCP field |
+|----------|-----------|
+| `--folder` / `--dir` / `--directory` | `include_paths` |
+| `--file` | `include_files` |
+| `--include-glob` | `include_globs` |
+| `--exclude-path` | `exclude_paths` |
+| `--exclude-file` | `exclude_files` |
+| `--exclude-glob` | `exclude_globs` |
 
-MCP fields:
+## Network security hardening
 
-- `include_paths`
-- `include_files`
-- `include_globs`
-- `exclude_paths`
-- `exclude_files`
-- `exclude_globs`
+For any network transport deployment:
 
-CLI shorthand to MCP mapping:
+- **Default bind is loopback** (`127.0.0.1`). Non-loopback requires `--allow-remote`.
+- **Always set a bearer token** via `--token-env CORTEX_MCP_TOKEN`.
+- **Terminate TLS at a reverse proxy** (nginx, Caddy, Traefik). CodeCortex does not terminate TLS itself.
+- **Rotate tokens periodically** and use `--token-env` to avoid tokens in shell history or process lists.
 
-- `--folder` / `--dir` / `--directory` -> `include_paths`
-- `--file` -> `include_files`
+Example production-safe remote setup (behind nginx TLS proxy):
+
+```bash
+CORTEX_MCP_TOKEN="$(openssl rand -hex 32)" \
+cortex mcp start \
+  --transport multi \
+  --listen 127.0.0.1:3001 \
+  --token-env CORTEX_MCP_TOKEN
+```
+
+Then configure nginx to proxy `https://your.host/mcp` → `http://127.0.0.1:3001/mcp` with TLS.
+
+See [SECURITY.md](../SECURITY.md) for the full security model.
 
 ## Verification checklist
 
 1. `cortex doctor` passes
-2. repository is indexed
-3. `cortex mcp tools` returns tools
-4. one symbol lookup succeeds
-5. one impact/relationship query succeeds
+2. Repository is indexed (`cortex list` shows the repo)
+3. `cortex mcp tools` returns the tool list
+4. One symbol lookup succeeds: `cortex find name main`
+5. One analysis query succeeds: `cortex analyze callers main`
 
 ## Troubleshooting
 
-- no tools visible: verify command path and args
-- empty results: ensure repo was indexed in same runtime
-- stale output: re-index and restart MCP process
-- backend problems: run `cortex doctor` and inspect services
-
-For remote exposure, use TLS termination/reverse proxy in front of CodeCortex and keep bearer token auth enabled.
+| Symptom | Solution |
+|---------|----------|
+| No tools visible in AI client | Verify `command` path and `args` in client config. Run `cortex mcp tools` manually. |
+| Empty results | Ensure the repo is indexed in the same runtime session. Run `cortex list`. |
+| Stale results after code changes | Re-index with `cortex index /path --force` and restart the MCP process. |
+| Backend problems | Run `cortex doctor` and inspect service health. |
+| Memory/capsule tools not available | Set `CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=true` and related flags. |
+| Network transport rejected | Check `--allow-remote` and bearer token configuration. See [SECURITY.md](../SECURITY.md). |

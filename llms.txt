@@ -1,0 +1,57 @@
+# CodeCortex
+
+> CodeCortex is a Rust-based code intelligence stack that indexes repositories into a graph database (Memgraph/Neo4j/Neptune), exposes 60 MCP tools to AI clients (Claude, Cursor, Codex, Gemini, Zed), and combines graph analysis with optional vector search for semantic and hybrid code retrieval.
+
+## Summary
+
+- **Language**: Rust (Apache 2.0)
+- **MCP tools**: 60 tools across indexing, analysis, navigation, vector search, cross-project, memory, and review
+- **Languages parsed**: Rust, Python, Go, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Kotlin, Swift, JSON, Shell (14 total)
+- **Graph backends**: Memgraph (default), Neo4j, AWS Neptune
+- **Vector backends**: LanceDB (embedded, default), Qdrant (production), JSON (simple)
+- **Embedding providers**: OpenAI (`text-embedding-3-small`), Ollama (`nomic-embed-text`, `bge-m3`)
+- **MCP transports**: stdio (default), HTTP-SSE, WebSocket, multi
+- **Version**: 1.0.1
+
+## Documentation
+
+- [Install guide](docs/INSTALL.md)
+- [Integration guide (MCP clients)](docs/INTEGRATION.md)
+- [Root README](README.md)
+- [Security policy](SECURITY.md)
+- [Support](SUPPORT.md)
+- [Roadmap](docs/ROADMAP.md)
+- [Integration test matrix](docs/INTEGRATION_TEST_MATRIX.md)
+
+## Crate Reference
+
+- [cortex-mcp — MCP server, 60 tools, feature flags](crates/cortex-mcp/README.md)
+- [cortex-cli — CLI entrypoint, all commands](crates/cortex-cli/README.md)
+- [cortex-core — Config, errors, models, EdgeKind](crates/cortex-core/README.md)
+- [cortex-graph — Graph client, Cypher engine, bundle store](crates/cortex-graph/README.md)
+- [cortex-parser — Tree-sitter parsing, 14 languages](crates/cortex-parser/README.md)
+- [cortex-indexer — Repository scanning, incremental indexing](crates/cortex-indexer/README.md)
+- [cortex-analyzer — Call graphs, smells, navigation, cross-project](crates/cortex-analyzer/README.md)
+- [cortex-vector — Vector stores, embedders, hybrid search](crates/cortex-vector/README.md)
+- [cortex-watcher — File watching, project registry, debouncing](crates/cortex-watcher/README.md)
+- [cortex-pipeline — ECL pipeline (Extract→Cognify→Embed→Load)](crates/cortex-pipeline/README.md)
+
+## Quick Start
+
+```bash
+docker run -d --name codecortex-memgraph -p 7687:7687 memgraph/memgraph-mage:3.8.1
+cortex doctor && cortex index /path/to/repo && cortex mcp start
+```
+
+## MCP Client Config (Cursor / Claude Code)
+
+```json
+{ "mcpServers": { "codecortex": { "command": "cortex", "args": ["mcp", "start"] } } }
+```
+
+## Optional
+
+- [Measurement kit](docs/MEASUREMENT_KIT.md)
+- [Phase 1: project-aware analysis](docs/phase1-project-aware-analysis.md)
+- [Phase 2: cross-project operations](docs/phase2-cross-project-operations.md)
+- [Phase 3: navigation](docs/phase3-sourcecraft-navigation.md)
