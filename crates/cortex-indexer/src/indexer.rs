@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{Level, info, instrument, span, warn};
 
@@ -313,168 +313,181 @@ impl Indexer {
             .map(|cmd| (cmd.file.clone(), cmd))
             .collect();
 
-        // Parse files with progress tracking
-        let _files_count = files.len();
         let processed = Arc::new(AtomicUsize::new(0));
-        let timed_out = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let timed_out = Arc::new(AtomicBool::new(false));
 
-        let parsed: Vec<Result<Option<IndexedFile>>> = files
-            .par_iter()
-            .map(|path| {
-                // Check timeout
-                if let Some(timeout) = timeout_duration
-                    && start.elapsed() > timeout
-                {
-                    timed_out.store(true, Ordering::Relaxed);
-                    return Err(CortexError::Timeout("Indexing timed out".to_string()));
-                }
+        // ── Phase 1: parse in batches, write nodes immediately ────────────────
+        //
+        // We parse `PARSE_BATCH` files at a time with rayon, then immediately
+        // write the resulting nodes to the DB and drop them.  This keeps peak
+        // memory proportional to one batch rather than the entire repository.
+        //
+        // Edges are accumulated separately because they may reference nodes
+        // from other files; we write them all in Phase 2 once every node exists.
+        const PARSE_BATCH: usize = 200;
 
-                let result = self.parse_and_filter_with_config(
-                    path,
-                    force,
-                    &compile_cmd_index,
-                    &branch,
-                    &repository_path,
-                );
-                processed.fetch_add(1, Ordering::Relaxed);
-                result
-            })
-            .collect();
-
-        let mut indexed = Vec::new();
-        let mut skipped_files = 0usize;
-        for item in parsed {
-            match item {
-                Ok(Some(file)) => indexed.push(file),
-                Ok(None) => skipped_files += 1,
-                Err(e) => {
-                    // Log error but continue
-                    eprintln!("Warning: Failed to parse file: {}", e);
-                    skipped_files += 1;
-                }
-            }
-        }
-
-        // Count symbols
-        let symbol_count: usize = indexed.iter().map(|f| f.nodes.len()).sum();
-
-        // Build hierarchy nodes and edges with branch properties
-        let mut pass_one_nodes = Vec::new();
-        let mut pass_two_edges = Vec::new();
-        let mut hierarchy_nodes = vec![];
-        let mut hierarchy_edges = vec![];
         let repo_id = format!("repo:{}", repository_path);
-        let mut seen_dirs = HashSet::new();
+        let mut seen_dirs: HashSet<String> = HashSet::new();
+        let mut all_edges: Vec<CodeEdge> = Vec::new();
+        // Lightweight cache-update data: (path, content_hash)
+        let mut cache_pairs: Vec<(String, String)> = Vec::new();
+        let mut symbol_count = 0usize;
+        let mut skipped_files = 0usize;
+        let mut indexed_file_count = 0usize;
 
-        for file in &indexed {
-            let file_path = PathBuf::from(&file.path);
-            let file_id = format!("file:{}", file.path);
-
-            hierarchy_nodes.push(CodeNode {
-                id: file_id.clone(),
-                kind: EntityKind::File,
-                name: file_path
-                    .file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                path: Some(file.path.clone()),
-                line_number: Some(1),
-                lang: Some(file.language),
-                source: None,
-                docstring: None,
-                properties: build_branch_properties(&branch, &repository_path),
-            });
-            hierarchy_edges.push(CodeEdge {
-                from: repo_id.clone(),
-                to: file_id.clone(),
-                kind: EdgeKind::Contains,
-                properties: HashMap::new(),
-            });
-
-            // Build directory chain
-            let chain = directory_chain(&root, &file_path);
-            if chain.is_empty() {
-                continue;
+        for file_batch in files.chunks(PARSE_BATCH) {
+            if timed_out.load(Ordering::Relaxed) {
+                break;
             }
 
-            // Create directory nodes
-            for dir in &chain {
-                let dir_key = dir.display().to_string();
-                if seen_dirs.insert(dir_key.clone()) {
-                    hierarchy_nodes.push(CodeNode {
-                        id: format!("dir:{dir_key}"),
-                        kind: EntityKind::Directory,
-                        name: dir
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        path: Some(dir_key.clone()),
-                        line_number: Some(1),
-                        lang: None,
-                        source: None,
-                        docstring: None,
-                        properties: build_branch_properties(&branch, &repository_path),
-                    });
+            // Parse this batch in parallel.
+            let parsed: Vec<Result<Option<IndexedFile>>> = {
+                let timed_out = Arc::clone(&timed_out);
+                let processed = Arc::clone(&processed);
+                file_batch
+                    .par_iter()
+                    .map(|path| {
+                        if let Some(timeout) = timeout_duration
+                            && start.elapsed() > timeout
+                        {
+                            timed_out.store(true, Ordering::Relaxed);
+                            return Err(CortexError::Timeout("Indexing timed out".to_string()));
+                        }
+                        let result = self.parse_and_filter_with_config(
+                            path,
+                            force,
+                            &compile_cmd_index,
+                            &branch,
+                            &repository_path,
+                        );
+                        processed.fetch_add(1, Ordering::Relaxed);
+                        result
+                    })
+                    .collect()
+            };
+
+            // Build nodes for this batch, moving data out of each IndexedFile
+            // (no clone) and constructing hierarchy nodes inline.
+            let mut batch_nodes: Vec<CodeNode> = Vec::new();
+
+            for item in parsed {
+                match item {
+                    Ok(Some(mut file)) => {
+                        indexed_file_count += 1;
+                        symbol_count += file.nodes.len();
+                        let file_path = PathBuf::from(&file.path);
+                        let file_id = format!("file:{}", file.path);
+
+                        // File hierarchy node
+                        batch_nodes.push(CodeNode {
+                            id: file_id.clone(),
+                            kind: EntityKind::File,
+                            name: file_path
+                                .file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                            path: Some(file.path.clone()),
+                            line_number: Some(1),
+                            lang: Some(file.language),
+                            source: None,
+                            docstring: None,
+                            properties: build_branch_properties(&branch, &repository_path),
+                        });
+                        all_edges.push(CodeEdge {
+                            from: repo_id.clone(),
+                            to: file_id.clone(),
+                            kind: EdgeKind::Contains,
+                            properties: HashMap::new(),
+                        });
+
+                        // Directory hierarchy (deduped across all batches via seen_dirs)
+                        let chain = directory_chain(&root, &file_path);
+                        if !chain.is_empty() {
+                            for dir in &chain {
+                                let dir_key = dir.display().to_string();
+                                if seen_dirs.insert(dir_key.clone()) {
+                                    batch_nodes.push(CodeNode {
+                                        id: format!("dir:{dir_key}"),
+                                        kind: EntityKind::Directory,
+                                        name: dir
+                                            .file_name()
+                                            .and_then(|s| s.to_str())
+                                            .unwrap_or_default()
+                                            .to_string(),
+                                        path: Some(dir_key.clone()),
+                                        line_number: Some(1),
+                                        lang: None,
+                                        source: None,
+                                        docstring: None,
+                                        properties: build_branch_properties(
+                                            &branch,
+                                            &repository_path,
+                                        ),
+                                    });
+                                }
+                            }
+
+                            if let Some(first_dir) = chain.first() {
+                                let first_dir_str = first_dir.display().to_string();
+                                all_edges.push(CodeEdge {
+                                    from: repo_id.clone(),
+                                    to: format!("dir:{first_dir_str}"),
+                                    kind: EdgeKind::Contains,
+                                    properties: HashMap::new(),
+                                });
+                            }
+                            for window in chain.windows(2) {
+                                all_edges.push(CodeEdge {
+                                    from: format!("dir:{}", window[0].display()),
+                                    to: format!("dir:{}", window[1].display()),
+                                    kind: EdgeKind::Contains,
+                                    properties: HashMap::new(),
+                                });
+                            }
+                            if let Some(last_dir) = chain.last() {
+                                all_edges.push(CodeEdge {
+                                    from: format!("dir:{}", last_dir.display()),
+                                    to: file_id,
+                                    kind: EdgeKind::Contains,
+                                    properties: HashMap::new(),
+                                });
+                            }
+                        }
+
+                        // Move symbol nodes out (no clone).  Add branch
+                        // properties in-place before appending.
+                        let mut sym_nodes = std::mem::take(&mut file.nodes);
+                        let branch_props = build_branch_properties(&branch, &repository_path);
+                        for node in &mut sym_nodes {
+                            node.properties.extend(branch_props.clone());
+                        }
+                        batch_nodes.extend(sym_nodes);
+
+                        // Move edges out (no clone).
+                        all_edges.extend(std::mem::take(&mut file.edges));
+
+                        // Lightweight record for cache update.
+                        cache_pairs.push((file.path, file.content_hash));
+                        // file (now empty) is dropped here, freeing source strings.
+                    }
+                    Ok(None) => skipped_files += 1,
+                    Err(e) => {
+                        eprintln!("Warning: Failed to parse file: {}", e);
+                        skipped_files += 1;
+                    }
                 }
             }
 
-            // Create directory edges
-            if let Some(first_dir) = chain.first() {
-                let first_dir_str = first_dir.display().to_string();
-                hierarchy_edges.push(CodeEdge {
-                    from: repo_id.clone(),
-                    to: format!("dir:{first_dir_str}"),
-                    kind: EdgeKind::Contains,
-                    properties: HashMap::new(),
-                });
-
-                for window in chain.windows(2) {
-                    let from = format!("dir:{}", window[0].display());
-                    let to = format!("dir:{}", window[1].display());
-                    hierarchy_edges.push(CodeEdge {
-                        from,
-                        to,
-                        kind: EdgeKind::Contains,
-                        properties: HashMap::new(),
-                    });
-                }
-
-                if let Some(last_dir) = chain.last() {
-                    let last_dir_str = format!("dir:{}", last_dir.display());
-                    hierarchy_edges.push(CodeEdge {
-                        from: last_dir_str,
-                        to: file_id,
-                        kind: EdgeKind::Contains,
-                        properties: HashMap::new(),
-                    });
-                }
-            }
+            // Write nodes for this batch immediately, then free the memory.
+            self.writer.write_nodes(&batch_nodes).await?;
+            // batch_nodes dropped here.
         }
 
-        // Collect all nodes and edges, adding branch properties
-        for file in &indexed {
-            // Add branch properties to all nodes
-            let mut nodes_with_branch: Vec<CodeNode> = file.nodes.clone();
-            for node in &mut nodes_with_branch {
-                for (k, v) in build_branch_properties(&branch, &repository_path) {
-                    node.properties.insert(k, v);
-                }
-            }
-            pass_one_nodes.extend(nodes_with_branch);
-        }
-        for file in &indexed {
-            pass_two_edges.extend(file.edges.clone());
-        }
+        // ── Phase 2: write edges (all nodes now exist in the DB) ─────────────
 
-        pass_one_nodes.extend(hierarchy_nodes);
-        pass_two_edges.extend(hierarchy_edges);
-
-        self.writer.write_nodes(&pass_one_nodes).await?;
-
-        // Resolve call targets
-        let call_targets: HashSet<(String, String)> = pass_two_edges
+        // Collect call-target placeholders from accumulated edges.
+        let call_targets: HashSet<(String, String)> = all_edges
             .iter()
             .filter_map(|edge| {
                 if !matches!(
@@ -488,11 +501,14 @@ impl Indexer {
                 Some((edge.to.clone(), name))
             })
             .collect();
-        for (id, name) in &call_targets {
-            self.client.upsert_call_target(id, name).await?;
-        }
+        let call_targets_vec: Vec<(String, String)> = call_targets.into_iter().collect();
+        self.client
+            .bulk_upsert_call_targets(&call_targets_vec)
+            .await?;
 
-        self.writer.write_edges(&pass_two_edges).await?;
+        self.writer.write_edges(&all_edges).await?;
+        drop(all_edges);
+
         let resolved_calls = self
             .client
             .resolve_call_targets(&repository_path, branch.as_deref())
@@ -527,14 +543,14 @@ impl Indexer {
                     &repository_path,
                     br,
                     ch,
-                    indexed.len(),
+                    indexed_file_count,
                     symbol_count,
                     start.elapsed().as_millis() as u64,
                 );
                 create_branch_index(&self.client, &record).await?;
             }
 
-            self.update_cache_entries(&indexed, &repository_path, &branch)?;
+            write_cache_entry_pairs(&self.cache, &cache_pairs, &repository_path, &branch)?;
         } else {
             warn!(
                 "Indexing timed out — skipping branch index and cache promotion for {}",
@@ -544,7 +560,7 @@ impl Indexer {
 
         Ok(IndexReport {
             scanned_files,
-            indexed_files: indexed.len(),
+            indexed_files: indexed_file_count,
             skipped_files,
             resolved_calls,
             build_systems,
@@ -559,6 +575,7 @@ impl Indexer {
         })
     }
 
+    #[allow(dead_code)]
     fn update_cache_entries(
         &self,
         files: &[IndexedFile],
@@ -639,20 +656,38 @@ fn cache_key_for_path(path: &Path, repository_path: &str, branch: &Option<String
     }
 }
 
+/// Write cache entries from lightweight (path, content_hash) pairs.
+///
+/// This is the primary cache-update path used by the streaming indexer to
+/// avoid holding the full `IndexedFile` vector in memory.
+fn write_cache_entry_pairs(
+    cache: &sled::Db,
+    pairs: &[(String, String)],
+    repository_path: &str,
+    branch: &Option<String>,
+) -> Result<()> {
+    for (path, content_hash) in pairs {
+        let cache_key = cache_key_for_path(Path::new(path), repository_path, branch);
+        cache
+            .insert(cache_key.as_bytes(), content_hash.as_bytes())
+            .map_err(|e| CortexError::Io(e.to_string()))?;
+    }
+    cache.flush().map_err(|e| CortexError::Io(e.to_string()))?;
+    Ok(())
+}
+
+/// Write cache entries from full IndexedFile objects (used in tests).
 fn write_cache_entries(
     cache: &sled::Db,
     files: &[IndexedFile],
     repository_path: &str,
     branch: &Option<String>,
 ) -> Result<()> {
-    for file in files {
-        let cache_key = cache_key_for_path(Path::new(&file.path), repository_path, branch);
-        cache
-            .insert(cache_key.as_bytes(), file.content_hash.as_bytes())
-            .map_err(|e| CortexError::Io(e.to_string()))?;
-    }
-    cache.flush().map_err(|e| CortexError::Io(e.to_string()))?;
-    Ok(())
+    let pairs: Vec<(String, String)> = files
+        .iter()
+        .map(|f| (f.path.clone(), f.content_hash.clone()))
+        .collect();
+    write_cache_entry_pairs(cache, &pairs, repository_path, branch)
 }
 
 /// Build branch properties map for node properties

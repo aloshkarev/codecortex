@@ -107,15 +107,21 @@ enum OutputFormat {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum IndexModeArg {
+    /// Re-index all files regardless of cache state
     Full,
+    /// Only index files changed since the last indexed branch commit
     IncrementalDiff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum McpTransportArg {
+    /// Standard I/O (default; used by most MCP clients)
     Stdio,
+    /// HTTP + Server-Sent Events transport
     HttpSse,
+    /// WebSocket transport
     Websocket,
+    /// Run all transports simultaneously
     Multi,
 }
 
@@ -177,6 +183,7 @@ struct Cli {
     /// Output format (format, json-pretty, yaml, table)
     #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Json)]
     format: OutputFormat,
+    /// Increase log verbosity (repeat for more detail: -v, -vv, -vvv)
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
     /// Search/analyze across all indexed projects (overrides project detection)
@@ -208,7 +215,9 @@ enum Commands {
     },
     /// Parse and index a repository into the graph database
     Index {
+        /// Path to the repository or file to index
         path: String,
+        /// Force a full re-index even if the branch is already current
         #[arg(long)]
         force: bool,
         /// Indexing mode
@@ -217,11 +226,24 @@ enum Commands {
         /// Base branch to use for incremental-diff mode
         #[arg(long)]
         base_branch: Option<String>,
+        /// Skip auto-registering this repository in the project registry
+        #[arg(long)]
+        no_register: bool,
+        /// Also run vector indexing after graph indexing (keeps graph and vector
+        /// store in sync using the same repository path and branch)
+        #[arg(long)]
+        vector: bool,
     },
     /// Watch a path for file changes and trigger automatic re-indexing
-    Watch { path: String },
+    Watch {
+        /// Directory to watch for changes
+        path: String,
+    },
     /// Stop watching a previously watched path
-    Unwatch { path: String },
+    Unwatch {
+        /// Directory to stop watching
+        path: String,
+    },
     /// Search for code entities (name, pattern, type, content, decorator, argument)
     Find {
         #[command(subcommand)]
@@ -247,11 +269,17 @@ enum Commands {
     /// List all indexed repositories
     List,
     /// Remove a repository from the graph index
-    Delete { path: String },
+    Delete {
+        /// Repository path to remove from the graph
+        path: String,
+    },
     /// Show indexed file and node counts for repositories
     Stats,
     /// Execute a raw Cypher query against the graph database
-    Query { cypher: String },
+    Query {
+        /// Cypher query string to execute
+        cypher: String,
+    },
     /// Inspect background job queue (list or show status of indexing jobs)
     Jobs {
         #[command(subcommand)]
@@ -398,6 +426,7 @@ enum Commands {
 
 #[derive(Debug, Subcommand)]
 enum McpCommand {
+    /// Start the MCP server (defaults to stdio transport)
     Start {
         /// MCP transport mode.
         #[arg(long, value_enum, default_value_t = McpTransportArg::Stdio)]
@@ -427,6 +456,7 @@ enum McpCommand {
         #[arg(long = "enable", value_enum, value_name = "TOOL")]
         enable: Vec<McpEnableFlag>,
     },
+    /// List all tools exposed by the MCP server
     Tools,
 }
 
@@ -445,47 +475,86 @@ enum DaemonCommand {
 
 #[derive(Debug, Subcommand)]
 enum FindCommand {
-    Name { name: String },
-    Pattern { pattern: String },
-    Type { kind: String },
-    Content { query: String },
-    Decorator { name: String },
-    Argument { name: String },
+    /// Find code entities by exact or prefix name match
+    Name {
+        /// Name to search for (exact or prefix)
+        name: String,
+    },
+    /// Find code entities whose name matches a regex pattern
+    Pattern {
+        /// Regular expression to match against entity names
+        pattern: String,
+    },
+    /// Find code entities of a specific kind (function, class, struct, …)
+    Type {
+        /// Entity kind to search for (e.g. function, class, struct, enum)
+        kind: String,
+    },
+    /// Search for entities whose source contains the given text
+    Content {
+        /// Text to search for within entity source code
+        query: String,
+    },
+    /// Find entities annotated with a specific decorator or attribute
+    Decorator {
+        /// Decorator or attribute name to search for
+        name: String,
+    },
+    /// Find functions that declare a parameter with the given name
+    Argument {
+        /// Parameter name to search for
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 enum AnalyzeCommand {
+    /// List all callers of a function or method
     Callers(TargetArg),
+    /// List all callees (functions called by) a function or method
     Callees(TargetArg),
+    /// Find call-chain paths between two symbols
     Chain {
+        /// Starting symbol (caller side)
         from: String,
+        /// Ending symbol (callee side)
         to: String,
+        /// Maximum traversal depth
         #[arg(long)]
         depth: Option<usize>,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
+    /// Show inheritance / implementation hierarchy for a class or interface
     Hierarchy {
+        /// Class or interface name
         class: String,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
+    /// Show import/dependency graph for a module or file
     Deps {
+        /// Module or file path
         module: String,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
+    /// Detect unreachable / uncalled code in the repository
     DeadCode {
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
+    /// Rank functions by cyclomatic complexity
     Complexity {
+        /// Number of top-ranked functions to return
         #[arg(long, default_value_t = 20)]
         top: usize,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
+    /// Find all overrides of a virtual/abstract method
     Overrides {
+        /// Method name to find overrides for
         method: String,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
@@ -605,27 +674,45 @@ enum AnalyzeCommand {
 
 #[derive(Debug, Subcommand)]
 enum BundleCommand {
+    /// Export graph data for one or all repositories to a portable .ccx bundle
     Export {
+        /// Output file path for the bundle (e.g. my-repo.ccx)
         output: PathBuf,
+        /// Repository to export (exports all repositories if omitted)
         #[arg(long)]
         repo: Option<PathBuf>,
     },
+    /// Import graph data from a previously exported .ccx bundle
     Import {
+        /// Path to the .ccx bundle file to import
         path: PathBuf,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
+    /// Display the current CodeCortex configuration
     Show,
-    Set { key: String, value: String },
+    /// Set a configuration key to a new value
+    Set {
+        /// Configuration key to update (e.g. memgraph_uri)
+        key: String,
+        /// New value for the key
+        value: String,
+    },
+    /// Reset all configuration to defaults
     Reset,
 }
 
 #[derive(Debug, Subcommand)]
 enum JobsCommand {
+    /// List all background indexing jobs and their current status
     List,
-    Status { id: String },
+    /// Show detailed status for a specific job
+    Status {
+        /// Job identifier returned by a previous index or sync command
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -668,6 +755,7 @@ enum DebugCommand {
 
 #[derive(Debug, Args)]
 struct TargetArg {
+    /// Symbol name (function, method, or class) to analyze
     target: String,
     #[command(flatten)]
     filters: AnalyzeFilterArgs,
@@ -896,7 +984,21 @@ async fn main() -> anyhow::Result<()> {
             force,
             mode,
             base_branch,
-        } => run_index(&config, &path, force, mode, base_branch.as_deref(), format).await?,
+            no_register,
+            vector,
+        } => {
+            run_index(
+                &config,
+                &path,
+                force,
+                mode,
+                base_branch.as_deref(),
+                format,
+                no_register,
+                vector,
+            )
+            .await?
+        }
         Commands::Watch { path } => run_watch(&config, &path).await?,
         Commands::Unwatch { path } => run_unwatch(&config, &path)?,
         Commands::Find { command } => run_find(&config, command, format, &scope).await?,
@@ -1689,6 +1791,8 @@ async fn run_index(
     mode: IndexModeArg,
     base_branch: Option<&str>,
     format: OutputFormat,
+    no_register: bool,
+    also_vector: bool,
 ) -> anyhow::Result<()> {
     let job_id = format!("cli-index-{}", now_millis());
     upsert_job(&job_id, "running", format!("Indexing {}", path))?;
@@ -1870,9 +1974,31 @@ async fn run_index(
         }
     };
     pb.finish_and_clear();
-    if let Some(root) = repo_root {
-        record_project_branch_index(&root, &report);
+    if let Some(root) = &repo_root {
+        if !no_register {
+            ensure_project_registered(root);
+        }
+        record_project_branch_index(root, &report);
     }
+
+    // Optionally also run vector indexing so graph + vector store stay in sync.
+    if also_vector {
+        let repo_str = repo_root
+            .as_ref()
+            .map(|r| r.display().to_string())
+            .unwrap_or_else(|| path.to_string());
+        let pb2 = ProgressBar::new_spinner();
+        pb2.set_style(ProgressStyle::with_template("{spinner:.green} {msg}")?);
+        pb2.set_message("Building vector index...");
+        pb2.enable_steady_tick(std::time::Duration::from_millis(100));
+        let vec_result =
+            run_vector_index(config, path, Some(repo_str.as_str()), force, format).await;
+        pb2.finish_and_clear();
+        if let Err(e) = vec_result {
+            eprintln!("Warning: vector indexing failed: {}", e);
+        }
+    }
+
     if planner.is_some() {
         let planner_value = planner.as_ref().map(incremental_diff_plan_to_value);
         print_formatted(
@@ -2032,15 +2158,21 @@ async fn index_with_git_context(
     }
 }
 
+/// Auto-register `repo_root` in the project registry if it is not already
+/// present.  Called by `cortex index` so graph data never becomes orphaned.
+fn ensure_project_registered(repo_root: &Path) {
+    let registry = cortex_watcher::ProjectRegistry::new();
+    if registry.get_project(repo_root).is_none() {
+        let _ = registry.add_project(repo_root, None);
+    }
+}
+
 fn record_project_branch_index(repo_root: &Path, report: &cortex_indexer::IndexReport) {
     let (Some(branch), Some(commit_hash)) = (&report.branch, &report.commit_hash) else {
         return;
     };
 
     let registry = cortex_watcher::ProjectRegistry::new();
-    if registry.get_project(repo_root).is_none() {
-        return;
-    }
 
     let duration_ms = (report.duration_secs * 1000.0).round() as u64;
     let _ = registry.record_branch_index(
@@ -5822,11 +5954,63 @@ async fn run_project(
             }
 
             let cleanup_result = if cleanup_old_branches {
+                // First collect which branches the registry will remove so we
+                // can also purge their graph data.
+                let state_before = registry.get_project(&project_path);
+                let branches_before: std::collections::HashSet<String> = state_before
+                    .as_ref()
+                    .map(|s| {
+                        s.indexed_branches
+                            .keys()
+                            .cloned()
+                            .collect::<std::collections::HashSet<_>>()
+                    })
+                    .unwrap_or_default();
+
                 match registry.cleanup_old_branches(&project_path) {
-                    Ok(removed) => serde_json::json!({
-                        "status": "ok",
-                        "removed": removed,
-                    }),
+                    Ok(removed) => {
+                        // Determine which branches were actually removed.
+                        let state_after = registry.get_project(&project_path);
+                        let branches_after: std::collections::HashSet<String> = state_after
+                            .as_ref()
+                            .map(|s| {
+                                s.indexed_branches
+                                    .keys()
+                                    .cloned()
+                                    .collect::<std::collections::HashSet<_>>()
+                            })
+                            .unwrap_or_default();
+                        let purged_branches: Vec<String> = branches_before
+                            .difference(&branches_after)
+                            .cloned()
+                            .collect();
+
+                        // Purge graph data for removed branches (best-effort).
+                        let repo_path_str = project_path.display().to_string();
+                        let mut graph_deleted = 0usize;
+                        if !purged_branches.is_empty() {
+                            if let Ok(client) = GraphClient::connect(config).await {
+                                for branch in &purged_branches {
+                                    if let Ok(n) = cortex_graph::delete_branch_index(
+                                        &client,
+                                        &repo_path_str,
+                                        branch,
+                                    )
+                                    .await
+                                    {
+                                        graph_deleted += n;
+                                    }
+                                }
+                            }
+                        }
+
+                        serde_json::json!({
+                            "status": "ok",
+                            "removed": removed,
+                            "purged_branches": purged_branches,
+                            "graph_nodes_deleted": graph_deleted,
+                        })
+                    }
                     Err(err) => serde_json::json!({
                         "status": "error",
                         "error": err.to_string(),
@@ -6342,12 +6526,18 @@ async fn run_vector_index(
     let mut documents = Vec::new();
     let repo_path = repo.unwrap_or(path);
 
+    // Resolve the actual git branch so the vector store stays in sync with the
+    // graph index (which is also keyed by repository_path + branch).
+    let resolved_branch = resolve_git_context(&target_path)
+        .map(|(_, branch, _)| branch)
+        .unwrap_or_else(|| "main".to_string());
+
     if target_path.is_file() {
         // Index single file
         if let Ok(content) = tokio::fs::read_to_string(&target_path).await {
             let doc_id = format!("{}:{}", repo_path, path);
             let metadata = VectorMetadata::code_symbol(path, "", "file", "")
-                .with_repository(repo_path.to_string(), "main");
+                .with_repository(repo_path.to_string(), &resolved_branch);
 
             documents.push(VectorDocument::with_metadata(
                 doc_id,
@@ -6384,7 +6574,7 @@ async fn run_vector_index(
                         };
 
                         let metadata = VectorMetadata::code_symbol(&file_path, "", "file", lang)
-                            .with_repository(repo_path.to_string(), "main");
+                            .with_repository(repo_path.to_string(), &resolved_branch);
 
                         documents.push(VectorDocument::with_metadata(
                             doc_id,

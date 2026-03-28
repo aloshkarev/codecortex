@@ -325,7 +325,8 @@ if command_exists docker; then
 else
     log_info "Docker not found — skipping Docker-based Memgraph setup"
     log_info "  Use --memgraph to install Memgraph, or point CodeCortex at your existing server"
-    if [ "$INSTALL_MEMGRAPH" != "skip" ]; then
+    # Honour explicit --memgraph / --no-memgraph: do not clear a requested or skipped intent here.
+    if [ "$INSTALL_MEMGRAPH" != "skip" ] && [ "$INSTALL_MEMGRAPH" != "true" ]; then
         INSTALL_MEMGRAPH=false
     fi
 fi

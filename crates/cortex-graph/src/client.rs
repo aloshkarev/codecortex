@@ -9,7 +9,9 @@ use crate::schema;
 use anyhow::Context;
 use cortex_core::{CodeEdge, CodeNode, CortexConfig, CortexError, Repository, Result};
 use neo4rs::{ConfigBuilder, Graph, query};
+use rsmgclient::QueryParam;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
 
@@ -406,6 +408,137 @@ impl GraphClient {
         Ok(())
     }
 
+    /// Bulk-upsert multiple nodes in a single Cypher round-trip (Memgraph) or via
+    /// per-node fallback (Neo4j).
+    ///
+    /// Nodes are grouped by their Cypher label so the `UNWIND … MERGE (n:Label …)`
+    /// query stays static.  Each label group is sent as one parameterised query
+    /// containing `QueryParam::List(QueryParam::Map)`, which Memgraph handles
+    /// efficiently without N separate round-trips.
+    pub async fn bulk_upsert_nodes(&self, nodes: &[CodeNode]) -> Result<()> {
+        if nodes.is_empty() {
+            return Ok(());
+        }
+
+        match self.driver.as_ref() {
+            GraphDriver::Memgraph(client) => {
+                // Group nodes by label to keep the MERGE clause label-safe.
+                let mut by_label: HashMap<&'static str, Vec<&CodeNode>> = HashMap::new();
+                for node in nodes {
+                    by_label
+                        .entry(node.kind.cypher_label())
+                        .or_default()
+                        .push(node);
+                }
+
+                for (label, group) in &by_label {
+                    let batch = build_node_batch_param(group);
+                    let cypher = format!(
+                        "UNWIND $batch AS item \
+                         MERGE (n:{label} {{id: item.id}}) \
+                         SET n:CodeNode, \
+                             n.kind = item.kind, n.name = item.name, \
+                             n.path = item.path, \
+                             n.line_number = item.line_number, \
+                             n.lang = item.lang, \
+                             n.source = item.source, n.docstring = item.docstring, \
+                             n.cyclomatic_complexity = item.cyclomatic_complexity, \
+                             n.qualified_name = item.qualified_name, \
+                             n.visibility = item.visibility, \
+                             n.properties = item.properties, \
+                             n.branch = item.branch, \
+                             n.repository_path = item.repository_path"
+                    );
+                    let mut params = HashMap::new();
+                    params.insert("batch".to_string(), batch);
+                    client.execute_with_raw_params(&cypher, params).await?;
+                }
+            }
+            // Neo4j: fall back to per-node upserts (neo4rs has its own connection pool).
+            GraphDriver::Neo4j(_) => {
+                for node in nodes {
+                    self.upsert_node(node).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Bulk-upsert multiple edges in a single Cypher round-trip per relationship
+    /// type (Memgraph) or via per-edge fallback (Neo4j).
+    pub async fn bulk_upsert_edges(&self, edges: &[CodeEdge]) -> Result<()> {
+        if edges.is_empty() {
+            return Ok(());
+        }
+
+        match self.driver.as_ref() {
+            GraphDriver::Memgraph(client) => {
+                // Group edges by relationship type.
+                let mut by_rel: HashMap<&'static str, Vec<&CodeEdge>> = HashMap::new();
+                for edge in edges {
+                    by_rel
+                        .entry(edge.kind.cypher_rel_type())
+                        .or_default()
+                        .push(edge);
+                }
+
+                for (rel_type, group) in &by_rel {
+                    let batch = build_edge_batch_param(group);
+                    let cypher = format!(
+                        "UNWIND $batch AS item \
+                         MATCH (from {{id: item.from}}), (to {{id: item.to}}) \
+                         MERGE (from)-[r:{rel_type}]->(to) \
+                         SET r.kind = item.kind, r.properties = item.properties"
+                    );
+                    let mut params = HashMap::new();
+                    params.insert("batch".to_string(), batch);
+                    client.execute_with_raw_params(&cypher, params).await?;
+                }
+            }
+            GraphDriver::Neo4j(_) => {
+                for edge in edges {
+                    self.upsert_edge(edge).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Bulk-upsert call-target placeholder nodes in a single round-trip (Memgraph)
+    /// or per-target fallback (Neo4j).
+    pub async fn bulk_upsert_call_targets(&self, targets: &[(String, String)]) -> Result<()> {
+        if targets.is_empty() {
+            return Ok(());
+        }
+
+        match self.driver.as_ref() {
+            GraphDriver::Memgraph(client) => {
+                let batch: Vec<QueryParam> = targets
+                    .iter()
+                    .map(|(id, name)| {
+                        let mut m = HashMap::new();
+                        m.insert("id".to_string(), QueryParam::String(id.clone()));
+                        m.insert("name".to_string(), QueryParam::String(name.clone()));
+                        QueryParam::Map(m)
+                    })
+                    .collect();
+
+                let cypher = "UNWIND $batch AS item \
+                              MERGE (n:CallTarget {id: item.id}) \
+                              SET n:CodeNode, n.kind = 'CallTarget', n.name = item.name";
+                let mut params = HashMap::new();
+                params.insert("batch".to_string(), QueryParam::List(batch));
+                client.execute_with_raw_params(cypher, params).await?;
+            }
+            GraphDriver::Neo4j(_) => {
+                for (id, name) in targets {
+                    self.upsert_call_target(id, name).await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Resolve call targets to concrete functions.
     ///
     /// When `branch` is provided, resolution is scoped to nodes on that branch,
@@ -533,6 +666,115 @@ impl GraphClient {
             .sum::<u64>() as usize;
         Ok(resolved)
     }
+}
+
+/// Build a `QueryParam::List(QueryParam::Map)` batch for a slice of `CodeNode`s.
+///
+/// Each map entry uses `QueryParam::Int` for numeric fields so Memgraph stores
+/// them as integers without needing a `toInteger()` cast in the Cypher query.
+fn build_node_batch_param(nodes: &[&CodeNode]) -> QueryParam {
+    let items: Vec<QueryParam> = nodes
+        .iter()
+        .map(|node| {
+            let cyclomatic = node
+                .properties
+                .get("cyclomatic_complexity")
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(0);
+            let branch = node.properties.get("branch").cloned().unwrap_or_default();
+            let repository_path = node
+                .properties
+                .get("repository_path")
+                .cloned()
+                .unwrap_or_default();
+            let qualified_name = node
+                .properties
+                .get("qualified_name")
+                .cloned()
+                .unwrap_or_default();
+            let visibility = node
+                .properties
+                .get("visibility")
+                .cloned()
+                .unwrap_or_default();
+
+            let mut m = HashMap::new();
+            m.insert("id".to_string(), QueryParam::String(node.id.clone()));
+            m.insert(
+                "kind".to_string(),
+                QueryParam::String(format!("{:?}", node.kind)),
+            );
+            m.insert("name".to_string(), QueryParam::String(node.name.clone()));
+            m.insert(
+                "path".to_string(),
+                QueryParam::String(node.path.clone().unwrap_or_default()),
+            );
+            m.insert(
+                "line_number".to_string(),
+                QueryParam::Int(node.line_number.unwrap_or_default() as i64),
+            );
+            m.insert(
+                "lang".to_string(),
+                QueryParam::String(
+                    node.lang
+                        .map(|l| l.as_str().to_string())
+                        .unwrap_or_default(),
+                ),
+            );
+            m.insert(
+                "source".to_string(),
+                QueryParam::String(node.source.clone().unwrap_or_default()),
+            );
+            m.insert(
+                "docstring".to_string(),
+                QueryParam::String(node.docstring.clone().unwrap_or_default()),
+            );
+            m.insert(
+                "cyclomatic_complexity".to_string(),
+                QueryParam::Int(cyclomatic),
+            );
+            m.insert(
+                "properties".to_string(),
+                QueryParam::String(serde_json::to_string(&node.properties).unwrap_or_default()),
+            );
+            m.insert(
+                "qualified_name".to_string(),
+                QueryParam::String(qualified_name),
+            );
+            m.insert("visibility".to_string(), QueryParam::String(visibility));
+            m.insert("branch".to_string(), QueryParam::String(branch));
+            m.insert(
+                "repository_path".to_string(),
+                QueryParam::String(repository_path),
+            );
+            QueryParam::Map(m)
+        })
+        .collect();
+
+    QueryParam::List(items)
+}
+
+/// Build a `QueryParam::List(QueryParam::Map)` batch for a slice of `CodeEdge`s.
+fn build_edge_batch_param(edges: &[&CodeEdge]) -> QueryParam {
+    let items: Vec<QueryParam> = edges
+        .iter()
+        .map(|edge| {
+            let mut m = HashMap::new();
+            m.insert("from".to_string(), QueryParam::String(edge.from.clone()));
+            m.insert("to".to_string(), QueryParam::String(edge.to.clone()));
+            m.insert(
+                "kind".to_string(),
+                QueryParam::String(format!("{:?}", edge.kind)),
+            );
+            m.insert(
+                "properties".to_string(),
+                QueryParam::String(serde_json::to_string(&edge.properties).unwrap_or_default()),
+            );
+            QueryParam::Map(m)
+        })
+        .collect();
+
+    QueryParam::List(items)
 }
 
 /// Extract properties from a Neo4j node (for Neo4j backend compatibility)

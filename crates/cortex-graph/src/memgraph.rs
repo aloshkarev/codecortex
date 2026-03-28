@@ -349,6 +349,31 @@ impl MemgraphClient {
         self.raw_query_with_params(cypher, Some(params)).await
     }
 
+    /// Execute a write query with raw `QueryParam` parameters (no results needed).
+    ///
+    /// Primarily used for UNWIND-based bulk upserts where callers build richer
+    /// parameter types such as `QueryParam::List` of `QueryParam::Map`.
+    pub async fn execute_with_raw_params(
+        &self,
+        cypher: &str,
+        params: HashMap<String, QueryParam>,
+    ) -> Result<()> {
+        let (response_tx, response_rx) = mpsc::channel();
+
+        self.command_tx
+            .send(MemgraphCommand::Execute {
+                query: cypher.to_string(),
+                params: Some(params),
+                response: response_tx,
+            })
+            .map_err(|e| CortexError::Database(format!("Failed to send command: {}", e)))?;
+
+        tokio::task::spawn_blocking(move || response_rx.recv())
+            .await
+            .map_err(|e| CortexError::Database(format!("Task failed: {}", e)))?
+            .map_err(|e| CortexError::Database(format!("Failed to receive response: {}", e)))?
+    }
+
     async fn raw_query_with_params(
         &self,
         cypher: &str,

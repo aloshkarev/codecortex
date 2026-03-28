@@ -243,8 +243,11 @@ check_dependencies() {
     else
         log_info "Docker not found — skipping Docker-based Memgraph setup"
         log_info "  Use --memgraph to install Memgraph, or point CodeCortex at your existing server"
-        # Don't abort; user may have a dedicated/remote Memgraph server
-        INSTALL_MEMGRAPH=false
+        # Don't abort; user may have a dedicated/remote Memgraph server.
+        # Honour explicit --memgraph / --no-memgraph: do not clear a requested or skipped intent here.
+        if [ "$INSTALL_MEMGRAPH" != "true" ] && [ "$INSTALL_MEMGRAPH" != "skip" ]; then
+            INSTALL_MEMGRAPH=false
+        fi
     fi
 
     # Build-time preflight dependencies (source build path)
