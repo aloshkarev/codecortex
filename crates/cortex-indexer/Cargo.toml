@@ -16,7 +16,6 @@ serde_json.workspace = true
 sled.workspace = true
 tokio.workspace = true
 tracing.workspace = true
-sha2 = "0.10"
 blake3 = "1.5"
 
 [dev-dependencies]
