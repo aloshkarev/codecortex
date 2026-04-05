@@ -9,7 +9,6 @@ use cortex_parser::ParserRegistry;
 use ignore::WalkBuilder;
 use rayon::prelude::*;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -816,9 +815,7 @@ fn collect_source_files_with_config(path: &Path, config: &ProjectConfig) -> Vec<
 }
 
 pub fn file_hash(source: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(source.as_bytes());
-    format!("{:x}", hasher.finalize())
+    blake3::hash(source.as_bytes()).to_hex().to_string()
 }
 
 #[cfg(test)]
@@ -877,7 +874,7 @@ mod tests {
 
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
-        assert_eq!(hash1.len(), 64); // SHA-256 produces 64 hex chars
+        assert_eq!(hash1.len(), 64); // BLAKE3 produces 64 hex chars
     }
 
     #[test]

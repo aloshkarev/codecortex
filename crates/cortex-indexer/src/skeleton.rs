@@ -10,7 +10,6 @@
 //! - Struct field compression: Keeps field names, shows type hints
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 
 /// Maximum docstring lines to include before truncation
@@ -675,17 +674,9 @@ fn compress_struct_single_line(struct_line: &str, max_width: usize) -> String {
 // File Hash
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/// Compute file hash using SHA-256
+/// Compute file hash using BLAKE3
 pub fn file_hash(content: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(content.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-/// Compute file hash using BLAKE3 (faster)
-pub fn file_hash_fast(content: &str) -> String {
-    let hash = blake3::hash(content.as_bytes());
-    hash.to_hex().to_string()
+    blake3::hash(content.as_bytes()).to_hex().to_string()
 }
 
 /// Skeleton builder that integrates with the indexer
@@ -871,23 +862,13 @@ class ESClass {}
         let hash2 = file_hash(content);
 
         assert_eq!(hash1, hash2);
-        assert_eq!(hash1.len(), 64); // SHA-256 hex length
-    }
-
-    #[test]
-    fn file_hash_fast_deterministic() {
-        let content = "test content";
-        let hash1 = file_hash_fast(content);
-        let hash2 = file_hash_fast(content);
-
-        assert_eq!(hash1, hash2);
         assert_eq!(hash1.len(), 64); // BLAKE3 hex length
     }
 
     #[test]
-    fn file_hash_fast_different_content() {
-        let hash1 = file_hash_fast("content 1");
-        let hash2 = file_hash_fast("content 2");
+    fn file_hash_different_content() {
+        let hash1 = file_hash("content 1");
+        let hash2 = file_hash("content 2");
 
         assert_ne!(hash1, hash2);
     }

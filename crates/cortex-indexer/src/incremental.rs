@@ -7,7 +7,6 @@
 //! - File modification time optimization
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -77,9 +76,7 @@ impl IncrementalIndexer {
 
     /// Calculate the hash of file content
     pub fn hash_content(content: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(content.as_bytes());
-        format!("{:x}", hasher.finalize())
+        blake3::hash(content.as_bytes()).to_hex().to_string()
     }
 
     /// Check if a file has changed since last indexing
