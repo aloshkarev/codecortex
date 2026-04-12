@@ -56,17 +56,24 @@ impl<T> CacheEntry<T> {
     }
 }
 
+/// Internal entry stored in L1 cache
+#[derive(Debug, Clone)]
+struct L1CacheEntry {
+    value: Vec<u8>,
+    created_at: Instant,
+    ttl: Duration,
+    repo_revision: String,
+}
+
 /// L1 Cache: In-memory cache using DashMap for concurrent access
 #[derive(Debug)]
 pub struct L1Cache {
     /// The underlying storage
-    store: DashMap<String, Vec<u8>>,
+    store: DashMap<String, L1CacheEntry>,
     /// Default TTL for entries
     default_ttl: Duration,
     /// Maximum number of entries
     max_entries: usize,
-    /// Entry metadata for TTL tracking
-    metadata: DashMap<String, (Instant, Duration, String)>, // (created_at, ttl, repo_revision)
 }
 
 impl L1Cache {
@@ -76,7 +83,6 @@ impl L1Cache {
             store: DashMap::new(),
             default_ttl: DEFAULT_L1_TTL,
             max_entries: DEFAULT_L1_MAX_ENTRIES,
-            metadata: DashMap::new(),
         }
     }
 
@@ -86,7 +92,6 @@ impl L1Cache {
             store: DashMap::new(),
             default_ttl,
             max_entries,
-            metadata: DashMap::new(),
         }
     }
 
@@ -98,23 +103,23 @@ impl L1Cache {
     /// Get a value from the cache
     pub fn get<T: DeserializeOwned>(&self, key: &str, repo_revision: &str) -> Option<T> {
         // Check metadata by reference to avoid cloning when we will return None
-        let meta = self.metadata.get(key)?;
-        let (created_at, ttl, cached_revision) = meta.value();
-        if created_at.elapsed() > *ttl {
-            drop(meta);
-            self.remove(key);
-            return None;
-        }
-        if cached_revision != repo_revision {
-            drop(meta);
-            self.remove(key);
-            return None;
-        }
-        drop(meta);
+        let entry = self.store.get(key)?;
 
-        // Get the value
-        let bytes = self.store.get(key)?;
-        serde_json::from_slice(bytes.value()).ok()
+        if entry.created_at.elapsed() > entry.ttl {
+            drop(entry);
+            self.remove(key);
+            return None;
+        }
+        if entry.repo_revision != repo_revision {
+            drop(entry);
+            self.remove(key);
+            return None;
+        }
+
+        let bytes = &entry.value;
+        let value = serde_json::from_slice(bytes).ok();
+        drop(entry);
+        value
     }
 
     /// Put a value into the cache
@@ -130,10 +135,13 @@ impl L1Cache {
 
         if let Ok(bytes) = serde_json::to_vec(&value) {
             let key_owned = key.to_string();
-            let rev_owned = repo_revision.to_string();
-            self.store.insert(key_owned.clone(), bytes);
-            self.metadata
-                .insert(key_owned, (Instant::now(), self.default_ttl, rev_owned));
+            let entry = L1CacheEntry {
+                value: bytes,
+                created_at: Instant::now(),
+                ttl: self.default_ttl,
+                repo_revision: repo_revision.to_string(),
+            };
+            self.store.insert(key_owned, entry);
         }
     }
 
@@ -152,23 +160,24 @@ impl L1Cache {
 
         if let Ok(bytes) = serde_json::to_vec(&value) {
             let key_owned = key.to_string();
-            let rev_owned = repo_revision.to_string();
-            self.store.insert(key_owned.clone(), bytes);
-            self.metadata
-                .insert(key_owned, (Instant::now(), ttl, rev_owned));
+            let entry = L1CacheEntry {
+                value: bytes,
+                created_at: Instant::now(),
+                ttl,
+                repo_revision: repo_revision.to_string(),
+            };
+            self.store.insert(key_owned, entry);
         }
     }
 
     /// Remove a value from the cache
     pub fn remove(&self, key: &str) {
         self.store.remove(key);
-        self.metadata.remove(key);
     }
 
     /// Clear all entries
     pub fn clear(&self) {
         self.store.clear();
-        self.metadata.clear();
     }
 
     /// Invalidate all entries for a specific repository
@@ -191,13 +200,10 @@ impl L1Cache {
     fn evict_expired(&self) {
         let now = Instant::now();
         let expired: Vec<String> = self
-            .metadata
+            .store
             .iter()
-            .filter(|m| {
-                let (created_at, ttl, _) = m.value();
-                now.duration_since(*created_at) > *ttl
-            })
-            .map(|m| m.key().clone())
+            .filter(|e| now.duration_since(e.created_at) > e.ttl)
+            .map(|e| e.key().clone())
             .collect();
 
         for key in expired {
@@ -208,12 +214,9 @@ impl L1Cache {
     /// Evict the oldest entries
     fn evict_oldest(&self, count: usize) {
         let mut entries: Vec<(String, Instant)> = self
-            .metadata
+            .store
             .iter()
-            .map(|m| {
-                let (created_at, _, _) = m.value();
-                (m.key().clone(), *created_at)
-            })
+            .map(|e| (e.key().clone(), e.created_at))
             .collect();
 
         entries.sort_by_key(|(_, t)| *t);
@@ -231,7 +234,7 @@ impl L1Cache {
         let to_remove: Vec<String> = self
             .store
             .iter()
-            .filter(|e| !predicate(e.key(), e.value()))
+            .filter(|e| !predicate(e.key(), &e.value))
             .map(|e| e.key().clone())
             .collect();
 
