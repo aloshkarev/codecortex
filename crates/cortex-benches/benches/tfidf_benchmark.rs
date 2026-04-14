@@ -123,7 +123,7 @@ fn bench_tfidf_scoring(c: &mut Criterion) {
 
     for (i, query) in queries.iter().enumerate() {
         group.bench_with_input(
-            BenchmarkId::new("query", format!("{}_terms", query.len())),
+            BenchmarkId::new("query", format!("{}_terms_{}", query.len(), i)),
             &i,
             |b, _| {
                 let doc = &docs[0];

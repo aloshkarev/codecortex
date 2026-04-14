@@ -15,20 +15,30 @@ use std::collections::{HashMap, HashSet};
 pub fn tokenize(text: &str) -> Vec<String> {
     if text.is_ascii() {
         let mut out = Vec::new();
-        let mut token = String::new();
-        for c in text.chars() {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                token.push(c.to_ascii_lowercase());
-            } else if !token.is_empty() {
-                if token.len() > 1 {
-                    out.push(std::mem::take(&mut token));
-                } else {
-                    token.clear();
+        let bytes = text.as_bytes();
+        let mut start = 0;
+
+        for i in 0..bytes.len() {
+            let b = bytes[i];
+            if !(b.is_ascii_alphanumeric() || b == b'_') {
+                if i - start > 1 {
+                    // Create an ascii string directly and convert it lowercase
+                    let mut s = String::with_capacity(i - start);
+                    for &ch in &bytes[start..i] {
+                        s.push(ch.to_ascii_lowercase() as char);
+                    }
+                    out.push(s);
                 }
+                start = i + 1;
             }
         }
-        if token.len() > 1 {
-            out.push(token);
+
+        if bytes.len() - start > 1 {
+            let mut s = String::with_capacity(bytes.len() - start);
+            for &ch in &bytes[start..bytes.len()] {
+                s.push(ch.to_ascii_lowercase() as char);
+            }
+            out.push(s);
         }
         out
     } else {
@@ -42,7 +52,8 @@ pub fn tokenize(text: &str) -> Vec<String> {
 
 /// Calculate term frequency for a document
 pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
-    let mut tf = HashMap::new();
+    // Pre-allocate to reduce resizing
+    let mut tf: HashMap<String, f64> = HashMap::with_capacity(terms.len().min(128));
     let total = terms.len() as f64;
 
     if total == 0.0 {
@@ -50,7 +61,12 @@ pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
     }
 
     for term in terms {
-        *tf.entry(term.clone()).or_insert(0.0) += 1.0;
+        // Avoid cloning the term string if it already exists in the map
+        if let Some(count) = tf.get_mut(term) {
+            *count += 1.0;
+        } else {
+            tf.insert(term.clone(), 1.0);
+        }
     }
 
     // Normalize by document length
