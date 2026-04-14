@@ -4794,6 +4794,7 @@ mod serve_options_tests {
     #[test]
     fn rejects_remote_bind_without_allow_remote() {
         let opts = McpServeOptions {
+            feature_flags: crate::FeatureFlags::default(),
             transport: McpTransport::HttpSse,
             listen: "0.0.0.0:3010".parse().unwrap(),
             token: None,
@@ -4807,6 +4808,7 @@ mod serve_options_tests {
     #[test]
     fn accepts_remote_bind_when_explicitly_allowed() {
         let opts = McpServeOptions {
+            feature_flags: crate::FeatureFlags::default(),
             transport: McpTransport::WebSocket,
             listen: "0.0.0.0:3010".parse().unwrap(),
             token: Some("secret".to_string()),
