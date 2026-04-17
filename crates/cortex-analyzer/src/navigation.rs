@@ -313,14 +313,15 @@ impl NavigationEngine {
             .find_modified_symbols(source_branch, target_branch)
             .await?;
 
-        let mut impact = Vec::new();
-        for name in modified
+        let changed_symbols: Vec<&str> = modified
             .iter()
             .map(|m| m.name.as_str())
             .chain(removed.iter().map(|r| r.name.as_str()))
-        {
-            impact.extend(self.find_affected_by_change(name, target_branch).await?);
-        }
+            .collect();
+
+        let impact = self
+            .find_affected_by_changes(&changed_symbols, target_branch)
+            .await?;
 
         let affected_files: HashSet<&str> =
             impact.iter().map(|i| i.affected_file.as_str()).collect();
@@ -593,41 +594,78 @@ impl NavigationEngine {
             .collect())
     }
 
-    async fn find_affected_by_change(
+    async fn find_affected_by_changes(
         &self,
-        symbol_name: &str,
+        symbol_names: &[&str],
         on_branch: &str,
     ) -> Result<Vec<ImpactEntry>> {
-        let cypher = "MATCH (caller)-[r:CALLS|IMPORTS|INHERITS|IMPLEMENTS|TYPE_REFERENCE]->(target {name: $symbol})
-             WHERE caller.repository_path = $repo
-               AND caller.branch = $branch
-             RETURN caller.name AS affected_symbol, caller.path AS affected_file,
-                    type(r) AS relationship
-             ORDER BY caller.path
-             LIMIT 100";
-        let rows = self
-            .graph
-            .query_with_params(
-                cypher,
-                vec![
-                    ("repo", self.repository_path.clone()),
-                    ("symbol", symbol_name.to_string()),
-                    ("branch", on_branch.to_string()),
-                ],
-            )
-            .await?;
-        Ok(rows
-            .iter()
-            .filter_map(|r| {
+        if symbol_names.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut all_impacts = Vec::new();
+
+        // Generate static parameter names once to avoid leaking memory
+        // and because we can't use lazy_static without importing it.
+        // We can just use an array of static strings.
+        const PARAM_NAMES: [&str; 100] = [
+            "sym_0", "sym_1", "sym_2", "sym_3", "sym_4", "sym_5", "sym_6", "sym_7", "sym_8", "sym_9",
+            "sym_10", "sym_11", "sym_12", "sym_13", "sym_14", "sym_15", "sym_16", "sym_17", "sym_18", "sym_19",
+            "sym_20", "sym_21", "sym_22", "sym_23", "sym_24", "sym_25", "sym_26", "sym_27", "sym_28", "sym_29",
+            "sym_30", "sym_31", "sym_32", "sym_33", "sym_34", "sym_35", "sym_36", "sym_37", "sym_38", "sym_39",
+            "sym_40", "sym_41", "sym_42", "sym_43", "sym_44", "sym_45", "sym_46", "sym_47", "sym_48", "sym_49",
+            "sym_50", "sym_51", "sym_52", "sym_53", "sym_54", "sym_55", "sym_56", "sym_57", "sym_58", "sym_59",
+            "sym_60", "sym_61", "sym_62", "sym_63", "sym_64", "sym_65", "sym_66", "sym_67", "sym_68", "sym_69",
+            "sym_70", "sym_71", "sym_72", "sym_73", "sym_74", "sym_75", "sym_76", "sym_77", "sym_78", "sym_79",
+            "sym_80", "sym_81", "sym_82", "sym_83", "sym_84", "sym_85", "sym_86", "sym_87", "sym_88", "sym_89",
+            "sym_90", "sym_91", "sym_92", "sym_93", "sym_94", "sym_95", "sym_96", "sym_97", "sym_98", "sym_99",
+        ];
+
+        // Process in chunks to avoid queries with too many parameters
+        for chunk in symbol_names.chunks(100) {
+            // Build the WHERE IN clause dynamically since query_with_params doesn't support list directly
+            let mut cypher =
+                "MATCH (caller)-[r:CALLS|IMPORTS|INHERITS|IMPLEMENTS|TYPE_REFERENCE]->(target)
+                 WHERE caller.repository_path = $repo
+                   AND caller.branch = $branch
+                   AND target.name IN ["
+                    .to_string();
+
+            let mut params = vec![
+                ("repo", self.repository_path.clone()),
+                ("branch", on_branch.to_string()),
+            ];
+
+            let mut param_markers = Vec::with_capacity(chunk.len());
+            for i in 0..chunk.len() {
+                param_markers.push(format!("${}", PARAM_NAMES[i]));
+            }
+            cypher.push_str(&param_markers.join(", "));
+            cypher.push_str(
+                "]
+                 RETURN caller.name AS affected_symbol, caller.path AS affected_file,
+                        type(r) AS relationship, target.name AS changed_symbol
+                 ORDER BY caller.path
+                 LIMIT 1000",
+            );
+
+            for (i, &name) in chunk.iter().enumerate() {
+                params.push((PARAM_NAMES[i], name.to_string()));
+            }
+
+            let rows = self.graph.query_with_params(&cypher, params).await?;
+            all_impacts.extend(rows.iter().filter_map(|r| {
                 Some(ImpactEntry {
-                    changed_symbol: symbol_name.to_string(),
+                    changed_symbol: r.get("changed_symbol")?.as_str()?.to_string(),
                     affected_symbol: r.get("affected_symbol")?.as_str()?.to_string(),
                     affected_file: r.get("affected_file")?.as_str()?.to_string(),
                     relationship: r.get("relationship")?.as_str()?.to_string(),
                     impact_level: "direct".to_string(),
                 })
-            })
-            .collect())
+            }));
+        }
+
+        Ok(all_impacts)
     }
 
     fn parse_definition(
