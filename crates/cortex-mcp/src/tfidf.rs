@@ -42,7 +42,8 @@ pub fn tokenize(text: &str) -> Vec<String> {
 
 /// Calculate term frequency for a document
 pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
-    let mut tf = HashMap::new();
+    // ⚡ Bolt Optimization: Pre-allocate capacity to reduce re-allocations
+    let mut tf = HashMap::with_capacity(terms.len().min(16));
     let total = terms.len() as f64;
 
     if total == 0.0 {
@@ -50,7 +51,13 @@ pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
     }
 
     for term in terms {
-        *tf.entry(term.clone()).or_insert(0.0) += 1.0;
+        // ⚡ Bolt Optimization: Avoid unconditional `.clone()` of `term` by checking existence first
+        // Reduces allocations for terms that appear multiple times
+        if let Some(count) = tf.get_mut(term.as_str()) {
+            *count += 1.0;
+        } else {
+            tf.insert(term.clone(), 1.0);
+        }
     }
 
     // Normalize by document length
@@ -127,7 +134,12 @@ impl TfIdfScorer {
         let seen: HashSet<&String> = doc.terms.iter().collect();
 
         for term in seen {
-            *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
+            // ⚡ Bolt Optimization: Avoid unconditional `.clone()` of `term` by checking existence first
+            if let Some(count) = self.document_frequencies.get_mut(term.as_str()) {
+                *count += 1;
+            } else {
+                self.document_frequencies.insert((*term).clone(), 1);
+            }
         }
 
         // Invalidate IDF cache
@@ -183,10 +195,18 @@ impl TfIdfScorer {
     pub fn score_all(&self, query: &str, documents: &[Document]) -> Vec<(String, f64)> {
         let query_terms = tokenize(query);
 
+        // ⚡ Bolt Optimization: Compute score first, and only `.clone()` the `doc.id` if the score > 0.0.
+        // This avoids allocating thousands of string clones for documents that don't match the query.
         let mut scores: Vec<(String, f64)> = documents
             .iter()
-            .map(|doc| (doc.id.clone(), self.score(&query_terms, doc)))
-            .filter(|(_, score)| *score > 0.0)
+            .filter_map(|doc| {
+                let score = self.score(&query_terms, doc);
+                if score > 0.0 {
+                    Some((doc.id.clone(), score))
+                } else {
+                    None
+                }
+            })
             .collect();
 
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -278,7 +298,12 @@ impl Bm25Scorer {
 
         let seen: HashSet<&String> = doc.terms.iter().collect();
         for term in seen {
-            *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
+            // ⚡ Bolt Optimization: Avoid unconditional `.clone()` of `term` by checking existence first
+            if let Some(count) = self.document_frequencies.get_mut(term.as_str()) {
+                *count += 1;
+            } else {
+                self.document_frequencies.insert((*term).clone(), 1);
+            }
         }
     }
 
