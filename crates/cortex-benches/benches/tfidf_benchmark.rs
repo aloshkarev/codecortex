@@ -168,7 +168,7 @@ fn bench_code_search(c: &mut Criterion) {
     let code_queries = vec![
         ("single_term", "authenticate"),
         ("two_terms", "fetch data"),
-        ("three_terms", "cache data struct"),
+        ("three_terms_unique", "cache data struct"),
         ("with_type", "result error"),
     ];
 
