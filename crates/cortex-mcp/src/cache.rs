@@ -10,6 +10,7 @@
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::any::Any;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -57,16 +58,26 @@ impl<T> CacheEntry<T> {
 }
 
 /// L1 Cache: In-memory cache using DashMap for concurrent access
-#[derive(Debug)]
 pub struct L1Cache {
     /// The underlying storage
-    store: DashMap<String, Vec<u8>>,
+    store: DashMap<String, Box<dyn Any + Send + Sync>>,
     /// Default TTL for entries
     default_ttl: Duration,
     /// Maximum number of entries
     max_entries: usize,
     /// Entry metadata for TTL tracking
     metadata: DashMap<String, (Instant, Duration, String)>, // (created_at, ttl, repo_revision)
+}
+
+impl std::fmt::Debug for L1Cache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("L1Cache")
+            .field("store_len", &self.store.len())
+            .field("default_ttl", &self.default_ttl)
+            .field("max_entries", &self.max_entries)
+            .field("metadata_len", &self.metadata.len())
+            .finish()
+    }
 }
 
 impl L1Cache {
@@ -96,7 +107,7 @@ impl L1Cache {
     }
 
     /// Get a value from the cache
-    pub fn get<T: DeserializeOwned>(&self, key: &str, repo_revision: &str) -> Option<T> {
+    pub fn get<T: 'static + Send + Sync + Clone>(&self, key: &str, repo_revision: &str) -> Option<T> {
         // Check metadata by reference to avoid cloning when we will return None
         let meta = self.metadata.get(key)?;
         let (created_at, ttl, cached_revision) = meta.value();
@@ -113,12 +124,12 @@ impl L1Cache {
         drop(meta);
 
         // Get the value
-        let bytes = self.store.get(key)?;
-        serde_json::from_slice(bytes.value()).ok()
+        let any_val = self.store.get(key)?;
+        any_val.downcast_ref::<T>().cloned()
     }
 
     /// Put a value into the cache
-    pub fn put<T: Serialize>(&self, key: &str, value: T, repo_revision: &str) {
+    pub fn put<T: 'static + Send + Sync + Clone>(&self, key: &str, value: T, repo_revision: &str) {
         // Evict old entries if at capacity
         if self.store.len() >= self.max_entries {
             self.evict_expired();
@@ -128,17 +139,15 @@ impl L1Cache {
             }
         }
 
-        if let Ok(bytes) = serde_json::to_vec(&value) {
-            let key_owned = key.to_string();
-            let rev_owned = repo_revision.to_string();
-            self.store.insert(key_owned.clone(), bytes);
-            self.metadata
-                .insert(key_owned, (Instant::now(), self.default_ttl, rev_owned));
-        }
+        let key_owned = key.to_string();
+        let rev_owned = repo_revision.to_string();
+        self.store.insert(key_owned.clone(), Box::new(value));
+        self.metadata
+            .insert(key_owned, (Instant::now(), self.default_ttl, rev_owned));
     }
 
     /// Put a value with a custom TTL
-    pub fn put_with_ttl<T: Serialize>(
+    pub fn put_with_ttl<T: 'static + Send + Sync + Clone>(
         &self,
         key: &str,
         value: T,
@@ -150,13 +159,11 @@ impl L1Cache {
             self.evict_expired();
         }
 
-        if let Ok(bytes) = serde_json::to_vec(&value) {
-            let key_owned = key.to_string();
-            let rev_owned = repo_revision.to_string();
-            self.store.insert(key_owned.clone(), bytes);
-            self.metadata
-                .insert(key_owned, (Instant::now(), ttl, rev_owned));
-        }
+        let key_owned = key.to_string();
+        let rev_owned = repo_revision.to_string();
+        self.store.insert(key_owned.clone(), Box::new(value));
+        self.metadata
+            .insert(key_owned, (Instant::now(), ttl, rev_owned));
     }
 
     /// Remove a value from the cache
@@ -226,7 +233,7 @@ impl L1Cache {
     /// Retain entries matching a predicate
     fn retain<F>(&self, mut predicate: F)
     where
-        F: FnMut(&str, &Vec<u8>) -> bool,
+        F: FnMut(&str, &Box<dyn Any + Send + Sync>) -> bool,
     {
         let to_remove: Vec<String> = self
             .store
@@ -395,7 +402,7 @@ impl CacheHierarchy {
 
     /// Get a value from the cache hierarchy
     /// Returns (value, hit_level) where hit_level is "l1", "l2", or "none"
-    pub fn get<T: DeserializeOwned + Serialize + Clone>(
+    pub fn get<T: 'static + DeserializeOwned + Serialize + Clone + Send + Sync>(
         &self,
         key: &str,
         repo_revision: &str,
@@ -406,9 +413,9 @@ impl CacheHierarchy {
         }
 
         // Try L2
-        if let Some(value) = self.l2.get(key, repo_revision) {
+        if let Some(value) = self.l2.get::<T>(key, repo_revision) {
             // Populate L1 for faster subsequent access
-            self.l1.put(key, &value, repo_revision);
+            self.l1.put(key, value.clone(), repo_revision);
             return (Some(value), "l2");
         }
 
@@ -416,15 +423,15 @@ impl CacheHierarchy {
     }
 
     /// Put a value into the cache hierarchy
-    pub fn put<T: Serialize + Clone>(&self, key: &str, value: T, repo_revision: &str) {
+    pub fn put<T: 'static + Serialize + Clone + Send + Sync>(&self, key: &str, value: T, repo_revision: &str) {
         // Put in both L1 and L2
-        self.l1.put(key, &value, repo_revision);
+        self.l1.put(key, value.clone(), repo_revision);
         self.l2
             .put(key, value, repo_revision, Duration::from_secs(300)); // 5 min L2 TTL
     }
 
     /// Put a value with custom TTLs
-    pub fn put_with_ttls<T: Serialize + Clone>(
+    pub fn put_with_ttls<T: 'static + Serialize + Clone + Send + Sync>(
         &self,
         key: &str,
         value: T,
@@ -432,7 +439,7 @@ impl CacheHierarchy {
         l1_ttl: Duration,
         l2_ttl: Duration,
     ) {
-        self.l1.put_with_ttl(key, &value, l1_ttl, repo_revision);
+        self.l1.put_with_ttl(key, value.clone(), l1_ttl, repo_revision);
         self.l2.put(key, value, repo_revision, l2_ttl);
     }
 
@@ -603,7 +610,7 @@ mod tests {
         cache.put("key1", "value1".to_string(), "rev1");
         cache.remove("key1");
 
-        let (value, _): (Option<String>, _) = cache.get("key1", "rev1");
+        let (value, _): (Option<String>, &'static str) = cache.get("key1", "rev1");
         assert!(value.is_none());
     }
 

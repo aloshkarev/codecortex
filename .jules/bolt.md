@@ -1,0 +1,3 @@
+## 2024-05-18 - Avoid Serde Serialization for In-Memory Caches
+**Learning:** Found that `cortex-mcp/src/cache.rs` uses `serde_json` to serialize and deserialize items stored in its `DashMap` based L1 Cache, leading to unnecessary overhead for an in-memory cache. The codebase guidelines explicitly state: "For in-memory caching mechanisms in Rust, prefer utilizing `Box<dyn std::any::Any + Send + Sync>` combined with downcasting instead of byte serialization strategies (like `serde_json`) to minimize overhead and improve performance."
+**Action:** Replace `serde_json` serialization/deserialization with `std::any::Any` downcasting for `L1Cache` in `cortex-mcp/src/cache.rs` to eliminate performance bottlenecks from JSON processing during cache hits/misses.
