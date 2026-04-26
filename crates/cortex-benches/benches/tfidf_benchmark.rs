@@ -118,6 +118,7 @@ fn bench_tfidf_scoring(c: &mut Criterion) {
             "implementation".to_string(),
             "validation".to_string(),
             "caching".to_string(),
+            "handler".to_string(),
         ],
     ];
 
