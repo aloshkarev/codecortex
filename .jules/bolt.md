@@ -1,0 +1,3 @@
+## 2024-04-28 - Avoid Unconditional String Cloning in Hot Loops
+**Learning:** In Rust `HashMap`, using `map.entry(key.clone()).or_insert(...)` unconditionally allocates a new `String` (clones the key) on every iteration, regardless of whether the key already exists in the map. In hot loops like TF-IDF frequency counting, this causes significant performance degradation due to unnecessary heap allocations.
+**Action:** When counting occurrences or updating existing keys in hot loops, always use a two-step approach: `if let Some(count) = map.get_mut(key)` first to avoid the allocation, and fallback to `map.insert(key.clone(), ...)` only on cache misses.
