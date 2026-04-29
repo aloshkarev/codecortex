@@ -50,7 +50,12 @@ pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
     }
 
     for term in terms {
-        *tf.entry(term.clone()).or_insert(0.0) += 1.0;
+        // PERF: Avoid cloning key on hot path for existing terms
+        if let Some(count) = tf.get_mut(term) {
+            *count += 1.0;
+        } else {
+            tf.insert(term.clone(), 1.0);
+        }
     }
 
     // Normalize by document length
@@ -127,7 +132,12 @@ impl TfIdfScorer {
         let seen: HashSet<&String> = doc.terms.iter().collect();
 
         for term in seen {
-            *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
+            // PERF: Avoid cloning key on hot path for existing terms
+            if let Some(count) = self.document_frequencies.get_mut(term) {
+                *count += 1;
+            } else {
+                self.document_frequencies.insert(term.clone(), 1);
+            }
         }
 
         // Invalidate IDF cache
@@ -278,7 +288,12 @@ impl Bm25Scorer {
 
         let seen: HashSet<&String> = doc.terms.iter().collect();
         for term in seen {
-            *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
+            // PERF: Avoid cloning key on hot path for existing terms
+            if let Some(count) = self.document_frequencies.get_mut(term) {
+                *count += 1;
+            } else {
+                self.document_frequencies.insert(term.clone(), 1);
+            }
         }
     }
 
