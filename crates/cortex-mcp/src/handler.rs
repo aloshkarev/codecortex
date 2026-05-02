@@ -4800,6 +4800,7 @@ mod serve_options_tests {
             allow_remote: false,
             max_clients: 32,
             idle_timeout_secs: 60,
+            feature_flags: crate::FeatureFlags::from_env(),
         };
         assert!(validate_serve_options(&opts).is_err());
     }
@@ -4813,6 +4814,7 @@ mod serve_options_tests {
             allow_remote: true,
             max_clients: 32,
             idle_timeout_secs: 60,
+            feature_flags: crate::FeatureFlags::from_env(),
         };
         assert!(validate_serve_options(&opts).is_ok());
     }

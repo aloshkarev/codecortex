@@ -49,8 +49,14 @@ pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
         return tf;
     }
 
+    // Performance optimization: Avoid unnecessary String allocations by checking
+    // with get_mut first before cloning and inserting the term into the map.
     for term in terms {
-        *tf.entry(term.clone()).or_insert(0.0) += 1.0;
+        if let Some(count) = tf.get_mut(term.as_str()) {
+            *count += 1.0;
+        } else {
+            tf.insert(term.clone(), 1.0);
+        }
     }
 
     // Normalize by document length
@@ -126,8 +132,14 @@ impl TfIdfScorer {
         // Track unique terms in this document
         let seen: HashSet<&String> = doc.terms.iter().collect();
 
+        // Performance optimization: Avoid unnecessary String allocations by checking
+        // with get_mut first before cloning and inserting the term into the map.
         for term in seen {
-            *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
+            if let Some(count) = self.document_frequencies.get_mut(term.as_str()) {
+                *count += 1;
+            } else {
+                self.document_frequencies.insert((*term).clone(), 1);
+            }
         }
 
         // Invalidate IDF cache
@@ -277,8 +289,14 @@ impl Bm25Scorer {
             / self.total_documents as f64;
 
         let seen: HashSet<&String> = doc.terms.iter().collect();
+        // Performance optimization: Avoid unnecessary String allocations by checking
+        // with get_mut first before cloning and inserting the term into the map.
         for term in seen {
-            *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
+            if let Some(count) = self.document_frequencies.get_mut(term.as_str()) {
+                *count += 1;
+            } else {
+                self.document_frequencies.insert((*term).clone(), 1);
+            }
         }
     }
 
