@@ -564,11 +564,19 @@ impl ContextCapsuleBuilder {
 
             if path_score > 0.0 {
                 // Score the full path and the directory
-                *path_scores.entry(result.path.clone()).or_insert(0.0) += path_score;
+                if let Some(score) = path_scores.get_mut(&result.path) {
+                    *score += path_score;
+                } else {
+                    path_scores.insert(result.path.clone(), path_score);
+                }
 
                 if let Some(dir) = std::path::Path::new(&result.path).parent() {
                     let dir_str = dir.to_string_lossy().to_string();
-                    *path_scores.entry(dir_str).or_insert(0.0) += path_score * 0.8;
+                    if let Some(score) = path_scores.get_mut(&dir_str) {
+                        *score += path_score * 0.8;
+                    } else {
+                        path_scores.insert(dir_str, path_score * 0.8);
+                    }
                 }
             }
         }

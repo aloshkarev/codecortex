@@ -170,8 +170,12 @@ impl LogicFlowSearcher {
         // Build reverse lookup for node info
         let mut node_info: HashMap<String, &RawEdge> = HashMap::new();
         for edge in &edges {
-            node_info.entry(edge.from_id.clone()).or_insert(edge);
-            node_info.entry(edge.to_id.clone()).or_insert(edge);
+            if !node_info.contains_key(&edge.from_id) {
+                node_info.insert(edge.from_id.clone(), edge);
+            }
+            if !node_info.contains_key(&edge.to_id) {
+                node_info.insert(edge.to_id.clone(), edge);
+            }
         }
 
         // Find candidate start and end nodes

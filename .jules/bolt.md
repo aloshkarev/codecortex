@@ -1,0 +1,3 @@
+## 2025-05-04 - HashMap::entry Cloning Overhead
+**Learning:** In Rust, using `HashMap::entry(key.clone()).or_insert(...)` inside a hot loop (like term frequency counters in TF-IDF scoring) allocates memory for the string clone *on every single iteration*, even if the key already exists. This causes unnecessary memory allocations and CPU overhead, creating a significant performance bottleneck.
+**Action:** Always prefer a two-step approach on hot paths: `if let Some(val) = map.get_mut(&key)` or `if !map.contains_key(&key)` with a fallback to `map.insert(key.clone(), ...)`. This defers the string allocation and cloning to only happen when the key is actually being inserted for the first time.
