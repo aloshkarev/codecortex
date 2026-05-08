@@ -32,7 +32,7 @@ async fn mcp_websocket_accepts_multiple_clients_and_lists_tools() {
     let port = free_port();
     let listen = format!("127.0.0.1:{port}");
 
-    let options = McpServeOptions {
+    let options = McpServeOptions { feature_flags: cortex_mcp::FeatureFlags::default(),
         transport: McpTransport::WebSocket,
         listen: listen.parse().expect("listen addr"),
         token: None,

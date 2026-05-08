@@ -1,0 +1,3 @@
+## 2024-05-08 - Rust HashMap Entry API clones keys unnecessarily in hot loops
+**Learning:** In Rust's `HashMap`, using `map.entry(key.clone()).or_insert(...)` requires cloning the key string on every single iteration, even if the key already exists in the map. In hot loops like TF-IDF term counting, this results in massive unnecessary heap allocation overhead.
+**Action:** When updating frequencies or counts in maps, especially with `String` keys, prefer `if let Some(val) = map.get_mut(key) { ... } else { map.insert(key.clone(), ...); }` to completely avoid cloning keys that are already present in the map.
