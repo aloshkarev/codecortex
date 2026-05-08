@@ -182,7 +182,7 @@ mod tests {
     #[tokio::test]
     async fn websocket_supports_multiple_clients() {
         let port = free_port();
-        let options = McpServeOptions {
+        let options = McpServeOptions { feature_flags: crate::flags::FeatureFlags::default(),
             transport: McpTransport::WebSocket,
             listen: std::net::SocketAddr::from(([127, 0, 0, 1], port)),
             token: None,
@@ -258,7 +258,7 @@ mod tests {
     #[tokio::test]
     async fn http_sse_returns_event_stream() {
         let port = free_port();
-        let options = McpServeOptions {
+        let options = McpServeOptions { feature_flags: crate::flags::FeatureFlags::default(),
             transport: McpTransport::HttpSse,
             listen: std::net::SocketAddr::from(([127, 0, 0, 1], port)),
             token: None,
