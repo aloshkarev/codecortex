@@ -2193,7 +2193,11 @@ impl CortexHandler {
                 Ok(_) => ingested += 1,
                 Err(_) => {
                     rejected += 1;
-                    *reasons.entry("unknown_symbol".to_string()).or_insert(0) += 1;
+                    if let Some(count) = reasons.get_mut("unknown_symbol") {
+                        *count += 1;
+                    } else {
+                        reasons.insert("unknown_symbol".to_string(), 1);
+                    }
                 }
             }
         }
@@ -3768,7 +3772,11 @@ impl CortexHandler {
             std::collections::HashMap::new();
         for result in &results {
             if let Some(pattern) = result.get("pattern").and_then(|p| p.as_str()) {
-                *pattern_counts.entry(pattern.to_string()).or_insert(0) += 1;
+                if let Some(count) = pattern_counts.get_mut(pattern) {
+                    *count += 1;
+                } else {
+                    pattern_counts.insert(pattern.to_string(), 1);
+                }
             }
         }
 
@@ -4800,6 +4808,7 @@ mod serve_options_tests {
             allow_remote: false,
             max_clients: 32,
             idle_timeout_secs: 60,
+            feature_flags: crate::flags::FeatureFlags::default(),
         };
         assert!(validate_serve_options(&opts).is_err());
     }
@@ -4813,6 +4822,7 @@ mod serve_options_tests {
             allow_remote: true,
             max_clients: 32,
             idle_timeout_secs: 60,
+            feature_flags: crate::flags::FeatureFlags::default(),
         };
         assert!(validate_serve_options(&opts).is_ok());
     }
