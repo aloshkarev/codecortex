@@ -188,6 +188,7 @@ mod tests {
             token: None,
             allow_remote: false,
             max_clients: 4,
+            feature_flags: crate::flags::FeatureFlags::default(),
             idle_timeout_secs: 60,
         };
 
@@ -264,6 +265,7 @@ mod tests {
             token: None,
             allow_remote: false,
             max_clients: 8,
+            feature_flags: crate::flags::FeatureFlags::default(),
             idle_timeout_secs: 60,
         };
 
