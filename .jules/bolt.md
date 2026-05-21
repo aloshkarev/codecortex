@@ -1,0 +1,3 @@
+## 2024-03-24 - Rust HashMap entry allocation overhead
+**Learning:** Using `HashMap::entry(key.clone()).or_insert(...)` inside a loop (like when calculating term frequencies for TF-IDF) forces a `String` clone for every single term, even if it already exists in the map. This generates significant unnecessary allocation overhead on hot paths.
+**Action:** When repeatedly updating counts or values in a map within a hot loop, avoid `.entry().or_insert()` if the key requires cloning. Instead, prefer checking `if let Some(val) = map.get_mut(key)` to update the existing value without allocating, and fall back to `map.insert(key.clone(), ...)` only when the key is truly absent.
