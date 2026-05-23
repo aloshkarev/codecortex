@@ -50,7 +50,12 @@ pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
     }
 
     for term in terms {
-        *tf.entry(term.clone()).or_insert(0.0) += 1.0;
+        // PERF: Avoid clone() when term already exists
+        if let Some(count) = tf.get_mut(term) {
+            *count += 1.0;
+        } else {
+            tf.insert(term.clone(), 1.0);
+        }
     }
 
     // Normalize by document length
