@@ -1,0 +1,3 @@
+## 2024-05-18 - [Optimize HashMap Memory Allocation in Hot Paths]
+**Learning:** [Using `entry(key.clone()).or_insert(...)` on a `HashMap` in a hot loop forces a clone (memory allocation) of the key on *every* iteration, even if the key already exists. This can become a significant performance bottleneck in tight loops, such as when computing TF-IDF scores or tallying term frequencies.]
+**Action:** [Always use the `if let Some(val) = map.get_mut(key) { ... } else { map.insert(key.clone(), ...); }` pattern in performance-critical paths (especially when key creation is expensive, like `String::clone()`) to avoid unnecessary memory allocations for keys that are already present in the map.]
