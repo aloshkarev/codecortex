@@ -189,6 +189,7 @@ mod tests {
             allow_remote: false,
             max_clients: 4,
             idle_timeout_secs: 60,
+            feature_flags: crate::flags::FeatureFlags::default(),
         };
 
         let handle = tokio::spawn(async move {
@@ -265,6 +266,7 @@ mod tests {
             allow_remote: false,
             max_clients: 8,
             idle_timeout_secs: 60,
+            feature_flags: crate::flags::FeatureFlags::default(),
         };
 
         let handle = tokio::spawn(async move {
