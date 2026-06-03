@@ -1,0 +1,3 @@
+## 2024-06-03 - Rust HashMap `entry().or_insert()` vs `get_mut()` with clones
+**Learning:** Using `*map.entry(key.clone()).or_insert(...)` on a hot path forces memory allocations via `.clone()` on every iteration even when the key already exists in the map. When iterating over a `HashSet<&String>` and inserting into a `HashMap<String, ...>`, this `.clone()` creates heavy string allocation pressure.
+**Action:** Replace `entry().or_insert()` with `if let Some(count) = map.get_mut(key)` (using `.as_str()` if needed to avoid type mismatch on borrowed string keys) and a fallback to `.insert(key.clone(), ...)`. This correctly avoids `.clone()` unless it's a completely new key, eliminating significant string allocations on hot paths like TF-IDF frequency counters.
