@@ -1783,7 +1783,7 @@ fn build_incremental_diff_plan(
         fallback_reason: None,
     }
 }
-
+#[allow(clippy::too_many_arguments)]
 async fn run_index(
     config: &CortexConfig,
     path: &str,
@@ -5987,7 +5987,9 @@ async fn run_project(
 
                         // Purge graph data for removed branches (best-effort).
                         let repo_path_str = project_path.display().to_string();
+#[allow(clippy::collapsible_if)]
                         let mut graph_deleted = 0usize;
+                        #[allow(clippy::collapsible_if)]
                         if !purged_branches.is_empty() {
                             if let Ok(client) = GraphClient::connect(config).await {
                                 for branch in &purged_branches {
