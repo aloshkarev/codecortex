@@ -1,0 +1,3 @@
+## 2024-03-24 - [Avoid HashMap::entry in Rust Hot Paths]
+**Learning:** Using `HashMap::entry(key.clone()).or_insert(...)` on hot paths (like TF-IDF term frequency counters) causes unnecessary memory allocation for `String::clone()` on every single iteration, even if the key already exists.
+**Action:** Use `if let Some(count) = map.get_mut(key)` with a fallback to `insert(key.clone(), ...)` instead. When querying a `HashMap<String, V>` using a borrowed key from a `HashSet<&String>`, remember to use `.get_mut(term.as_str())` to avoid type mismatch errors.
