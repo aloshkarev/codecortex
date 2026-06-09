@@ -1,0 +1,3 @@
+## 2024-06-09 - HashMap entry API vs get_mut on hot paths
+**Learning:** Using `HashMap::entry(key.clone()).or_insert(...)` on hot paths (like TF-IDF term frequency counters where `key` is a string) is an anti-pattern. It forces a heap allocation for the `.clone()` on *every single iteration*, even when the key already exists in the map (which is the case for most terms in a document).
+**Action:** When updating counts in a HashMap where the key is expensive to clone (like a `String`), prefer the pattern `if let Some(val) = map.get_mut(key) { *val += 1 } else { map.insert(key.clone(), 1) }`. Note that if querying with a borrowed key (`&String`) into a map with `String` keys, use `.as_str()` or deref appropriately to match types and avoid trait bounds errors.
