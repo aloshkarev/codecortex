@@ -38,6 +38,7 @@ async fn mcp_websocket_accepts_multiple_clients_and_lists_tools() {
         token: None,
         allow_remote: false,
         max_clients: 4,
+        feature_flags: cortex_mcp::FeatureFlags::default(),
         idle_timeout_secs: 60,
     };
     let server_task = tokio::spawn(async move {
