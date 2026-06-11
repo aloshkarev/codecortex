@@ -158,12 +158,10 @@ impl CentralityScorer {
         let mut next = HashMap::new();
 
         for _ in 0..iterations {
-            // Reset next scores
             for id in self.graph.nodes() {
                 next.insert(id.clone(), (1.0 - damping) / n as f64);
             }
 
-            // Distribute PageRank
             for node in self.graph.nodes() {
                 let outgoing = self.graph.outgoing(node);
                 let out_degree = outgoing.map(|e| e.len()).unwrap_or(0);
@@ -271,7 +269,6 @@ pub fn betweenness_centrality_approx(
         let source = &nodes[i];
         let target = &nodes[j];
 
-        // BFS to find shortest paths
         if let Some(path) = bfs_shortest_path(graph, source, target) {
             for node in &path[1..path.len() - 1] {
                 *betweenness.get_mut(node).unwrap() += 1.0;
@@ -279,7 +276,6 @@ pub fn betweenness_centrality_approx(
         }
     }
 
-    // Normalize
     let scale = samples as f64;
     for value in betweenness.values_mut() {
         *value /= scale;
@@ -299,7 +295,6 @@ fn bfs_shortest_path(graph: &CentralityGraph, source: &str, target: &str) -> Opt
 
     while let Some(current) = queue.pop_front() {
         if current == target {
-            // Reconstruct path
             let mut path = vec![target.to_string()];
             let mut node = target.to_string();
             while let Some(p) = parent.get(&node) {
@@ -335,7 +330,6 @@ impl SimpleRng {
     }
 
     fn next(&mut self) -> u64 {
-        // xorshift64
         self.state ^= self.state << 13;
         self.state ^= self.state >> 7;
         self.state ^= self.state << 17;
@@ -359,7 +353,6 @@ pub struct CombinedCentrality {
 impl CombinedCentrality {
     /// Compute combined score from individual scores
     pub fn compute(pagerank: f64, degree: f64, betweenness: f64) -> Self {
-        // Weighted combination
         let combined = pagerank * 0.5 + degree * 0.3 + betweenness * 0.2;
         Self {
             pagerank,
@@ -402,13 +395,11 @@ mod tests {
     fn pagerank_simple_graph() {
         let mut scorer = CentralityScorer::new();
 
-        // Create a simple graph: a -> b -> c
         scorer.add_edge("a", "b");
         scorer.add_edge("b", "c");
 
         scorer.compute();
 
-        // All nodes should have positive scores
         assert!(scorer.score("a") > 0.0);
         assert!(scorer.score("b") > 0.0);
         assert!(scorer.score("c") > 0.0);
@@ -418,14 +409,12 @@ mod tests {
     fn pagerank_hub_nodes() {
         let mut scorer = CentralityScorer::new();
 
-        // Create a star graph: center <- a, center <- b, center <- c
         scorer.add_edge("a", "center");
         scorer.add_edge("b", "center");
         scorer.add_edge("c", "center");
 
         scorer.compute();
 
-        // Center should have higher PageRank due to incoming links
         let center_score = scorer.score("center");
         let a_score = scorer.score("a");
 
@@ -446,7 +435,6 @@ mod tests {
         let top = scorer.top_nodes(2);
         assert_eq!(top.len(), 2);
 
-        // Hub should be in top nodes
         let top_ids: Vec<_> = top.iter().map(|(id, _)| id.as_str()).collect();
         assert!(top_ids.contains(&"hub"));
     }
@@ -454,7 +442,6 @@ mod tests {
     #[test]
     fn test_degree_centrality() {
         let mut graph = CentralityGraph::new();
-        // a -> b, a -> c, d -> b, e -> b
         graph.add_edge(Edge::new("a", "b"));
         graph.add_edge(Edge::new("a", "c"));
         graph.add_edge(Edge::new("d", "b"));
@@ -462,8 +449,6 @@ mod tests {
 
         let dc = super::degree_centrality(&graph);
 
-        // Node 'a' has 2 outgoing + 0 incoming = 2 connections
-        // Node 'b' has 0 outgoing + 3 incoming = 3 connections
         assert!(dc[&"b".to_string()] > dc[&"a".to_string()]);
     }
 
@@ -492,6 +477,6 @@ mod tests {
     fn combined_centrality() {
         let combined = CombinedCentrality::compute(0.5, 0.4, 0.3);
 
-        assert!((combined.combined - 0.43).abs() < 0.01); // 0.5*0.5 + 0.4*0.3 + 0.3*0.2
+        assert!((combined.combined - 0.43).abs() < 0.01);
     }
 }

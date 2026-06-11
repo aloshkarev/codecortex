@@ -86,7 +86,7 @@
           meta = with lib; {
             description = "CodeCortex CLI";
             homepage = "https://github.com/aloshkarev/codecortex";
-            license = licenses.asl20;
+            license = licenses.mit;
             mainProgram = "cortex";
             platforms = platforms.unix;
           };
@@ -102,7 +102,6 @@
                 pkgs.rustfmt
                 pkgs.clippy
                 pkgs.cacert
-                pkgs.git
               ];
               buildInputs = commonBuildInputs;
             }
@@ -175,9 +174,7 @@
 
         checks = {
           format = mkCheck "codecortex-fmt" "cargo fmt --all -- --check";
-          lint =
-            mkCheck "codecortex-clippy"
-              "cargo clippy --workspace --all-targets --all-features -- -D warnings";
+          lint = mkCheck "codecortex-clippy" "cargo clippy --workspace --all-targets --all-features -- -D warnings";
           tests = mkCheck "codecortex-tests" "cargo test --workspace --locked";
           mcpToolSurfaceGuard =
             mkCheck "codecortex-mcp-tool-surface-guard"

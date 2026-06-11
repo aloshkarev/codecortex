@@ -1,0 +1,29 @@
+---
+description: CodeCortex graph analysis — callers, impact, dead code, complexity, navigation, hybrid search (scoped filters required)
+globs: crates/**
+alwaysApply: false
+---
+
+# CodeCortex analysis (Rust workspace)
+
+## Routing
+
+| Question | Primary MCP tool |
+| --- | --- |
+| Callers / callees | `analyze_code_relationships` |
+| Blast radius | `get_impact_graph` |
+| Dead code / complexity | `find_dead_code`, `calculate_cyclomatic_complexity` |
+| Go to def / usages | `go_to_definition`, `find_all_usages` |
+| NL discovery | `vector_search_hybrid` (needs graph + vector) |
+
+## MUST
+
+- Preflight: `check_health`, `index_status`.
+- Set `include_paths` / `exclude_paths` before expensive calls.
+- Cross-check once for high-impact conclusions.
+
+## Delegate
+
+Long traces → Task **codecortex-analyzer**.
+
+**Sync:** skill [codecortex](../../skills/codecortex/SKILL.md) · subagent `codecortex-analyzer`

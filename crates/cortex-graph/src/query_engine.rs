@@ -118,7 +118,6 @@ mod tests {
 
     #[test]
     fn callers_query_uses_parameter() {
-        // Verify the callers query uses parameterized input (safe from injection)
         let query = "MATCH (caller:Function)-[r:CALLS]->(callee:Function {name: $name})
                      RETURN caller.name AS caller, callee.name AS callee, r.properties AS relationship";
         assert!(query.contains("$name"));
@@ -129,7 +128,6 @@ mod tests {
 
     #[test]
     fn callees_query_uses_parameter() {
-        // Verify the callees query uses parameterized input (safe from injection)
         let query = "MATCH (caller:Function {name: $name})-[r:CALLS]->(callee:Function)
                      RETURN caller.name AS caller, callee.name AS callee, r.properties AS relationship";
         assert!(query.contains("$name"));
@@ -140,7 +138,6 @@ mod tests {
 
     #[test]
     fn find_functions_query_uses_parameter() {
-        // Verify the find_functions query uses parameterized input
         let query = "MATCH (f:Function) WHERE f.name CONTAINS $pattern
                      RETURN f.name AS name, f.path AS path, f.line_number AS line
                      ORDER BY f.name
@@ -151,7 +148,6 @@ mod tests {
 
     #[test]
     fn get_function_query_uses_parameter() {
-        // Verify the get_function query uses parameterized input
         let query = "MATCH (f:Function {name: $name})
                      RETURN f.name AS name, f.path AS path, f.line_number AS line,
                             f.source AS source, f.docstring AS docstring";
@@ -161,7 +157,6 @@ mod tests {
 
     #[test]
     fn all_queries_use_safe_parameters() {
-        // Ensure all query engine methods use parameterized queries
         let queries = [
             "MATCH (caller:Function)-[r:CALLS]->(callee:Function {name: $name})",
             "MATCH (caller:Function {name: $name})-[r:CALLS]->(callee:Function)",
@@ -170,9 +165,7 @@ mod tests {
         ];
 
         for query in queries {
-            // All queries should use $param syntax
             assert!(query.contains("$"), "Query should use parameter: {}", query);
-            // No string interpolation patterns
             assert!(
                 !query.contains("'{") && !query.contains("}'"),
                 "Query should not use string interpolation: {}",

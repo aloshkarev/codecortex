@@ -2,10 +2,15 @@
 //!
 //! Provides configurable event filtering to reduce noise:
 //! - Pattern-based file filtering (glob patterns)
+//! - `.cortexignore` / `.gitignore` via [`CortexIgnoreWalker`]
 //! - Event type filtering (create, modify, delete)
 //! - Custom filter rules
 //! - Path-based inclusion/exclusion
 
+use cortex_core::{
+    CortexConfig, CortexIgnoreOptions, CortexIgnoreWalker, ProjectConfig,
+    default_global_cortexignore_path, ensure_cortexignore_template,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
@@ -99,6 +104,8 @@ impl FilterRule {
                 let prefix = parts[0].trim_end_matches('/');
                 let suffix = parts[1].trim_start_matches('/');
 
+                let path_str = path_str.to_string();
+
                 // Check prefix
                 if !prefix.is_empty() && !path_str.starts_with(prefix) {
                     // Check if any path component matches
@@ -117,7 +124,7 @@ impl FilterRule {
                     return path_str.ends_with(suffix)
                         || path
                             .extension()
-                            .map(|e| suffix.contains(e.to_string_lossy().as_ref()))
+                            .map(|e| suffix.contains(&e.to_string_lossy().to_string()))
                             .unwrap_or(false);
                 }
 
@@ -240,6 +247,7 @@ impl Default for FilterConfig {
 #[derive(Debug, Clone)]
 pub struct EventFilter {
     config: FilterConfig,
+    ignore_walker: Option<CortexIgnoreWalker>,
 }
 
 impl EventFilter {
@@ -250,7 +258,58 @@ impl EventFilter {
 
     /// Create an event filter with custom configuration
     pub fn with_config(config: FilterConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            ignore_walker: None,
+        }
+    }
+
+    /// Attach `.cortexignore` / `.gitignore` rules for a repository root.
+    pub fn with_cortex_ignore(
+        self,
+        repo_root: &Path,
+        cortex_config: &CortexConfig,
+        extra_excludes: &[String],
+    ) -> Self {
+        self.with_cortex_ignore_scoped(repo_root, None, cortex_config, extra_excludes)
+    }
+
+    /// Attach ignore rules with optional scan root (defaults to `repo_root`).
+    pub fn with_cortex_ignore_scoped(
+        mut self,
+        repo_root: &Path,
+        scan_root: Option<&Path>,
+        cortex_config: &CortexConfig,
+        extra_excludes: &[String],
+    ) -> Self {
+        let repo_root = repo_root
+            .canonicalize()
+            .unwrap_or_else(|_| repo_root.to_path_buf());
+        let git_root = cortex_core::find_git_repository_root(&repo_root)
+            .map(|p| p.canonicalize().unwrap_or(p))
+            .unwrap_or_else(|| repo_root.clone());
+        let _ = ensure_cortexignore_template(&git_root, &ProjectConfig::default().ignore_patterns);
+        let mut policy = cortex_config.index_exclude_patterns.clone();
+        policy.extend_from_slice(extra_excludes);
+        self.ignore_walker = Some(CortexIgnoreWalker::new(CortexIgnoreOptions {
+            repo_root: git_root,
+            scan_root: scan_root.map(|p| p.canonicalize().unwrap_or_else(|_| p.to_path_buf())),
+            global_ignore_path: cortex_config
+                .global_cortexignore_path
+                .clone()
+                .or_else(default_global_cortexignore_path),
+            respect_gitignore: true,
+            respect_cortexignore: true,
+            include_hidden: false,
+            policy_excludes: policy,
+            count_ignored_skips: false,
+        }));
+        self
+    }
+
+    /// Replace the cortex ignore walker (for tests or daemon policy updates).
+    pub fn set_ignore_walker(&mut self, walker: Option<CortexIgnoreWalker>) {
+        self.ignore_walker = walker;
     }
 
     /// Get the current configuration
@@ -260,6 +319,12 @@ impl EventFilter {
 
     /// Check if an event should be processed
     pub fn should_process(&self, path: &Path, event_kind: WatchEventKind) -> bool {
+        if let Some(ref walker) = self.ignore_walker {
+            if walker.is_ignored(path) {
+                return false;
+            }
+        }
+
         // Check directory exclusions
         if self.is_excluded_dir(path) {
             return false;
@@ -503,6 +568,38 @@ mod tests {
             Path::new("__pycache__/module.pyc"),
             WatchEventKind::Modified
         ));
+    }
+
+    #[test]
+    fn event_filter_respects_cortexignore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join(".cortexignore"), "skip.rs\n").unwrap();
+        let ignored_file = root.join("skip.rs");
+        std::fs::write(&ignored_file, "fn skip() {}").unwrap();
+        let keep = root.join("keep.rs");
+        std::fs::write(&keep, "fn keep() {}").unwrap();
+
+        let filter = EventFilter::new().with_cortex_ignore(root, &CortexConfig::default(), &[]);
+        assert!(!filter.should_process(&ignored_file, WatchEventKind::Modified));
+        assert!(filter.should_process(&keep, WatchEventKind::Modified));
+    }
+
+    #[test]
+    fn event_filter_respects_ignored_directory_pattern() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join(".cortexignore"), "ignored/\n").unwrap();
+        let ignored_dir = root.join("ignored");
+        std::fs::create_dir_all(&ignored_dir).unwrap();
+        let nested = ignored_dir.join("skip.rs");
+        std::fs::write(&nested, "fn skip() {}").unwrap();
+        let keep = root.join("keep.rs");
+        std::fs::write(&keep, "fn keep() {}").unwrap();
+
+        let filter = EventFilter::new().with_cortex_ignore(root, &CortexConfig::default(), &[]);
+        assert!(!filter.should_process(&nested, WatchEventKind::Modified));
+        assert!(filter.should_process(&keep, WatchEventKind::Modified));
     }
 
     #[test]

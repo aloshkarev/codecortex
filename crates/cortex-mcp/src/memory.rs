@@ -301,7 +301,6 @@ impl MemoryStore {
 
     /// Save an observation
     pub fn save(&self, obs: &Observation) -> Result<(), MemoryStoreError> {
-        // Validate
         if obs.text.is_empty() {
             return Err(MemoryStoreError::ValidationError(
                 "text must not be empty".into(),
@@ -319,7 +318,6 @@ impl MemoryStore {
             return Err(MemoryStoreError::SensitiveContent);
         }
 
-        // Check rate limit
         if self.is_rate_limited(&obs.session_id)? {
             return Err(MemoryStoreError::RateLimited);
         }
@@ -356,7 +354,6 @@ impl MemoryStore {
             ],
         )?;
 
-        // Append to audit log
         self.append_audit(&conn, "save", &obs.observation_id, None)?;
 
         Ok(())
@@ -549,7 +546,7 @@ impl MemoryStore {
     }
 
     /// Check if rate limited
-    fn is_rate_limited(&self, session_id: &str) -> Result<bool, MemoryStoreError> {
+    pub fn is_rate_limited(&self, session_id: &str) -> Result<bool, MemoryStoreError> {
         let one_minute_ago = current_time_ms() - 60_000;
 
         let conn = self.conn.lock().map_err(|_| MemoryStoreError::LockError)?;
@@ -719,9 +716,6 @@ pub fn generate_observation_id() -> String {
     format!("obs-{}", uuid::Uuid::new_v4())
 }
 
-// ============================================================================
-// Developer Rules Ingestion
-// ============================================================================
 
 /// Developer rules file patterns to auto-detect
 pub const DEV_RULES_FILES: &[&str] = &[
@@ -754,7 +748,6 @@ pub fn ingest_developer_rules(
 ) -> Result<Vec<String>, MemoryStoreError> {
     let mut ingested = Vec::new();
 
-    // Check for rules files
     for rules_file in DEV_RULES_FILES {
         let path = repo_path.join(rules_file);
         if path.exists() {
@@ -765,7 +758,6 @@ pub fn ingest_developer_rules(
         }
     }
 
-    // Check for context files
     for context_file in DEV_CONTEXT_FILES {
         let path = repo_path.join(context_file);
         if path.exists() {
@@ -790,7 +782,6 @@ fn ingest_file(
     let content = std::fs::read_to_string(path)?;
     let path_str = path.to_string_lossy().to_string();
 
-    // Create observation
     let obs = Observation {
         observation_id: generate_observation_id(),
         repo_id: repo_id.to_string(),
@@ -816,16 +807,12 @@ fn ingest_file(
     Ok(obs.observation_id)
 }
 
-// ============================================================================
-// Memory Importance and Decay
-// ============================================================================
 
 /// Calculate decayed importance for an observation
 pub fn calculate_decayed_importance(observation: &Observation, now_ms: i64) -> f64 {
     let age_days = (now_ms - observation.created_at) as f64 / (24.0 * 60.0 * 60.0 * 1000.0);
     let decay = IMPORTANCE_DECAY_FACTOR.powf(age_days);
 
-    // Boost importance based on access count
     let access_boost = 1.0 + (observation.access_count as f64 * 0.05).min(0.5);
 
     // Rules and context decay slower
@@ -859,9 +846,6 @@ pub fn find_low_importance_observations(
     Ok(low_importance)
 }
 
-// ============================================================================
-// Memory Linking
-// ============================================================================
 
 /// Link two observations together
 pub fn link_observations(
@@ -869,7 +853,6 @@ pub fn link_observations(
     obs_id_1: &str,
     obs_id_2: &str,
 ) -> Result<(), MemoryStoreError> {
-    // Get both observations
     let obs1 = store.get(obs_id_1)?.ok_or_else(|| {
         MemoryStoreError::ValidationError(format!("Observation {} not found", obs_id_1))
     })?;
@@ -877,7 +860,6 @@ pub fn link_observations(
         MemoryStoreError::ValidationError(format!("Observation {} not found", obs_id_2))
     })?;
 
-    // Update links (bidirectional)
     let mut links1 = obs1.linked_to.clone();
     if !links1.contains(&obs_id_2.to_string()) {
         links1.push(obs_id_2.to_string());
@@ -888,7 +870,6 @@ pub fn link_observations(
         links2.push(obs_id_1.to_string());
     }
 
-    // Save updated observations
     let mut obs1_updated = obs1.clone();
     obs1_updated.linked_to = links1;
     store.save(&obs1_updated)?;
@@ -917,7 +898,6 @@ pub fn find_related_observations(
         visited.insert(current_id.clone());
 
         if let Some(obs) = store.get(&current_id)? {
-            // Add linked observations to queue
             if depth < max_depth {
                 for linked_id in &obs.linked_to {
                     if !visited.contains(linked_id) {
@@ -1075,7 +1055,6 @@ mod tests {
 
         let store = MemoryStore::open_at(&path).unwrap();
 
-        // Create many observations quickly
         for i in 0..35 {
             let obs = Observation {
                 observation_id: generate_observation_id(),
@@ -1112,7 +1091,6 @@ mod tests {
 
         let store = MemoryStore::open_at(&path).unwrap();
 
-        // Empty text
         let obs = Observation {
             observation_id: generate_observation_id(),
             repo_id: "test".to_string(),
@@ -1137,7 +1115,6 @@ mod tests {
         let result = store.save(&obs);
         assert!(matches!(result, Err(MemoryStoreError::ValidationError(_))));
 
-        // Sensitive content
         let obs = Observation {
             observation_id: generate_observation_id(),
             repo_id: "test".to_string(),
@@ -1193,13 +1170,11 @@ mod tests {
 
         store.save(&obs).unwrap();
 
-        // Update staleness
         let count = store
             .update_staleness("test-repo", &["func:changed_func".to_string()])
             .unwrap();
         assert_eq!(count, 1);
 
-        // Verify it's marked stale
         let retrieved = store.get(&obs.observation_id).unwrap().unwrap();
         assert!(retrieved.stale);
     }

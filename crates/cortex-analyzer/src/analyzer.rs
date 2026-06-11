@@ -6,12 +6,14 @@ use crate::{ReviewAnalyzer, ReviewInput, ReviewReport};
 use cortex_core::{CortexError, Result, SearchKind};
 use cortex_graph::GraphClient;
 use serde_json::Value;
-use std::borrow::Cow;
 use std::path::Path;
 
 #[derive(Clone)]
 pub struct Analyzer {
     graph: GraphClient,
+    /// When set, graph queries filter by FalkorDB `repository_path` (project scan path).
+    repository_path: Option<String>,
+    branch: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -22,6 +24,63 @@ pub struct AnalyzePathFilters {
     pub exclude_paths: Vec<String>,
     pub exclude_files: Vec<String>,
     pub exclude_globs: Vec<String>,
+}
+
+impl Analyzer {
+    pub fn new(graph: GraphClient) -> Self {
+        Self {
+            graph,
+            repository_path: None,
+            branch: None,
+        }
+    }
+
+    /// Scope graph queries to a single indexed project (required on large multi-repo graphs).
+    pub fn with_repository_scope(
+        mut self,
+        repository_path: impl Into<String>,
+        branch: Option<String>,
+    ) -> Self {
+        self.repository_path = Some(repository_path.into());
+        self.branch = branch;
+        self
+    }
+
+    fn repo_filter_cypher(&self, alias: &str) -> (String, Vec<(&'static str, String)>) {
+        let mut clauses = Vec::new();
+        let mut params = Vec::new();
+        if let Some(repo) = &self.repository_path {
+            clauses.push(format!("{alias}.repository_path = $repo"));
+            params.push(("repo", repo.clone()));
+            if let Some(branch) = &self.branch {
+                clauses.push(format!("{alias}.branch = $branch"));
+                params.push(("branch", branch.clone()));
+            }
+        }
+        (clauses.join(" AND "), params)
+    }
+
+    async fn raw_query_scoped(&self, base: &str, alias: &str) -> Result<Vec<Value>> {
+        let (filter, params) = self.repo_filter_cypher(alias);
+        if filter.is_empty() {
+            return self.graph.raw_query(base).await;
+        }
+        let cypher = if let Some(pos) = base.find('\n') {
+            let (head, tail) = base.split_at(pos);
+            if head.starts_with("MATCH ") {
+                format!("{head}\nWHERE {filter}{tail}")
+            } else if base.contains(" WHERE ") {
+                format!("{base} AND {filter}")
+            } else {
+                format!("{base} WHERE {filter}")
+            }
+        } else if base.contains(" WHERE ") {
+            format!("{base} AND {filter}")
+        } else {
+            format!("{base} WHERE {filter}")
+        };
+        self.graph.query_with_params(&cypher, params).await
+    }
 }
 
 impl AnalyzePathFilters {
@@ -53,20 +112,20 @@ impl AnalyzePathFilters {
         if self.is_empty() {
             return true;
         }
-        let candidate_cow = normalize_path(candidate);
-        let candidate = candidate_cow.as_ref();
+
+        let candidate = normalize_path(candidate);
         let include_match = if self.has_includes() {
             self.include_paths
                 .iter()
-                .any(|p| path_prefix_match_normalized(candidate, p.as_str()))
+                .any(|p| path_prefix_match(candidate.as_str(), p.as_str()))
                 || self
                     .include_files
                     .iter()
-                    .any(|f| file_match_normalized(candidate, f.as_str()))
+                    .any(|f| file_match(candidate.as_str(), f.as_str()))
                 || self
                     .include_globs
                     .iter()
-                    .any(|g| glob_match_normalized(candidate, g.as_str()))
+                    .any(|g| glob_match(candidate.as_str(), g.as_str()))
         } else {
             true
         };
@@ -78,33 +137,32 @@ impl AnalyzePathFilters {
         let excluded = self
             .exclude_paths
             .iter()
-            .any(|p| path_prefix_match_normalized(candidate, p.as_str()))
+            .any(|p| path_prefix_match(candidate.as_str(), p.as_str()))
             || self
                 .exclude_files
                 .iter()
-                .any(|f| file_match_normalized(candidate, f.as_str()))
+                .any(|f| file_match(candidate.as_str(), f.as_str()))
             || self
                 .exclude_globs
                 .iter()
-                .any(|g| glob_match_normalized(candidate, g.as_str()));
+                .any(|g| glob_match(candidate.as_str(), g.as_str()));
 
         !excluded
     }
 
     pub fn is_excluded_path(&self, candidate: &str) -> bool {
         let candidate = normalize_path(candidate);
-        let candidate = candidate.as_ref();
         self.exclude_paths
             .iter()
-            .any(|p| path_prefix_match_normalized(candidate, p.as_str()))
+            .any(|p| path_prefix_match(candidate.as_str(), p.as_str()))
             || self
                 .exclude_files
                 .iter()
-                .any(|f| file_match_normalized(candidate, f.as_str()))
+                .any(|f| file_match(candidate.as_str(), f.as_str()))
             || self
                 .exclude_globs
                 .iter()
-                .any(|g| glob_match_normalized(candidate, g.as_str()))
+                .any(|g| glob_match(candidate.as_str(), g.as_str()))
     }
 
     pub fn matches_any_path<'a, I>(&self, paths: I) -> bool
@@ -118,13 +176,12 @@ impl AnalyzePathFilters {
         let mut saw_include = false;
         for path in paths {
             saw_any_path = true;
-            let normalized_cow = normalize_path(path);
-            let normalized_path = normalized_cow.as_ref();
+            let normalized_path = normalize_path(path);
             if !self.exclude_paths.is_empty()
                 && self
                     .exclude_paths
                     .iter()
-                    .any(|p| path_prefix_match_normalized(normalized_path, p.as_str()))
+                    .any(|p| path_prefix_match(normalized_path.as_str(), p.as_str()))
             {
                 return false;
             }
@@ -132,7 +189,7 @@ impl AnalyzePathFilters {
                 && self
                     .exclude_files
                     .iter()
-                    .any(|f| file_match_normalized(normalized_path, f.as_str()))
+                    .any(|f| file_match(normalized_path.as_str(), f.as_str()))
             {
                 return false;
             }
@@ -140,12 +197,12 @@ impl AnalyzePathFilters {
                 && self
                     .exclude_globs
                     .iter()
-                    .any(|g| glob_match_normalized(normalized_path, g.as_str()))
+                    .any(|g| glob_match(normalized_path.as_str(), g.as_str()))
             {
                 return false;
             }
 
-            if !self.has_includes() || self.matches_path(normalized_path) {
+            if !self.has_includes() || self.matches_path(normalized_path.as_str()) {
                 saw_include = true;
             }
         }
@@ -161,78 +218,37 @@ impl AnalyzePathFilters {
     }
 }
 
-/// Normalize path for comparison. Returns `Cow::Borrowed` when no change is needed to avoid allocation.
-fn normalize_path(path: &str) -> Cow<'_, str> {
-    let need_replace = path.contains('\\');
-    let trimmed = path.trim();
-    let need_trim = trimmed.as_ptr() != path.as_ptr() || trimmed.len() != path.len();
-    let no_leading_dot_slash = !trimmed.starts_with("./");
-    let no_trailing_slash = !trimmed.ends_with('/') || trimmed.len() <= 1;
-    if !need_replace && !need_trim && no_leading_dot_slash && no_trailing_slash {
-        return Cow::Borrowed(trimmed);
-    }
-    let s = path
-        .replace('\\', "/")
+fn normalize_path(path: &str) -> String {
+    path.replace('\\', "/")
         .trim()
         .trim_start_matches("./")
         .trim_end_matches('/')
-        .to_string();
-    Cow::Owned(s)
+        .to_string()
 }
 
-/// Path prefix match when candidate is already normalized. Normalizes only filter.
-fn path_prefix_match_normalized(candidate: &str, filter: &str) -> bool {
-    let filter = match normalize_path(filter) {
-        Cow::Borrowed(s) => s,
-        Cow::Owned(s) => return path_prefix_match_normalized(candidate, &s),
-    };
+fn path_prefix_match(candidate: &str, filter: &str) -> bool {
+    let candidate = normalize_path(candidate);
+    let filter = normalize_path(filter);
     if filter.is_empty() {
         return true;
     }
-    if candidate == filter {
+    if candidate == filter || candidate.starts_with(format!("{filter}/").as_str()) {
         return true;
     }
-    if let Some(rest) = candidate.strip_prefix(filter)
-        && (rest.is_empty() || rest.starts_with('/'))
-    {
-        return true;
-    }
-    let mut buf = String::with_capacity(filter.len() + 2);
-    buf.push('/');
-    buf.push_str(filter);
-    buf.push('/');
-    let slash_filter_slash = buf.as_str();
-    let slash_filter = &buf[..buf.len() - 1];
-    candidate.contains(slash_filter_slash) || candidate.ends_with(slash_filter)
+    let seg = format!("/{filter}/");
+    candidate.contains(seg.as_str()) || candidate.ends_with(format!("/{filter}").as_str())
 }
 
-/// `s` starts with `prefix` followed by `::` (Rust module qualifier).
-fn starts_with_qualified_prefix(s: &str, prefix: &str) -> bool {
-    s.len() >= prefix.len() + 2
-        && s.starts_with(prefix)
-        && s[prefix.len()..prefix.len() + 2] == *"::"
-}
-
-/// File match when candidate is already normalized.
-fn file_match_normalized(candidate: &str, file_filter: &str) -> bool {
-    let file_filter = match normalize_path(file_filter) {
-        Cow::Borrowed(s) => s,
-        Cow::Owned(s) => return file_match_normalized(candidate, &s),
-    };
+fn file_match(candidate: &str, file_filter: &str) -> bool {
+    let candidate = normalize_path(candidate);
+    let file_filter = normalize_path(file_filter);
     if file_filter.is_empty() {
         return false;
     }
     if file_filter.contains('/') {
-        if candidate == file_filter {
-            return true;
-        }
-        if !candidate.ends_with(file_filter) {
-            return false;
-        }
-        let prefix_len = candidate.len() - file_filter.len();
-        prefix_len > 0 && candidate[..prefix_len].ends_with('/')
+        candidate == file_filter || candidate.ends_with(format!("/{file_filter}").as_str())
     } else {
-        Path::new(candidate)
+        Path::new(candidate.as_str())
             .file_name()
             .and_then(|name| name.to_str())
             .map(|name| name == file_filter)
@@ -240,23 +256,22 @@ fn file_match_normalized(candidate: &str, file_filter: &str) -> bool {
     }
 }
 
-/// Glob match when candidate is already normalized.
-fn glob_match_normalized(candidate: &str, pattern: &str) -> bool {
-    let Ok(pat) = glob::Pattern::new(pattern) else {
+fn glob_match(candidate: &str, pattern: &str) -> bool {
+    let candidate = normalize_path(candidate);
+    let Ok(pattern) = glob::Pattern::new(pattern) else {
         return false;
     };
-    pat.matches(candidate) || pat.matches_path(Path::new(candidate))
+    pattern.matches(candidate.as_str()) || pattern.matches_path(Path::new(candidate.as_str()))
 }
 
 fn collect_paths(value: &Value, out: &mut Vec<String>) {
     match value {
         Value::Object(map) => {
             for (k, v) in map {
-                if (k == "path" || k.ends_with(".path"))
-                    && v.is_string()
-                    && let Some(path) = v.as_str()
-                {
-                    out.push(path.to_string());
+                if (k == "path" || k.ends_with(".path")) && v.is_string() {
+                    if let Some(path) = v.as_str() {
+                        out.push(path.to_string());
+                    }
                 }
                 collect_paths(v, out);
             }
@@ -270,29 +285,23 @@ fn collect_paths(value: &Value, out: &mut Vec<String>) {
     }
 }
 
-fn row_matches_filters(
-    row: &Value,
-    filters: &AnalyzePathFilters,
-    path_buf: &mut Vec<String>,
-) -> bool {
+fn row_matches_filters(row: &Value, filters: &AnalyzePathFilters) -> bool {
     if filters.is_empty() {
         return true;
     }
-    path_buf.clear();
-    collect_paths(row, path_buf);
-    filters.matches_any_path(path_buf.iter().map(String::as_str))
+    let mut paths = Vec::new();
+    collect_paths(row, &mut paths);
+    filters.matches_any_path(paths.iter().map(String::as_str))
 }
 
 fn apply_row_filters(rows: Vec<Value>, filters: Option<&AnalyzePathFilters>) -> Vec<Value> {
     match filters {
         None => rows,
         Some(f) if f.is_empty() => rows,
-        Some(f) => {
-            let mut path_buf = Vec::new();
-            rows.into_iter()
-                .filter(|row| row_matches_filters(row, f, &mut path_buf))
-                .collect()
-        }
+        Some(f) => rows
+            .into_iter()
+            .filter(|row| row_matches_filters(row, f))
+            .collect(),
     }
 }
 
@@ -328,21 +337,21 @@ fn import_path_matches_module(import_path: &str, module: &str) -> bool {
     }
 
     if import_path == module
-        || starts_with_qualified_prefix(import_path, module)
-        || starts_with_qualified_prefix(module, import_path)
+        || import_path.starts_with(format!("{module}::").as_str())
+        || module.starts_with(format!("{import_path}::").as_str())
     {
         return true;
     }
 
     if let Some((prefix, items)) = grouped_rust_import(import_path) {
-        if module == prefix || starts_with_qualified_prefix(module, &prefix) {
+        if module == prefix || module.starts_with(format!("{prefix}::").as_str()) {
             return true;
         }
         for item in items {
             let full = format!("{prefix}::{item}");
             if module == full
-                || starts_with_qualified_prefix(module, &full)
-                || starts_with_qualified_prefix(&full, module)
+                || module.starts_with(format!("{full}::").as_str())
+                || full.starts_with(format!("{module}::").as_str())
             {
                 return true;
             }
@@ -361,7 +370,7 @@ fn row_module_name(row: &Value) -> Option<&str> {
 impl Analyzer {
     fn callers_query_with_depth(depth: usize) -> String {
         format!(
-            "MATCH p=(caller)-[:CALLS*1..{}]->(callee:Function {{name: $name}})
+            "MATCH p=(caller:CodeNode)-[:CALLS*1..{}]->(callee:CodeNode {{name: $name}})
              RETURN p",
             depth.max(1)
         )
@@ -369,14 +378,24 @@ impl Analyzer {
 
     fn callees_query_with_depth(depth: usize) -> String {
         format!(
-            "MATCH p=(caller:Function {{name: $name}})-[:CALLS*1..{}]->(callee:Function)
+            "MATCH p=(caller:CodeNode {{name: $name}})-[:CALLS*1..{}]->(callee)
              RETURN p",
             depth.max(1)
         )
     }
 
-    pub fn new(graph: GraphClient) -> Self {
-        Self { graph }
+    fn merge_repo_params(
+        &self,
+        alias: &str,
+        mut params: Vec<(&'static str, String)>,
+    ) -> (String, Vec<(&'static str, String)>) {
+        let (filter, repo_params) = self.repo_filter_cypher(alias);
+        for (k, v) in repo_params {
+            if !params.iter().any(|(pk, _)| *pk == k) {
+                params.push((k, v));
+            }
+        }
+        (filter, params)
     }
 
     pub async fn find_code(
@@ -421,16 +440,20 @@ impl Analyzer {
         if let Some(f) = filters {
             f.validate()?;
         }
-        let rows = self
-            .graph
-            .query_with_param(
-                "MATCH (caller:Function)-[r:CALLS]->(callee)
-                 WHERE coalesce(callee.name, r.callee_name) = $name
-                 RETURN caller, callee, r.callee_name AS callee_name",
-                "name",
-                function_name,
-            )
-            .await?;
+        let (repo_filter, params) =
+            self.merge_repo_params("caller", vec![("name", function_name.to_string())]);
+        let mut where_parts = vec!["coalesce(callee.name, r.callee_name) = $name".to_string()];
+        if !repo_filter.is_empty() {
+            where_parts.push(repo_filter);
+        }
+        let cypher = format!(
+            "MATCH (caller:CodeNode)-[r:CALLS]->(callee)
+             WHERE {}
+                OR (callee:CallTarget AND coalesce(r.callee_name, callee.name) = $name)
+             RETURN caller, callee, r.callee_name AS callee_name",
+            where_parts.join(" AND ")
+        );
+        let rows = self.graph.query_with_params(&cypher, params).await?;
         Ok(apply_row_filters(rows, filters))
     }
 
@@ -446,21 +469,23 @@ impl Analyzer {
         if let Some(f) = filters {
             f.validate()?;
         }
-        let rows = self
-            .graph
-            .query_with_param(
-                "MATCH (caller:Function {name: $name})-[:CALLS]->(callee)
-                 WHERE callee:Function OR callee:CallTarget
-                 RETURN caller, callee",
-                "name",
-                function_name,
-            )
-            .await?;
+        let (repo_filter, params) =
+            self.merge_repo_params("caller", vec![("name", function_name.to_string())]);
+        let where_clause = if repo_filter.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {repo_filter}")
+        };
+        let cypher = format!(
+            "MATCH (caller:CodeNode {{name: $name}})-[:CALLS]->(callee){where_clause}
+             RETURN caller, callee"
+        );
+        let rows = self.graph.query_with_params(&cypher, params).await?;
         Ok(apply_row_filters(rows, filters))
     }
 
     fn all_callers_query() -> &'static str {
-        "MATCH p=(caller)-[:CALLS*1..20]->(callee:Function {name: $name}) RETURN p"
+        "MATCH p=(caller:CodeNode)-[:CALLS*1..20]->(callee:CodeNode {name: $name}) RETURN p"
     }
 
     pub async fn all_callers(&self, function_name: &str) -> Result<Vec<Value>> {
@@ -475,15 +500,23 @@ impl Analyzer {
         if let Some(f) = filters {
             f.validate()?;
         }
-        let rows = self
-            .graph
-            .query_with_param(Self::all_callers_query(), "name", function_name)
-            .await?;
+        let (repo_filter, params) =
+            self.merge_repo_params("callee", vec![("name", function_name.to_string())]);
+        let cypher = if repo_filter.is_empty() {
+            Self::all_callers_query().to_string()
+        } else {
+            format!(
+                "MATCH p=(caller:CodeNode)-[:CALLS*1..20]->(callee:CodeNode {{name: $name}})
+                 WHERE {repo_filter}
+                 RETURN p"
+            )
+        };
+        let rows = self.graph.query_with_params(&cypher, params).await?;
         Ok(apply_row_filters(rows, filters))
     }
 
     fn all_callees_query() -> &'static str {
-        "MATCH p=(caller:Function {name: $name})-[:CALLS*1..20]->(callee:Function) RETURN p"
+        "MATCH p=(caller:CodeNode {name: $name})-[:CALLS*1..20]->(callee) RETURN p"
     }
 
     pub async fn all_callees(&self, function_name: &str) -> Result<Vec<Value>> {
@@ -498,10 +531,18 @@ impl Analyzer {
         if let Some(f) = filters {
             f.validate()?;
         }
-        let rows = self
-            .graph
-            .query_with_param(Self::all_callees_query(), "name", function_name)
-            .await?;
+        let (repo_filter, params) =
+            self.merge_repo_params("caller", vec![("name", function_name.to_string())]);
+        let cypher = if repo_filter.is_empty() {
+            Self::all_callees_query().to_string()
+        } else {
+            format!(
+                "MATCH p=(caller:CodeNode {{name: $name}})-[:CALLS*1..20]->(callee)
+                 WHERE {repo_filter}
+                 RETURN p"
+            )
+        };
+        let rows = self.graph.query_with_params(&cypher, params).await?;
         Ok(apply_row_filters(rows, filters))
     }
 
@@ -525,20 +566,23 @@ impl Analyzer {
             f.validate()?;
         }
         let depth = depth.unwrap_or(15).max(1);
+        let (repo_filter, params) = self.merge_repo_params(
+            "a",
+            vec![("from", from.to_string()), ("to", to.to_string())],
+        );
+        let where_repo = if repo_filter.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {repo_filter} AND b.repository_path = a.repository_path")
+        };
         let cypher = format!(
-            "MATCH p=(a:Function {{name: $from}})-[:CALLS*1..{}]->(b:Function {{name: $to}})
+            "MATCH p=(a:CodeNode {{name: $from}})-[:CALLS*1..{depth}]->(b:CodeNode {{name: $to}})
+             {where_repo}
              RETURN p
              ORDER BY length(p) ASC
-             LIMIT 1",
-            depth
+             LIMIT 1"
         );
-        let rows = self
-            .graph
-            .query_with_params(
-                &cypher,
-                vec![("from", from.to_string()), ("to", to.to_string())],
-            )
-            .await?;
+        let rows = self.graph.query_with_params(&cypher, params).await?;
         Ok(apply_row_filters(rows, filters))
     }
 
@@ -578,8 +622,7 @@ impl Analyzer {
             f.validate()?;
         }
         let rows = self
-            .graph
-            .raw_query(
+            .raw_query_scoped(
                 "MATCH (f:Function)
                  OPTIONAL MATCH (caller:Function)-[:CALLS]->(f)
                  WITH f, count(caller) AS incoming_calls
@@ -595,7 +638,9 @@ impl Analyzer {
                         incoming_calls,
                         outgoing_calls,
                         'no incoming calls' AS reason
-                 ORDER BY outgoing_calls DESC, f.path, f.name",
+                 ORDER BY outgoing_calls DESC, f.path, f.name
+                 LIMIT 500",
+                "f",
             )
             .await?;
         Ok(apply_row_filters(rows, filters))
@@ -613,19 +658,26 @@ impl Analyzer {
         if let Some(f) = filters {
             f.validate()?;
         }
+        let (repo_filter, params) = self.merge_repo_params("n", Vec::new());
+        let where_clause = if repo_filter.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {repo_filter}")
+        };
         let cypher = format!(
-            "MATCH (f:Function)
-             WITH f, toInteger(coalesce(f.cyclomatic_complexity, '1')) AS complexity
-             RETURN f.name AS function,
-                    f.path AS path,
-                    f.line_number AS line,
-                    coalesce(f.lang, '') AS language,
+            "MATCH (n:CodeNode)
+             {where_clause}
+             WITH n, toInteger(coalesce(n.cyclomatic_complexity, '1')) AS complexity
+             RETURN n.name AS function,
+                    n.path AS path,
+                    n.line_number AS line,
+                    coalesce(n.lang, '') AS language,
                     complexity
-             ORDER BY complexity DESC, f.path, f.name
+             ORDER BY complexity DESC, n.path, n.name
              LIMIT {}",
             top_n
         );
-        let rows = self.graph.raw_query(&cypher).await?;
+        let rows = self.graph.query_with_params(&cypher, params).await?;
         Ok(apply_row_filters(rows, filters))
     }
 
@@ -641,20 +693,23 @@ impl Analyzer {
         if let Some(f) = filters {
             f.validate()?;
         }
-        let rows = self
-            .graph
-            .query_with_param(
-                "MATCH (f:Function {name: $name})
-                 WITH f, toInteger(coalesce(f.cyclomatic_complexity, '1')) AS complexity
-                 RETURN f.name AS function,
-                        f.path AS path,
-                        f.line_number AS line,
-                        coalesce(f.lang, '') AS language,
-                        complexity",
-                "name",
-                function_name,
-            )
-            .await?;
+        let (repo_filter, params) =
+            self.merge_repo_params("n", vec![("name", function_name.to_string())]);
+        let where_clause = if repo_filter.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {repo_filter}")
+        };
+        let cypher = format!(
+            "MATCH (n:CodeNode {{name: $name}}){where_clause}
+             WITH n, toInteger(coalesce(n.cyclomatic_complexity, '1')) AS complexity
+             RETURN n.name AS function,
+                    n.path AS path,
+                    n.line_number AS line,
+                    coalesce(n.lang, '') AS language,
+                    complexity"
+        );
+        let rows = self.graph.query_with_params(&cypher, params).await?;
         Ok(apply_row_filters(rows, filters))
     }
 
@@ -1020,7 +1075,6 @@ impl Analyzer {
 
     /// Run review analysis over normalized diff inputs.
     pub fn analyze_review(&self, input: &ReviewInput) -> ReviewReport {
-        // This path is graph-client independent and reuses static analyzer detectors.
         let review = ReviewAnalyzer::new();
         review.analyze(input)
     }
@@ -1038,7 +1092,6 @@ mod tests {
 
     #[test]
     fn parameterized_query_safe() {
-        // Test that injection attempts are safely parameterized
         let injection_attempt = "' OR '1'='1";
         let cypher = "MATCH (n:Function {name: $name}) RETURN n";
         // The injection string would be passed as a parameter value, not interpolated
@@ -1049,7 +1102,6 @@ mod tests {
 
     #[test]
     fn find_code_query_structure() {
-        // Verify queries use parameterized inputs
         let cypher = "MATCH (n:CodeNode) WHERE n.name = $query RETURN n LIMIT 100";
         assert!(cypher.contains("$query"));
         assert!(!cypher.contains("format!"));
@@ -1073,23 +1125,19 @@ mod tests {
 
     #[test]
     fn find_by_file_query_structure() {
-        // Verify the query uses parameterization
         let cypher = "MATCH (n:CodeNode) WHERE n.path CONTAINS $path RETURN n";
         assert!(cypher.contains("$path"));
     }
 
     #[test]
     fn find_similar_query_structure() {
-        // Verify the query uses parameterization
         let cypher = "MATCH (n:Function) WHERE n.name CONTAINS $name RETURN n";
         assert!(cypher.contains("$name"));
     }
 
     #[test]
     fn entry_points_query_safe() {
-        // Entry points query should not use user input
         let cypher = "MATCH (f:Function) OPTIONAL MATCH (caller:Function)-[:CALLS]->(f) WITH f, count(caller) AS incoming_calls WHERE incoming_calls = 0 RETURN f";
-        // No parameters means no injection risk
         assert!(!cypher.contains("$"));
     }
 
@@ -1123,7 +1171,6 @@ mod tests {
 
     #[test]
     fn dependency_graph_depth_limit() {
-        // Verify depth is limited to prevent overly complex queries
         let depth = 5;
         let cypher = format!(
             "MATCH path = (root {{name: $name}})-[:IMPORTS|DEPENDS_ON*..{}]->(dep) RETURN path",
@@ -1147,7 +1194,6 @@ mod tests {
 
     #[test]
     fn analyze_module_query_structure() {
-        // Verify module analysis uses parameterization
         let cypher = "MATCH (f:Function) WHERE f.path CONTAINS $path RETURN f";
         assert!(cypher.contains("$path"));
     }
@@ -1208,13 +1254,9 @@ mod tests {
             exclude_globs: vec!["src/**/ignored_*.rs".to_string()],
         };
 
-        // Exclude path should match even with mixed separators and trailing slash style.
         assert!(!filters.matches_any_path(["src\\generated\\schema.rs"].iter().copied()));
-        // Exclude file should match via normalized include entry.
         assert!(!filters.matches_any_path([".\\src\\lib.rs"].iter().copied()));
-        // Exclude glob should match normalized candidate path.
         assert!(!filters.matches_any_path(["./src/mod/ignored_test.rs"].iter().copied()));
-        // Non-excluded path under included scope should still pass.
         assert!(filters.matches_any_path(["./src/main.rs"].iter().copied()));
     }
 

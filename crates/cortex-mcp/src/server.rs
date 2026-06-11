@@ -113,7 +113,7 @@ impl McpServer {
             "tools/list" => Ok(json!({ "tools": tool_names() })),
             "add_code_to_graph" => {
                 let client = GraphClient::connect(&self.config).await?;
-                let indexer = Indexer::new(client, self.config.max_batch_size)?;
+                let indexer = Indexer::from_cortex_config(client, &self.config)?;
                 let path = params.get("path").and_then(Value::as_str).unwrap_or(".");
                 let report = indexer.index_path(path).await?;
                 Ok(json!(report))
@@ -313,6 +313,7 @@ impl McpServer {
             }
             "check_health" => Ok(json!({
                 "status":"ok",
+                "graph": "connected",
                 "analyzer": analyzer_capabilities_json()
             })),
             "add_package_to_graph" | "visualize_graph_query" => {

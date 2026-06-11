@@ -17,7 +17,26 @@ use super::language::{
     is_python_function_end, is_python_style_function, is_ruby_style_function, ruby_block_delta,
 };
 use crate::{CodeSmell, Severity, SmellConfig, SmellType};
-use std::collections::HashSet;
+
+/// True when a braced/python/ruby function body ends at line `i`.
+fn function_body_closed(
+    lines: &[&str],
+    i: usize,
+    function_start: usize,
+    brace_count: i32,
+    function_is_python_style: bool,
+    function_is_ruby_style: bool,
+    saw_open_brace: bool,
+    ruby_block_depth: i32,
+) -> bool {
+    if function_is_python_style {
+        return is_python_function_end(lines, i, function_start);
+    }
+    if function_is_ruby_style {
+        return ruby_block_depth <= 0 && i >= function_start;
+    }
+    brace_count == 0 && i > function_start && saw_open_brace
+}
 
 /// Detect functions that are too long
 pub fn detect_long_functions(
@@ -62,17 +81,21 @@ pub fn detect_long_functions(
                 saw_open_brace = true;
             }
 
-            if (brace_count == 0
-                && i > function_start
-                && !function_is_python_style
-                && !function_is_ruby_style
-                && saw_open_brace)
-                || (function_is_python_style && is_python_function_end(&lines, i, function_start))
-                || (function_is_ruby_style && ruby_block_depth <= 0 && i >= function_start)
-            {
+            if function_body_closed(
+                &lines,
+                i,
+                function_start,
+                brace_count,
+                function_is_python_style,
+                function_is_ruby_style,
+                saw_open_brace,
+                ruby_block_depth,
+            ) {
                 let function_lines = i - function_start + 1;
 
-                if function_lines > config.max_function_lines {
+                if function_lines > config.max_function_lines
+                    && !super::is_test_artifact(file_path, &function_name)
+                {
                     let severity =
                         calculate_length_severity(function_lines, config.max_function_lines);
 
@@ -121,7 +144,6 @@ pub fn detect_large_classes(source: &str, file_path: &str, config: &SmellConfig)
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Detect class/struct start
         if !in_class
             && (trimmed.starts_with("struct ")
                 || trimmed.starts_with("class ")
@@ -141,18 +163,15 @@ pub fn detect_large_classes(source: &str, file_path: &str, config: &SmellConfig)
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            // Count methods
             if is_method_definition(trimmed, lang) {
                 method_count += 1;
             }
 
-            // Count fields (simplified)
             if is_field_definition(trimmed) {
                 field_count += 1;
             }
 
             if brace_count == 0 && i > class_start {
-                // Check method count
                 if method_count > config.max_methods_per_class {
                     smells.push(CodeSmell {
                         smell_type: SmellType::LargeClass,
@@ -173,7 +192,6 @@ pub fn detect_large_classes(source: &str, file_path: &str, config: &SmellConfig)
                     });
                 }
 
-                // Check field count
                 if field_count > config.max_fields_per_class {
                     smells.push(CodeSmell {
                         smell_type: SmellType::LargeClass,
@@ -212,29 +230,25 @@ pub fn detect_primitive_obsession(
     let lines: Vec<&str> = source.lines().collect();
     let lang = SourceLanguage::from_file_path(file_path);
 
-    // Track primitive parameter patterns
     let mut primitive_params: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Skip comments
         if shared_is_comment_line(trimmed, lang) {
             continue;
         }
 
-        // Look for function definitions with primitive parameters
-        if is_function_definition(trimmed, lang)
-            && let Some(paren_start) = trimmed.find('(')
-            && let Some(paren_end) = trimmed.rfind(')')
-        {
-            let params_str = &trimmed[paren_start + 1..paren_end];
-            let primitives = count_primitive_params(params_str);
+        if is_function_definition(trimmed, lang) {
+            if let Some(paren_start) = trimmed.find('(') {
+                if let Some(paren_end) = trimmed.rfind(')') {
+                    let params_str = &trimmed[paren_start + 1..paren_end];
+                    let primitives = count_primitive_params(params_str);
 
-            if primitives > config.max_primitive_params {
-                let function_name = shared_extract_function_name(trimmed);
-                smells.push(CodeSmell {
+                    if primitives > config.max_primitive_params {
+                        let function_name = shared_extract_function_name(trimmed);
+                        smells.push(CodeSmell {
                             smell_type: SmellType::PrimitiveObsession,
                             severity: Severity::Warning,
                             file_path: file_path.to_string(),
@@ -251,13 +265,14 @@ pub fn detect_primitive_obsession(
                                     .to_string(),
                             ),
                         });
-            }
+                    }
 
-            // Track for data clump detection
-            for primitive in extract_primitive_names(params_str) {
-                *primitive_params
-                    .entry(primitive.to_lowercase())
-                    .or_default() += 1;
+                    for primitive in extract_primitive_names(params_str) {
+                        *primitive_params
+                            .entry(primitive.to_lowercase())
+                            .or_default() += 1;
+                    }
+                }
             }
         }
     }
@@ -278,36 +293,38 @@ pub fn detect_long_parameter_lists(
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        if is_function_definition(trimmed, lang)
-            && let Some(paren_start) = trimmed.find('(')
-            && let Some(paren_end) = find_matching_paren(trimmed, paren_start)
-        {
-            let params_str = &trimmed[paren_start + 1..paren_end];
+        if is_function_definition(trimmed, lang) {
+            if let Some(paren_start) = trimmed.find('(') {
+                if let Some(paren_end) = find_matching_paren(trimmed, paren_start) {
+                    let params_str = &trimmed[paren_start + 1..paren_end];
 
-            if !params_str.trim().is_empty() {
-                let param_count = count_parameters(params_str);
+                    if !params_str.trim().is_empty() {
+                        let param_count = count_parameters(params_str);
 
-                if param_count > config.max_parameters {
-                    let function_name = shared_extract_function_name(trimmed);
-                    let severity = calculate_count_severity(param_count, config.max_parameters);
+                        if param_count > config.max_parameters {
+                            let function_name = shared_extract_function_name(trimmed);
+                            let severity =
+                                calculate_count_severity(param_count, config.max_parameters);
 
-                    smells.push(CodeSmell {
-                        smell_type: SmellType::LongParameterList,
-                        severity,
-                        file_path: file_path.to_string(),
-                        line_number: (i + 1) as u32,
-                        symbol_name: function_name.clone(),
-                        message: format!(
-                            "Function '{}' has {} parameters (max: {})",
-                            function_name, param_count, config.max_parameters
-                        ),
-                        metric_value: Some(param_count),
-                        threshold: Some(config.max_parameters),
-                        suggestion: Some(
-                            "Consider using Introduce Parameter Object or Preserve Whole Object"
-                                .to_string(),
-                        ),
-                    });
+                            smells.push(CodeSmell {
+                                smell_type: SmellType::LongParameterList,
+                                severity,
+                                file_path: file_path.to_string(),
+                                line_number: (i + 1) as u32,
+                                symbol_name: function_name.clone(),
+                                message: format!(
+                                    "Function '{}' has {} parameters (max: {})",
+                                    function_name, param_count, config.max_parameters
+                                ),
+                                metric_value: Some(param_count),
+                                threshold: Some(config.max_parameters),
+                                suggestion: Some(
+                                    "Consider using Introduce Parameter Object or Preserve Whole Object"
+                                        .to_string(),
+                                ),
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -322,35 +339,32 @@ pub fn detect_data_clumps(source: &str, file_path: &str, config: &SmellConfig) -
     let lines: Vec<&str> = source.lines().collect();
     let lang = SourceLanguage::from_file_path(file_path);
 
-    // Collect all parameter groups
     let mut param_groups: Vec<(String, Vec<String>, usize)> = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        if is_function_definition(trimmed, lang)
-            && let Some(paren_start) = trimmed.find('(')
-            && let Some(paren_end) = find_matching_paren(trimmed, paren_start)
-        {
-            let params_str = &trimmed[paren_start + 1..paren_end];
-            let param_names: Vec<String> = extract_param_names(params_str);
+        if is_function_definition(trimmed, lang) {
+            if let Some(paren_start) = trimmed.find('(') {
+                if let Some(paren_end) = find_matching_paren(trimmed, paren_start) {
+                    let params_str = &trimmed[paren_start + 1..paren_end];
+                    let param_names: Vec<String> = extract_param_names(params_str);
 
-            if param_names.len() >= 3 {
-                let function_name = shared_extract_function_name(trimmed);
-                param_groups.push((function_name, param_names, i));
+                    if param_names.len() >= 3 {
+                        let function_name = shared_extract_function_name(trimmed);
+                        param_groups.push((function_name, param_names, i));
+                    }
+                }
             }
         }
     }
 
-    // Find overlapping parameter sets (data clumps)
     for i in 0..param_groups.len() {
         for j in (i + 1)..param_groups.len() {
             let (_, params1, line1) = &param_groups[i];
             let (func2, params2, _line2) = &param_groups[j];
 
-            // Calculate Jaccard similarity (HashSet avoids O(|p1|×|p2|) `contains` scans)
-            let params2_set: HashSet<&String> = params2.iter().collect();
-            let intersection = params1.iter().filter(|p| params2_set.contains(p)).count();
+            let intersection = params1.iter().filter(|p| params2.contains(p)).count();
             let union = params1.len() + params2.len() - intersection;
             let similarity = intersection as f64 / union as f64;
 
@@ -400,29 +414,27 @@ pub fn detect_switch_statements(
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Detect switch/match start
-        if !in_switch && (trimmed.starts_with("switch ") || trimmed.starts_with("match ")) {
-            in_switch = true;
-            switch_start = i;
-            case_count = 0;
-            brace_count = 0;
-            switch_var = extract_switch_variable(trimmed);
+        if !in_switch {
+            if trimmed.starts_with("switch ") || trimmed.starts_with("match ") {
+                in_switch = true;
+                switch_start = i;
+                case_count = 0;
+                brace_count = 0;
+                switch_var = extract_switch_variable(trimmed);
+            }
         }
 
         if in_switch {
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            // Count cases
             if trimmed.starts_with("case ") || trimmed.starts_with("Case ") {
                 case_count += 1;
             }
-            // Rust match patterns
             if trimmed.contains(" => ") && !shared_is_comment_line(trimmed, lang) {
                 case_count += 1;
             }
 
-            // Check for end of switch
             if brace_count == 0 && i > switch_start && trimmed.contains('}') {
                 if case_count > config.max_switch_cases {
                     smells.push(CodeSmell {
@@ -452,7 +464,6 @@ pub fn detect_switch_statements(
     smells
 }
 
-// Helper functions
 
 #[allow(dead_code)]
 fn extract_function_name(line: &str) -> String {
@@ -462,8 +473,8 @@ fn extract_function_name(line: &str) -> String {
 fn extract_class_name(line: &str) -> String {
     let line = line.trim();
 
-    // Handle impl blocks
-    if let Some(rest) = line.strip_prefix("impl ") {
+    if line.starts_with("impl ") {
+        let rest = &line[5..];
         return rest
             .split(|c: char| c.is_whitespace() || c == '{' || c == '<')
             .find(|s| !s.is_empty())
@@ -471,10 +482,10 @@ fn extract_class_name(line: &str) -> String {
             .to_string();
     }
 
-    // Handle struct/class definitions
     let keywords = ["struct ", "class ", "pub struct ", "pub class "];
     for keyword in keywords {
-        if let Some(rest) = line.strip_prefix(keyword) {
+        if line.starts_with(keyword) {
+            let rest = &line[keyword.len()..];
             return rest
                 .split(|c: char| c.is_whitespace() || c == '{' || c == '<' || c == '(')
                 .find(|s| !s.is_empty())
@@ -495,12 +506,10 @@ fn is_method_definition(trimmed: &str, lang: SourceLanguage) -> bool {
 }
 
 fn is_field_definition(trimmed: &str) -> bool {
-    // Rust struct fields
     if trimmed.contains(':') && !trimmed.contains("::") && !trimmed.contains('(') {
         let colon_pos = trimmed.find(':').unwrap();
         let before = &trimmed[..colon_pos];
-        // Simple field: name or pub name
-        if before.split_whitespace().count() <= 2 {
+        if before.trim().split_whitespace().count() <= 2 {
             return true;
         }
     }
@@ -584,7 +593,6 @@ fn extract_param_names(params_str: &str) -> Vec<String> {
         .split(',')
         .filter_map(|param| {
             let param = param.trim();
-            // Handle "name: Type" or "Type name" formats
             if param.contains(':') {
                 param.split(':').next().map(|s| s.trim().to_lowercase())
             } else {
@@ -598,9 +606,10 @@ fn extract_switch_variable(line: &str) -> String {
     let line = line.trim();
 
     // Rust: match variable { or match variable.method() {
-    if let Some(rest) = line.strip_prefix("match ") {
+    if line.starts_with("match ") {
+        let rest = &line[6..];
         return rest
-            .split(['{', '?'])
+            .split(|c: char| c == '{' || c == '?')
             .next()
             .unwrap_or("unknown")
             .trim()
@@ -608,10 +617,11 @@ fn extract_switch_variable(line: &str) -> String {
     }
 
     // Other languages: switch (variable) { or switch variable {
-    if let Some(rest) = line.strip_prefix("switch ") {
+    if line.starts_with("switch ") {
+        let rest = &line[7..];
         let rest = rest.trim_start_matches('(');
         return rest
-            .split([')', '{'])
+            .split(|c: char| c == ')' || c == '{')
             .next()
             .unwrap_or("unknown")
             .trim()

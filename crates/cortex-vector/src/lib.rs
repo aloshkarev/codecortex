@@ -53,8 +53,12 @@ pub mod hybrid;
 pub mod json_store;
 pub mod lancedb_store;
 pub mod schema;
+pub mod static_embedder;
 
-pub use embedder::{Embedder, EmbeddingError, EmbeddingProvider, OllamaEmbedder, OpenAIEmbedder};
+pub use embedder::{
+    Embedder, EmbeddingError, EmbeddingProvider, HashEmbedder, OllamaEmbedder, OpenAIEmbedder,
+};
+pub use static_embedder::{FallbackEmbedder, StaticEmbedder};
 pub use hybrid::{HybridResult, HybridSearch, SearchType};
 pub use json_store::JsonStore;
 pub use lancedb_store::LanceStore;
@@ -128,6 +132,12 @@ pub trait VectorStore: Send + Sync {
 
     /// Get the number of documents in the store
     async fn count(&self) -> Result<usize, VectorError>;
+
+    /// Count documents matching metadata filter (empty filter = all documents).
+    async fn count_by_filter(
+        &self,
+        filter: HashMap<String, MetadataValue>,
+    ) -> Result<usize, VectorError>;
 
     /// Check if the store is healthy
     async fn health_check(&self) -> Result<bool, VectorError>;

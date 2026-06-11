@@ -1,0 +1,20 @@
+{
+  "name": "codecortex",
+  "version": "0.1.0",
+  "description": "Maximize CodeCortex MCP for indexing, analysis, patch planning, and PR review",
+  "author": {
+    "name": "CodeCortex",
+    "email": ""
+  },
+  "keywords": [
+    "codecortex",
+    "mcp",
+    "code-intelligence",
+    "indexing",
+    "graph",
+    "vector-search"
+  ],
+  "license": "Apache-2.0",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
+}

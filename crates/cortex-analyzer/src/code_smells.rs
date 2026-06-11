@@ -89,7 +89,6 @@ impl std::fmt::Display for Severity {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SmellType {
-    // === BLOATERS ===
     /// Function is too long (too many lines)
     LongFunction,
     /// Class/struct has too many members (methods + fields)
@@ -103,7 +102,6 @@ pub enum SmellType {
     /// Complex switch/match statements
     SwitchStatements,
 
-    // === OBJECT-ORIENTED ABUSERS ===
     /// Different classes with similar interfaces
     AlternativeClasses,
     /// Subclass doesn't use inherited functionality
@@ -113,14 +111,11 @@ pub enum SmellType {
     /// One class changed for many different reasons
     DivergentChange,
 
-    // === CHANGE PREVENTERS ===
     /// Subclasses mirror each other's hierarchy
     ParallelInheritance,
     /// One change requires many small changes across files
     ShotgunSurgery,
-    // Note: DivergentChange is in OO Abusers but also here as it's related
 
-    // === DISPENSABLES ===
     /// Code needs comments to be understood
     Comments,
     /// Similar code in multiple places
@@ -134,7 +129,6 @@ pub enum SmellType {
     /// Unused abstractions (YAGNI)
     SpeculativeGenerality,
 
-    // === COUPLERS ===
     /// Method uses other class more than its own
     FeatureEnvy,
     /// Classes access each other's internals
@@ -144,7 +138,6 @@ pub enum SmellType {
     /// Class just delegates to another
     MiddleMan,
 
-    // === LEGACY (kept for backward compatibility) ===
     /// Deep nesting of control structures
     DeepNesting,
     /// Too many parameters in function (alias for LongParameterList)
@@ -166,34 +159,28 @@ pub enum SmellType {
 impl std::fmt::Display for SmellType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // Bloaters
             SmellType::LongFunction => write!(f, "long_function"),
             SmellType::LargeClass => write!(f, "large_class"),
             SmellType::PrimitiveObsession => write!(f, "primitive_obsession"),
             SmellType::LongParameterList => write!(f, "long_parameter_list"),
             SmellType::DataClumps => write!(f, "data_clumps"),
             SmellType::SwitchStatements => write!(f, "switch_statements"),
-            // OO Abusers
             SmellType::AlternativeClasses => write!(f, "alternative_classes"),
             SmellType::RefusedBequest => write!(f, "refused_bequest"),
             SmellType::TemporaryField => write!(f, "temporary_field"),
             SmellType::DivergentChange => write!(f, "divergent_change"),
-            // Change Preventers
             SmellType::ParallelInheritance => write!(f, "parallel_inheritance"),
             SmellType::ShotgunSurgery => write!(f, "shotgun_surgery"),
-            // Dispensables
             SmellType::Comments => write!(f, "comments"),
             SmellType::DuplicateCode => write!(f, "duplicate_code"),
             SmellType::DataClass => write!(f, "data_class"),
             SmellType::DeadCode => write!(f, "dead_code"),
             SmellType::LazyClass => write!(f, "lazy_class"),
             SmellType::SpeculativeGenerality => write!(f, "speculative_generality"),
-            // Couplers
             SmellType::FeatureEnvy => write!(f, "feature_envy"),
             SmellType::InappropriateIntimacy => write!(f, "inappropriate_intimacy"),
             SmellType::MessageChains => write!(f, "message_chains"),
             SmellType::MiddleMan => write!(f, "middle_man"),
-            // Legacy (backward compatibility)
             SmellType::DeepNesting => write!(f, "deep_nesting"),
             SmellType::TooManyParameters => write!(f, "too_many_parameters"),
             SmellType::TooManyMethods => write!(f, "too_many_methods"),
@@ -210,7 +197,6 @@ impl SmellType {
     /// Get the category this smell belongs to
     pub fn category(&self) -> SmellCategory {
         match self {
-            // Bloaters
             Self::LongFunction
             | Self::LargeClass
             | Self::PrimitiveObsession
@@ -218,17 +204,14 @@ impl SmellType {
             | Self::DataClumps
             | Self::SwitchStatements => SmellCategory::Bloaters,
 
-            // OO Abusers
             Self::AlternativeClasses | Self::RefusedBequest | Self::TemporaryField => {
                 SmellCategory::ObjectOrientedAbusers
             }
 
-            // Change Preventers
             Self::DivergentChange | Self::ParallelInheritance | Self::ShotgunSurgery => {
                 SmellCategory::ChangePreventers
             }
 
-            // Dispensables
             Self::Comments
             | Self::DuplicateCode
             | Self::DataClass
@@ -236,13 +219,11 @@ impl SmellType {
             | Self::LazyClass
             | Self::SpeculativeGenerality => SmellCategory::Dispensables,
 
-            // Couplers
             Self::FeatureEnvy
             | Self::InappropriateIntimacy
             | Self::MessageChains
             | Self::MiddleMan => SmellCategory::Couplers,
 
-            // Legacy mappings
             Self::DeepNesting => SmellCategory::Bloaters,
             Self::TooManyParameters => SmellCategory::Bloaters,
             Self::TooManyMethods => SmellCategory::Bloaters,
@@ -297,7 +278,6 @@ pub struct CodeSmell {
 /// Configuration for code smell detection thresholds
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SmellConfig {
-    // === Bloaters ===
     /// Maximum lines before a function is considered too long
     pub max_function_lines: usize,
     /// Maximum lines before a class is considered too large
@@ -325,7 +305,6 @@ pub struct SmellConfig {
     /// Minimum similarity for data clumps
     pub min_data_clump_similarity: f64,
 
-    // === OO Abusers ===
     /// Minimum similarity for alternative classes detection
     pub min_class_similarity: f64,
     /// Minimum usage ratio for refused bequest
@@ -335,13 +314,11 @@ pub struct SmellConfig {
     /// Minimum method cohesion
     pub min_method_cohesion: f64,
 
-    // === Change Preventers ===
     /// Minimum parallel subclass pairs
     pub min_parallel_pairs: usize,
     /// Minimum callers for shotgun surgery
     pub min_shotgun_callers: usize,
 
-    // === Dispensables ===
     /// Maximum comment-to-code ratio
     pub max_comment_ratio: f64,
     /// Maximum TODO/FIXME before warning
@@ -355,13 +332,11 @@ pub struct SmellConfig {
     /// Minimum commented code lines
     pub min_commented_code_lines: usize,
 
-    // === Dispensables (Lazy Class) ===
     /// Maximum methods for lazy class
     pub max_lazy_methods: usize,
     /// Maximum fields for lazy class
     pub max_lazy_fields: usize,
 
-    // === Couplers ===
     /// Maximum envy ratio (0.0-1.0)
     pub max_envy_ratio: f64,
     /// Minimum other accesses for feature envy
@@ -377,7 +352,6 @@ pub struct SmellConfig {
 impl Default for SmellConfig {
     fn default() -> Self {
         Self {
-            // Bloaters
             max_function_lines: 50,
             max_class_lines: 500,
             max_nesting_depth: 4,
@@ -392,17 +366,14 @@ impl Default for SmellConfig {
             max_primitive_params: 4,
             min_data_clump_similarity: 0.7,
 
-            // OO Abusers
             min_class_similarity: 0.8,
             min_bequest_usage: 0.3,
             min_field_usage_ratio: 0.2,
             min_method_cohesion: 0.5,
 
-            // Change Preventers
             min_parallel_pairs: 2,
             min_shotgun_callers: 5,
 
-            // Dispensables
             max_comment_ratio: 0.3,
             max_todos: 5,
             min_duplicate_similarity: 0.7,
@@ -412,7 +383,6 @@ impl Default for SmellConfig {
             max_lazy_methods: 3,
             max_lazy_fields: 3,
 
-            // Couplers
             max_envy_ratio: 0.6,
             min_other_accesses: 3,
             min_intimacy_accesses: 5,
@@ -445,22 +415,16 @@ impl SmellDetector {
     pub fn detect(&self, source: &str, file_path: &str) -> Vec<CodeSmell> {
         let mut smells = Vec::new();
 
-        // Detect long functions
         smells.extend(self.detect_long_functions(source, file_path));
 
-        // Detect deep nesting
         smells.extend(self.detect_deep_nesting(source, file_path));
 
-        // Detect magic numbers
         smells.extend(self.detect_magic_numbers(source, file_path));
 
-        // Detect too many parameters
         smells.extend(self.detect_too_many_parameters(source, file_path));
 
-        // Detect empty blocks
         smells.extend(self.detect_empty_blocks(source, file_path));
 
-        // Detect too many returns
         smells.extend(self.detect_too_many_returns(source, file_path));
 
         smells
@@ -472,7 +436,6 @@ impl SmellDetector {
         let lines: Vec<&str> = source.lines().collect();
         let lang = SourceLanguage::from_file_path(file_path);
 
-        // Simple heuristic: look for function definitions and count lines until closing brace
         let mut in_function = false;
         let mut function_start = 0;
         let mut brace_count = 0;
@@ -494,7 +457,6 @@ impl SmellDetector {
                 saw_open_brace = false;
                 ruby_block_depth = 0;
 
-                // Extract function name
                 function_name = self.extract_function_name(trimmed);
             }
 
@@ -570,12 +532,10 @@ impl SmellDetector {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Skip empty lines and comments
             if self.is_comment_line(trimmed, lang) {
                 continue;
             }
 
-            // Count indentation as nesting indicator
             let indent = line.len() - trimmed.len();
             let depth = indent / 4; // Assuming 4-space indent
 
@@ -620,16 +580,13 @@ impl SmellDetector {
         let lines: Vec<&str> = source.lines().collect();
         let lang = SourceLanguage::from_file_path(file_path);
 
-        // Regex pattern for detecting numeric literals
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Skip comments and strings
             if self.is_comment_line(trimmed, lang) {
                 continue;
             }
 
-            // Skip constant definitions and array index lines
             if trimmed.starts_with("const ")
                 || trimmed.starts_with("static ")
                 || trimmed.starts_with("pub const ")
@@ -641,14 +598,11 @@ impl SmellDetector {
                 continue;
             }
 
-            // Simple magic number detection (numbers that aren't 0, 1, or part of common patterns)
             let words: Vec<&str> = trimmed.split_whitespace().collect();
             for word in words {
-                // Remove trailing punctuation
                 let clean = word.trim_matches(|c: char| !c.is_numeric() && c != '.' && c != '-');
 
                 if let Ok(num) = clean.parse::<f64>() {
-                    // Skip common acceptable numbers
                     if num == 0.0 || num == 1.0 || num == -1.0 {
                         continue;
                     }
@@ -680,44 +634,41 @@ impl SmellDetector {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Look for function definitions
             if self.is_function_signature(trimmed, lang) {
-                // Extract parameters from parentheses
-                if let Some(paren_start) = trimmed.find('(')
-                    && let Some(local_paren_end) = trimmed[paren_start + 1..].find(')')
-                {
-                    let paren_end = paren_start + 1 + local_paren_end;
-                    let params_str = &trimmed[paren_start + 1..paren_end];
+                if let Some(paren_start) = trimmed.find('(') {
+                    if let Some(local_paren_end) = trimmed[paren_start + 1..].find(')') {
+                        let paren_end = paren_start + 1 + local_paren_end;
+                        let params_str = &trimmed[paren_start + 1..paren_end];
 
-                    if !params_str.trim().is_empty() {
-                        // Count parameters (handle nested types)
-                        let param_count = self.count_parameters(params_str);
+                        if !params_str.trim().is_empty() {
+                            let param_count = self.count_parameters(params_str);
 
-                        if param_count > self.config.max_parameters {
-                            let function_name = self.extract_function_name(trimmed);
-                            let severity = if param_count > self.config.max_parameters + 3 {
-                                Severity::Error
-                            } else {
-                                Severity::Warning
-                            };
+                            if param_count > self.config.max_parameters {
+                                let function_name = self.extract_function_name(trimmed);
+                                let severity = if param_count > self.config.max_parameters + 3 {
+                                    Severity::Error
+                                } else {
+                                    Severity::Warning
+                                };
 
-                            smells.push(CodeSmell {
-                                smell_type: SmellType::TooManyParameters,
-                                severity,
-                                file_path: file_path.to_string(),
-                                line_number: (i + 1) as u32,
-                                symbol_name: function_name.clone(),
-                                message: format!(
-                                    "Function '{}' has {} parameters (max: {})",
-                                    function_name, param_count, self.config.max_parameters
-                                ),
-                                metric_value: Some(param_count),
-                                threshold: Some(self.config.max_parameters),
-                                suggestion: Some(
-                                    "Consider using a configuration struct or builder pattern"
-                                        .to_string(),
-                                ),
-                            });
+                                smells.push(CodeSmell {
+                                    smell_type: SmellType::TooManyParameters,
+                                    severity,
+                                    file_path: file_path.to_string(),
+                                    line_number: (i + 1) as u32,
+                                    symbol_name: function_name.clone(),
+                                    message: format!(
+                                        "Function '{}' has {} parameters (max: {})",
+                                        function_name, param_count, self.config.max_parameters
+                                    ),
+                                    metric_value: Some(param_count),
+                                    threshold: Some(self.config.max_parameters),
+                                    suggestion: Some(
+                                        "Consider using a configuration struct or builder pattern"
+                                            .to_string(),
+                                    ),
+                                });
+                            }
                         }
                     }
                 }
@@ -771,19 +722,16 @@ impl SmellDetector {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Skip comments
             if self.is_comment_line(trimmed, lang) {
                 continue;
             }
 
-            // Track block starts
             if trimmed.contains('{') && !in_block {
                 in_block = true;
                 block_start = i;
                 brace_count = 0;
                 block_name = self.extract_function_name(trimmed);
                 if block_name.is_empty() || block_name == "unknown" {
-                    // Try to get name from previous line or context
                     if i > 0 {
                         block_name = self.extract_function_name(lines[i - 1]);
                     }
@@ -795,7 +743,6 @@ impl SmellDetector {
                 brace_count -= trimmed.matches('}').count() as i32;
 
                 if brace_count == 0 {
-                    // Check if block was empty (only whitespace/comments)
                     let block_lines: Vec<&str> = lines[block_start..=i]
                         .iter()
                         .filter(|l| {
@@ -853,12 +800,10 @@ impl SmellDetector {
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
 
-            // Skip comments
             if self.is_comment_line(trimmed, lang) {
                 continue;
             }
 
-            // Detect function start
             if !in_function && self.is_function_signature(trimmed, lang) {
                 in_function = true;
                 function_start = i;
@@ -881,7 +826,6 @@ impl SmellDetector {
                     saw_open_brace = true;
                 }
 
-                // Count return statements
                 if trimmed.contains("return ") || trimmed.starts_with("return") {
                     return_count += 1;
                 }
@@ -933,10 +877,8 @@ impl SmellDetector {
 
     /// Extract function name from a function definition line
     fn extract_function_name(&self, line: &str) -> String {
-        // Simple extraction - look for word after fn, def, function, etc.
         let mut line = line.trim();
 
-        // Strip visibility modifiers and other prefixes
         let prefixes = [
             "pub ",
             "pub(crate) ",
@@ -960,7 +902,6 @@ impl SmellDetector {
             }
         }
 
-        // Now strip function keywords
         let keywords = ["fn ", "def ", "function ", "fun "];
         for keyword in keywords {
             if line.starts_with(keyword) {
@@ -969,7 +910,6 @@ impl SmellDetector {
             }
         }
 
-        // Handle assignment-style declarations (e.g., "const name = (...) =>")
         if let Some(eq_pos) = line.find('=') {
             let left = line[..eq_pos].trim();
             if let Some(name) = left
@@ -983,7 +923,6 @@ impl SmellDetector {
             }
         }
 
-        // Get the first word that looks like a function name
         line.split(|c: char| !c.is_alphanumeric() && c != '_')
             .find(|s| {
                 !s.is_empty()
@@ -1129,7 +1068,6 @@ impl SmellDetector {
         let lines: Vec<&str> = source.lines().collect();
         let line_count = lines.len();
 
-        // Count parameters (simplified)
         let param_count = if let Some(paren_start) = source.find('(') {
             if let Some(paren_end) = source.find(')') {
                 let params = &source[paren_start + 1..paren_end];
@@ -1145,7 +1083,6 @@ impl SmellDetector {
             0
         };
 
-        // Count control structures for complexity estimate
         let control_keywords = [
             "if ", "else if", "else{", "for ", "while ", "match ", "switch ", "case ", "catch ",
             "&&", "||", "?",
@@ -1159,7 +1096,6 @@ impl SmellDetector {
             }
         }
 
-        // Calculate nesting depth
         let max_nesting = self.calculate_max_nesting(source);
 
         FunctionMetrics {
@@ -1405,7 +1341,6 @@ fn example(a: i32, b: i32, c: i32) -> i32 {
     #[test]
     fn detect_magic_numbers() {
         let detector = SmellDetector::new();
-        // Use code without 'let' or 'const' to avoid filtering
         let source = r#"
 fn calculate() {
     process(42);
@@ -1414,9 +1349,6 @@ fn calculate() {
 }
 "#;
         let _smells = detector.detect_magic_numbers(source, "test.rs");
-        // Note: Magic number detection is simplified and may not catch all cases
-        // The test passes if the function runs without error
-        // In a full implementation, this would detect 42, 100, and 3.14159
     }
 
     #[test]
@@ -1605,15 +1537,11 @@ class UserService(val value: String)
     #[test]
     fn detect_empty_block_smell() {
         let detector = SmellDetector::new();
-        // Empty block detection is a heuristic that may vary by language
-        // This test verifies the function runs without crashing
         let source = r#"
 fn empty_function() {
 }
 "#;
         let _smells = detector.detect_empty_blocks(source, "test.rs");
-        // The detection is best-effort and may not catch all empty blocks
-        // depending on the structure of the code
     }
 
     #[test]
@@ -1625,8 +1553,6 @@ fn normal_function() {
 }
 "#;
         let _smells = detector.detect_empty_blocks(source, "test.rs");
-        // May or may not find smells depending on interpretation
-        // At minimum it should not crash
     }
 
     #[test]
@@ -1725,7 +1651,6 @@ fn normal_fn(x: i32) -> i32 {
     #[test]
     fn count_parameters_with_generics() {
         let detector = SmellDetector::new();
-        // Should handle nested generics correctly
         assert_eq!(detector.count_parameters("a: Vec<HashMap<String, i32>>"), 1);
         assert_eq!(
             detector.count_parameters("a: Vec<i32>, b: Option<String>"),
@@ -1755,7 +1680,6 @@ fn problematic(a: i32, b: i32, c: i32, d: i32) -> i32 {
 }
 "#;
         let smells = detector.detect(source, "test.rs");
-        // Should detect multiple issues
         assert!(!smells.is_empty());
     }
 }

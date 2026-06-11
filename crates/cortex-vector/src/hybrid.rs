@@ -11,7 +11,7 @@
 
 use crate::{Embedder, MetadataValue, SearchResult, VectorStore};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Search type for hybrid queries
@@ -176,11 +176,19 @@ impl HybridSearch {
                 let graph_score = estimated_graph_signal(&r);
                 let lexical_hint = lexical_metadata_hint(query, &r);
                 let intent_boost = intent_kind_boost(intent, &r);
+                let generation_boost = generation_context_boost(intent, &r);
+                let freshness_penalty = freshness_penalty(&r);
+                let token_penalty = token_cost_penalty(&r);
+                let generated_penalty = generated_or_vendor_penalty(&r);
                 let (w_vector, w_graph, w_lexical) = intent_weights(intent);
                 r.combined_score = (vector_score * w_vector)
                     + (graph_score * w_graph)
                     + (lexical_hint * w_lexical)
-                    + intent_boost;
+                    + intent_boost
+                    + generation_boost
+                    - freshness_penalty
+                    - token_penalty
+                    - generated_penalty;
                 r
             })
             .collect();
@@ -190,6 +198,35 @@ impl HybridSearch {
                 .partial_cmp(&a.combined_score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
+
+        if hybrid_fusion_rrf_enabled() {
+            let vector_ranked: Vec<String> = reranked
+                .iter()
+                .map(|r| r.result.id.clone())
+                .collect();
+            let mut lexical_ranked: Vec<(String, f32)> = reranked
+                .iter()
+                .map(|r| {
+                    let hint = lexical_metadata_hint(query, r);
+                    (r.result.id.clone(), hint)
+                })
+                .collect();
+            lexical_ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let lexical_ids: Vec<String> = lexical_ranked.into_iter().map(|(id, _)| id).collect();
+            let fused = rrf_fuse_ids(&[vector_ranked, lexical_ids], 60.0);
+            let score_map: HashMap<String, f32> = fused.into_iter().map(|(id, s)| (id, s as f32)).collect();
+            for item in &mut reranked {
+                if let Some(s) = score_map.get(&item.result.id) {
+                    item.combined_score = *s;
+                }
+            }
+            reranked.sort_by(|a, b| {
+                b.combined_score
+                    .partial_cmp(&a.combined_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+
         reranked.truncate(k);
         Ok(reranked)
     }
@@ -231,7 +268,6 @@ impl HybridSearch {
                     .await?
             }
             Some(repos) => {
-                let repo_set: HashSet<&str> = repos.iter().map(|s| s.as_str()).collect();
                 let all_results = self
                     .vector_store
                     .search(embedding, k * 3 * repos.len())
@@ -245,7 +281,7 @@ impl HybridSearch {
                                 MetadataValue::String(s) => Some(s.as_str()),
                                 _ => None,
                             })
-                            .is_some_and(|repo| repo_set.contains(repo))
+                            .is_some_and(|repo| repos.iter().any(|r| r == repo))
                     })
                     .collect()
             }
@@ -472,6 +508,30 @@ fn estimated_graph_signal(result: &HybridResult) -> f32 {
         .unwrap_or(0.0)
 }
 
+fn hybrid_fusion_rrf_enabled() -> bool {
+    std::env::var("CORTEX_HYBRID_FUSION")
+        .unwrap_or_else(|_| "rrf".to_string())
+        .to_ascii_lowercase()
+        != "legacy"
+}
+
+fn rrf_fuse_ids(rank_lists: &[Vec<String>], k: f64) -> Vec<(String, f64)> {
+    let mut scores: HashMap<String, f64> = HashMap::new();
+    for list in rank_lists {
+        for (rank, id) in list.iter().enumerate() {
+            let contribution = 1.0 / (k + (rank as f64) + 1.0);
+            *scores.entry(id.clone()).or_insert(0.0) += contribution;
+        }
+    }
+    let mut fused: Vec<(String, f64)> = scores.into_iter().collect();
+    fused.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    fused
+}
+
 fn lexical_metadata_hint(query: &str, result: &HybridResult) -> f32 {
     let q = query.to_ascii_lowercase();
     let mut hint = 0.0f32;
@@ -510,6 +570,71 @@ fn intent_kind_boost(intent: QueryIntent, result: &HybridResult) -> f32 {
         QueryIntent::ApiUsage if kind.contains("function") => 0.06,
         _ => 0.0,
     }
+}
+
+fn generation_context_boost(intent: QueryIntent, result: &HybridResult) -> f32 {
+    let path = metadata_string(result, "path")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let kind = metadata_string(result, "kind")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let name = metadata_string(result, "name")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match intent {
+        QueryIntent::Tests if path.contains("test") || name.contains("test") => 0.18,
+        QueryIntent::Bugfix if path.contains("test") => 0.08,
+        QueryIntent::Refactor if kind.contains("trait") || kind.contains("interface") => 0.12,
+        QueryIntent::ApiUsage if path.contains("api") || kind.contains("interface") => 0.14,
+        QueryIntent::Explore => 0.0,
+        _ => 0.04,
+    }
+}
+
+fn freshness_penalty(result: &HybridResult) -> f32 {
+    match metadata_string(result, "freshness")
+        .unwrap_or_else(|| "unknown".to_string())
+        .as_str()
+    {
+        "fresh" => 0.0,
+        "warming" => 0.04,
+        "partial" => 0.08,
+        "stale" => 0.20,
+        _ => 0.05,
+    }
+}
+
+fn token_cost_penalty(result: &HybridResult) -> f32 {
+    let content_len = result
+        .result
+        .content
+        .as_ref()
+        .map(|content| content.len())
+        .unwrap_or(0);
+    ((content_len as f32 / 4.0) / 8000.0).min(0.18)
+}
+
+fn generated_or_vendor_penalty(result: &HybridResult) -> f32 {
+    let path = metadata_string(result, "path")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if path.contains("generated")
+        || path.contains("vendor/")
+        || path.contains("node_modules")
+        || path.contains("target/")
+    {
+        0.35
+    } else {
+        0.0
+    }
+}
+
+fn metadata_string(result: &HybridResult, key: &str) -> Option<String> {
+    result.result.metadata.get(key).and_then(|v| match v {
+        MetadataValue::String(s) => Some(s.clone()),
+        _ => None,
+    })
 }
 
 #[cfg(test)]
@@ -607,6 +732,13 @@ mod tests {
         }
 
         async fn count(&self) -> Result<usize, crate::VectorError> {
+            Ok(0)
+        }
+
+        async fn count_by_filter(
+            &self,
+            _filter: HashMap<String, MetadataValue>,
+        ) -> Result<usize, crate::VectorError> {
             Ok(0)
         }
 

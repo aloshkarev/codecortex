@@ -28,6 +28,7 @@
 use crate::EMBEDDING_DIMENSION;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::time::Duration;
 
 /// Error type for embedding operations
@@ -64,6 +65,8 @@ pub enum EmbeddingError {
 pub enum EmbeddingProvider {
     OpenAI,
     Ollama,
+    /// Deterministic hash embeddings for CI and local semantic tests (`CORTEX_TEST_EMBEDDER=1`).
+    Test,
 }
 
 impl std::fmt::Display for EmbeddingProvider {
@@ -71,6 +74,7 @@ impl std::fmt::Display for EmbeddingProvider {
         match self {
             Self::OpenAI => write!(f, "openai"),
             Self::Ollama => write!(f, "ollama"),
+            Self::Test => write!(f, "test"),
         }
     }
 }
@@ -79,12 +83,11 @@ impl std::str::FromStr for EmbeddingProvider {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("openai") {
-            Ok(Self::OpenAI)
-        } else if s.eq_ignore_ascii_case("ollama") {
-            Ok(Self::Ollama)
-        } else {
-            Err(format!("Unknown embedding provider: {}", s))
+        match s.to_lowercase().as_str() {
+            "openai" => Ok(Self::OpenAI),
+            "ollama" => Ok(Self::Ollama),
+            "test" => Ok(Self::Test),
+            _ => Err(format!("Unknown embedding provider: {}", s)),
         }
     }
 }
@@ -358,11 +361,13 @@ impl OllamaEmbedder {
     const DEFAULT_MIN_RETRY_CHARS: usize = 256;
     const DEFAULT_MAX_RETRY_ATTEMPTS: usize = 6;
     const DEFAULT_TARGET_DIMENSION: usize = EMBEDDING_DIMENSION;
+    const DEFAULT_OLLAMA_EMBED_BATCH_SIZE: usize = 4;
+    const DEFAULT_OLLAMA_REQUEST_TIMEOUT_SECS: u64 = 180;
 
     /// Create a new Ollama embedder
     pub fn new() -> Self {
         let mut embedder = Self {
-            client: reqwest::Client::new(),
+            client: Self::build_http_client(),
             base_url: "http://localhost:11434".to_string(),
             model: Self::DEFAULT_MODEL.to_string(),
             max_input_chars: Self::default_max_input_chars_for_model(Self::DEFAULT_MODEL),
@@ -377,19 +382,69 @@ impl OllamaEmbedder {
 
     /// Create with custom model
     pub fn with_model(model: impl Into<String>) -> Self {
+        let model = model.into();
         let mut embedder = Self {
-            client: reqwest::Client::new(),
+            client: Self::build_http_client(),
             base_url: "http://localhost:11434".to_string(),
-            model: model.into(),
-            max_input_chars: Self::default_max_input_chars_for_model(Self::DEFAULT_MODEL),
+            model: model.clone(),
+            max_input_chars: Self::default_max_input_chars_for_model(&model),
             min_retry_chars: Self::DEFAULT_MIN_RETRY_CHARS,
             max_retry_attempts: Self::DEFAULT_MAX_RETRY_ATTEMPTS,
             target_dimension: Self::DEFAULT_TARGET_DIMENSION,
             enable_bge_query_prefix: true,
         };
-        embedder.max_input_chars = Self::default_max_input_chars_for_model(&embedder.model);
         embedder.apply_env_overrides();
         embedder
+    }
+
+    fn build_http_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(30))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    }
+
+    fn format_http_error(err: &reqwest::Error) -> String {
+        let mut msg = err.to_string();
+        if err.is_timeout() {
+            msg.push_str(" (timeout — try CORTEX_OLLAMA_EMBED_BATCH_SIZE=1 or a smaller model)");
+        } else if err.is_connect() {
+            msg.push_str(" (connection failed — check Ollama is listening at ollama_base_url)");
+        } else if let Some(source) = err.source() {
+            msg.push_str(": ");
+            msg.push_str(&source.to_string());
+        }
+        msg
+    }
+
+    async fn post_json_with_retry(
+        &self,
+        body: &OllamaEmbedRequest,
+    ) -> Result<reqwest::Response, EmbeddingError> {
+        const MAX_ATTEMPTS: usize = 4;
+        let url = format!("{}/api/embed", self.base_url);
+        let mut last_err: Option<reqwest::Error> = None;
+        for attempt in 0..MAX_ATTEMPTS {
+            match self
+                .client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(body)
+                .timeout(Duration::from_secs(
+                    Self::DEFAULT_OLLAMA_REQUEST_TIMEOUT_SECS,
+                ))
+                .send()
+                .await
+            {
+                Ok(response) => return Ok(response),
+                Err(err) if attempt + 1 < MAX_ATTEMPTS => {
+                    last_err = Some(err);
+                    tokio::time::sleep(Duration::from_secs(1_u64 << attempt.min(3))).await;
+                }
+                Err(err) => return Err(EmbeddingError::HttpError(err)),
+            }
+        }
+        Err(EmbeddingError::HttpError(last_err.expect("retry loop")))
     }
 
     /// Set custom Ollama base URL
@@ -411,13 +466,13 @@ impl OllamaEmbedder {
     }
 
     /// Pad embedding to target dimension
-    fn pad_embedding(&self, mut embedding: Vec<f32>) -> Vec<f32> {
+    fn pad_embedding(&self, embedding: Vec<f32>) -> Vec<f32> {
         if embedding.len() >= self.target_dimension {
-            embedding.truncate(self.target_dimension);
-            embedding
+            embedding[..self.target_dimension].to_vec()
         } else {
-            embedding.resize(self.target_dimension, 0.0);
-            embedding
+            let mut padded = embedding;
+            padded.resize(self.target_dimension, 0.0);
+            padded
         }
     }
 
@@ -430,10 +485,9 @@ impl OllamaEmbedder {
     }
 
     fn is_bge_m3_model_name(model: &str) -> bool {
-        let m = model.trim_start();
-        let prefix = Self::BGE_M3_MODEL_PREFIX.as_bytes();
-        let b = m.as_bytes();
-        b.len() >= prefix.len() && b[..prefix.len()].eq_ignore_ascii_case(prefix)
+        model
+            .to_ascii_lowercase()
+            .starts_with(Self::BGE_M3_MODEL_PREFIX)
     }
 
     fn is_bge_m3_model(&self) -> bool {
@@ -469,30 +523,30 @@ impl OllamaEmbedder {
     }
 
     fn apply_env_overrides(&mut self) {
-        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MAX_INPUT_CHARS")
-            && let Ok(parsed) = v.parse::<usize>()
-        {
-            self.max_input_chars = parsed.max(256);
+        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MAX_INPUT_CHARS") {
+            if let Ok(parsed) = v.parse::<usize>() {
+                self.max_input_chars = parsed.max(256);
+            }
         }
-        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MIN_RETRY_CHARS")
-            && let Ok(parsed) = v.parse::<usize>()
-        {
-            self.min_retry_chars = parsed.max(64);
+        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MIN_RETRY_CHARS") {
+            if let Ok(parsed) = v.parse::<usize>() {
+                self.min_retry_chars = parsed.max(64);
+            }
         }
-        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MAX_RETRY_ATTEMPTS")
-            && let Ok(parsed) = v.parse::<usize>()
-        {
-            self.max_retry_attempts = parsed.max(1);
+        if let Ok(v) = std::env::var("CORTEX_OLLAMA_MAX_RETRY_ATTEMPTS") {
+            if let Ok(parsed) = v.parse::<usize>() {
+                self.max_retry_attempts = parsed.max(1);
+            }
         }
-        if let Ok(v) = std::env::var("CORTEX_OLLAMA_TARGET_DIMENSION")
-            && let Ok(parsed) = v.parse::<usize>()
-        {
-            self.target_dimension = parsed.max(1);
+        if let Ok(v) = std::env::var("CORTEX_OLLAMA_TARGET_DIMENSION") {
+            if let Ok(parsed) = v.parse::<usize>() {
+                self.target_dimension = parsed.max(1);
+            }
         }
-        if let Ok(v) = std::env::var("CORTEX_VECTOR_TARGET_DIM")
-            && let Ok(parsed) = v.parse::<usize>()
-        {
-            self.target_dimension = parsed.max(1);
+        if let Ok(v) = std::env::var("CORTEX_VECTOR_TARGET_DIM") {
+            if let Ok(parsed) = v.parse::<usize>() {
+                self.target_dimension = parsed.max(1);
+            }
         }
         if let Ok(v) = std::env::var("CORTEX_OLLAMA_ENABLE_BGE_QUERY_PREFIX") {
             let v = v.trim().to_ascii_lowercase();
@@ -548,14 +602,7 @@ impl OllamaEmbedder {
             dimensions: self.request_dimensions(),
         };
 
-        let response = self
-            .client
-            .post(format!("{}/api/embed", self.base_url))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(Duration::from_secs(60))
-            .send()
-            .await?;
+        let response = self.post_json_with_retry(&request).await?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
@@ -573,6 +620,52 @@ impl OllamaEmbedder {
             .into_iter()
             .next()
             .ok_or_else(|| EmbeddingError::InvalidResponse("No embedding in response".to_string()))
+    }
+
+    fn ollama_embed_batch_size() -> usize {
+        std::env::var("CORTEX_OLLAMA_EMBED_BATCH_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(Self::DEFAULT_OLLAMA_EMBED_BATCH_SIZE)
+    }
+
+    async fn request_batch_embeddings(
+        &self,
+        prepared: &[String],
+    ) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        let request = OllamaEmbedRequest {
+            model: self.model.clone(),
+            input: OllamaInput::Batch(prepared.to_vec()),
+            truncate: true,
+            dimensions: self.request_dimensions(),
+        };
+
+        let response = self.post_json_with_retry(&request).await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            if Self::is_context_length_error(&error_text) && prepared.len() > 1 {
+                let mut embeddings = Vec::with_capacity(prepared.len());
+                for text in prepared {
+                    embeddings.push(self.embed_single_with_retry(text).await?);
+                }
+                return Ok(embeddings);
+            }
+            return Err(EmbeddingError::OllamaError(error_text));
+        }
+
+        let embed_response: OllamaEmbedResponse = response
+            .json()
+            .await
+            .map_err(|e| EmbeddingError::InvalidResponse(e.to_string()))?;
+        Self::validate_embedding_count(embed_response.embeddings.len(), prepared.len())?;
+
+        Ok(embed_response
+            .embeddings
+            .into_iter()
+            .map(|e| self.pad_embedding(e))
+            .collect())
     }
 
     fn validate_embedding_count(actual: usize, expected: usize) -> Result<(), EmbeddingError> {
@@ -671,45 +764,23 @@ impl Embedder for OllamaEmbedder {
             })
             .collect();
 
-        let request = OllamaEmbedRequest {
-            model: self.model.clone(),
-            input: OllamaInput::Batch(prepared.clone()),
-            truncate: true,
-            dimensions: self.request_dimensions(),
-        };
-
-        let response = self
-            .client
-            .post(format!("{}/api/embed", self.base_url))
-            .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(Duration::from_secs(120))
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            if Self::is_context_length_error(&error_text) {
-                let mut embeddings = Vec::with_capacity(prepared.len());
-                for text in &prepared {
-                    embeddings.push(self.embed_single_with_retry(text).await?);
+        let batch_size = Self::ollama_embed_batch_size();
+        let mut all = Vec::with_capacity(prepared.len());
+        for chunk in prepared.chunks(batch_size) {
+            match self.request_batch_embeddings(chunk).await {
+                Ok(embeddings) => all.extend(embeddings),
+                Err(EmbeddingError::HttpError(err)) if chunk.len() > 1 => {
+                    for text in chunk {
+                        all.push(self.embed_single_with_retry(text).await?);
+                    }
                 }
-                return Ok(embeddings);
+                Err(EmbeddingError::HttpError(err)) => {
+                    return Err(EmbeddingError::OllamaError(Self::format_http_error(&err)));
+                }
+                Err(err) => return Err(err),
             }
-            return Err(EmbeddingError::OllamaError(error_text));
         }
-
-        let embed_response: OllamaEmbedResponse = response
-            .json()
-            .await
-            .map_err(|e| EmbeddingError::InvalidResponse(e.to_string()))?;
-        Self::validate_embedding_count(embed_response.embeddings.len(), prepared.len())?;
-
-        Ok(embed_response
-            .embeddings
-            .into_iter()
-            .map(|e| self.pad_embedding(e))
-            .collect())
+        Ok(all)
     }
 
     fn provider(&self) -> EmbeddingProvider {
@@ -722,6 +793,115 @@ impl Embedder for OllamaEmbedder {
 
     fn dimension(&self) -> usize {
         self.target_dimension
+    }
+}
+
+// ============================================================================
+// Hash Embedder (deterministic test / CI)
+// ============================================================================
+
+/// Deterministic hash-based embedder for semantic MCP tests without external APIs.
+pub struct HashEmbedder {
+    dimension: usize,
+}
+
+impl HashEmbedder {
+    pub const MODEL: &'static str = "hash-v1";
+
+    pub fn new() -> Self {
+        Self {
+            dimension: EMBEDDING_DIMENSION,
+        }
+    }
+
+    /// Build a normalized embedding vector from text (token + char features).
+    pub fn hash_text(text: &str, dimension: usize) -> Vec<f32> {
+        let mut embedding = vec![0.0f32; dimension];
+        for token in Self::tokenize(text) {
+            let mut h: u64 = 5381;
+            for b in token.bytes() {
+                h = h.wrapping_mul(33).wrapping_add(u64::from(b));
+            }
+            for j in 0..8 {
+                let idx = h.wrapping_add(j) as usize % dimension;
+                embedding[idx] += 2.0;
+            }
+        }
+        let lower = text.to_lowercase();
+        for (i, c) in lower.chars().enumerate() {
+            embedding[i % dimension] += (c as u32) as f32 / 512.0;
+        }
+        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for v in &mut embedding {
+                *v /= norm;
+            }
+        }
+        embedding
+    }
+
+    fn tokenize(text: &str) -> Vec<String> {
+        let lower = text.to_lowercase();
+        let mut tokens = Vec::new();
+        for word in lower.split(|c: char| !c.is_alphanumeric()) {
+            if word.is_empty() {
+                continue;
+            }
+            tokens.push(word.to_string());
+            for part in word.split('_') {
+                if !part.is_empty() && part != word {
+                    tokens.push(part.to_string());
+                }
+            }
+        }
+        tokens
+    }
+
+    /// Cosine similarity between two normalized or arbitrary vectors.
+    pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+        if a.len() != b.len() || a.is_empty() {
+            return 0.0;
+        }
+        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if na == 0.0 || nb == 0.0 {
+            0.0
+        } else {
+            dot / (na * nb)
+        }
+    }
+}
+
+impl Default for HashEmbedder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Embedder for HashEmbedder {
+    async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {
+        Ok(Self::hash_text(text, self.dimension))
+    }
+
+    async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+        Ok(texts
+            .iter()
+            .map(|t| Self::hash_text(t, self.dimension))
+            .collect())
+    }
+
+    fn provider(&self) -> EmbeddingProvider {
+        EmbeddingProvider::Test
+    }
+
+    fn model(&self) -> &str {
+        Self::MODEL
+    }
+
+    fn dimension(&self) -> usize {
+        self.dimension
     }
 }
 
@@ -749,6 +929,7 @@ pub fn create_embedder(
             };
             Ok(Box::new(embedder))
         }
+        EmbeddingProvider::Test => Ok(Box::new(HashEmbedder::new())),
     }
 }
 
@@ -771,7 +952,42 @@ mod tests {
             EmbeddingProvider::from_str("ollama").unwrap(),
             EmbeddingProvider::Ollama
         );
+        assert_eq!(
+            EmbeddingProvider::from_str("test").unwrap(),
+            EmbeddingProvider::Test
+        );
         assert!(EmbeddingProvider::from_str("unknown").is_err());
+    }
+
+    #[tokio::test]
+    async fn hash_embedder_is_deterministic() {
+        let embedder = HashEmbedder::new();
+        let a = embedder.embed("validate user session token").await.unwrap();
+        let b = embedder.embed("validate user session token").await.unwrap();
+        assert_eq!(a, b);
+        assert_eq!(a.len(), EMBEDDING_DIMENSION);
+    }
+
+    #[tokio::test]
+    async fn hash_embedder_ranks_related_text_higher() {
+        let embedder = HashEmbedder::new();
+        let query = embedder.embed("validate user session token").await.unwrap();
+        let auth = embedder
+            .embed(
+                "validate user session token authentication pub fn validate_session_token(user: &str) -> bool",
+            )
+            .await
+            .unwrap();
+        let noise = embedder
+            .embed("completely unrelated quantum physics simulation step")
+            .await
+            .unwrap();
+        let sim_auth = HashEmbedder::cosine_similarity(&query, &auth);
+        let sim_noise = HashEmbedder::cosine_similarity(&query, &noise);
+        assert!(
+            sim_auth > sim_noise,
+            "auth similarity {sim_auth} should exceed noise {sim_noise}"
+        );
     }
 
     #[test]

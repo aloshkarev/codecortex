@@ -159,7 +159,6 @@ impl LspEdgeIngester {
 
     /// Generate a unique edge ID
     fn make_edge_id(caller: &str, callee: &str, file: &str, line: u64) -> String {
-        // Simple hash-based ID
         let combined = format!("{}:{}:{}:{}", caller, callee, file, line);
         format!("edge:{:x}", md5_hash(&combined))
     }
@@ -175,15 +174,12 @@ impl LspEdgeIngester {
         let now = current_time_ms();
         let window_cutoff = now - self.dedup_window.as_millis() as i64;
 
-        // Clean old entries from known_edges
         self.known_edges
             .retain(|_, &mut first_seen| first_seen > window_cutoff);
 
-        // Track unique edges within this batch
         let mut batch_seen: HashSet<String> = HashSet::new();
 
         for edge in edges {
-            // Validate edge
             if let Err(reason) = self.validate_edge(&edge, repo_path) {
                 result.rejected += 1;
                 *result.rejection_reasons.entry(reason).or_insert(0) += 1;
@@ -193,13 +189,11 @@ impl LspEdgeIngester {
             let edge_id =
                 Self::make_edge_id(&edge.caller_fqn, &edge.callee_fqn, &edge.file, edge.line);
 
-            // Check for duplicates within batch
             if !batch_seen.insert(edge_id.clone()) {
                 result.deduped += 1;
                 continue;
             }
 
-            // Check for duplicates within window
             if merge_mode == MergeMode::Upsert
                 && let Some(&first_seen) = self.known_edges.get(&edge_id)
                 && first_seen > window_cutoff
@@ -208,7 +202,6 @@ impl LspEdgeIngester {
                 continue;
             }
 
-            // Mark as known
             self.known_edges.insert(edge_id.clone(), now);
             result.ingested += 1;
         }
@@ -218,7 +211,6 @@ impl LspEdgeIngester {
 
     /// Validate an edge
     fn validate_edge(&self, edge: &LspEdgeInput, repo_path: &str) -> Result<(), String> {
-        // Check for empty fields
         if edge.caller_fqn.is_empty() {
             return Err("empty_caller_fqn".to_string());
         }
@@ -229,18 +221,14 @@ impl LspEdgeIngester {
             return Err("empty_file".to_string());
         }
 
-        // Validate confidence range
         if edge.confidence < 0.0 || edge.confidence > 1.0 {
             return Err("invalid_confidence_range".to_string());
         }
 
-        // Validate file path is within repo
-        // Accept if file starts with repo_path OR is a relative path (doesn't start with /)
         if !edge.file.starts_with(repo_path) && edge.file.starts_with('/') {
             return Err("file_outside_repo".to_string());
         }
 
-        // Validate line number
         if edge.line == 0 {
             return Err("invalid_line_number".to_string());
         }
@@ -369,7 +357,7 @@ mod tests {
 
         let edges = vec![
             make_edge("func::a", "func::b", "/repo/src/a.rs", 10),
-            make_edge("func::a", "func::b", "/repo/src/a.rs", 10), // Duplicate
+            make_edge("func::a", "func::b", "/repo/src/a.rs", 10),
         ];
 
         let result = ingester.ingest("/repo", edges, MergeMode::Upsert);
@@ -386,7 +374,6 @@ mod tests {
         let result1 = ingester.ingest("/repo", batch1, MergeMode::Upsert);
         assert_eq!(result1.ingested, 1);
 
-        // Same edge in second batch
         let batch2 = vec![make_edge("func::a", "func::b", "/repo/src/a.rs", 10)];
         let result2 = ingester.ingest("/repo", batch2, MergeMode::Upsert);
         assert_eq!(result2.ingested, 0);
@@ -399,7 +386,7 @@ mod tests {
 
         let edges = vec![
             LspEdgeInput {
-                caller_fqn: "".to_string(), // Empty caller
+                caller_fqn: "".to_string(),
                 callee_fqn: "func::b".to_string(),
                 file: "/repo/src/a.rs".to_string(),
                 line: 10,
@@ -410,7 +397,7 @@ mod tests {
                 caller_fqn: "func::a".to_string(),
                 callee_fqn: "func::b".to_string(),
                 file: "/repo/src/a.rs".to_string(),
-                line: 0, // Invalid line
+                line: 0,
                 confidence: 0.9,
                 source: None,
             },
@@ -419,7 +406,7 @@ mod tests {
                 callee_fqn: "func::b".to_string(),
                 file: "/repo/src/a.rs".to_string(),
                 line: 10,
-                confidence: 1.5, // Invalid confidence
+                confidence: 1.5,
                 source: None,
             },
         ];

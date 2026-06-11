@@ -8,36 +8,12 @@
 use std::collections::{HashMap, HashSet};
 
 /// Tokenize text into terms
-///
-/// For all-ASCII input, lowercases per character (no full-string `to_lowercase`
-/// allocation). Non-ASCII text uses `str::to_lowercase()` so Unicode special-case
-/// rules (e.g. Greek final sigma) match `str` semantics.
 pub fn tokenize(text: &str) -> Vec<String> {
-    if text.is_ascii() {
-        let mut out = Vec::new();
-        let mut token = String::new();
-        for c in text.chars() {
-            if c.is_ascii_alphanumeric() || c == '_' {
-                token.push(c.to_ascii_lowercase());
-            } else if !token.is_empty() {
-                if token.len() > 1 {
-                    out.push(std::mem::take(&mut token));
-                } else {
-                    token.clear();
-                }
-            }
-        }
-        if token.len() > 1 {
-            out.push(token);
-        }
-        out
-    } else {
-        text.to_lowercase()
-            .split(|c: char| !c.is_alphanumeric() && c != '_')
-            .filter(|s| !s.is_empty() && s.len() > 1)
-            .map(|s| s.to_string())
-            .collect()
-    }
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|s| !s.is_empty() && s.len() > 1)
+        .map(|s| s.to_string())
+        .collect()
 }
 
 /// Calculate term frequency for a document
@@ -53,7 +29,6 @@ pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
         *tf.entry(term.clone()).or_insert(0.0) += 1.0;
     }
 
-    // Normalize by document length
     for count in tf.values_mut() {
         *count /= total;
     }
@@ -123,14 +98,12 @@ impl TfIdfScorer {
     pub fn add_document(&mut self, doc: &Document) {
         self.total_documents += 1;
 
-        // Track unique terms in this document
         let seen: HashSet<&String> = doc.terms.iter().collect();
 
         for term in seen {
             *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
         }
 
-        // Invalidate IDF cache
         self.idf_cache.clear();
     }
 
@@ -170,7 +143,6 @@ impl TfIdfScorer {
             score += tf * idf;
         }
 
-        // Normalize by document length to avoid bias toward long documents
         let doc_length = doc.terms.len() as f64;
         if doc_length > 0.0 {
             score /= doc_length.sqrt();
@@ -221,16 +193,13 @@ pub fn simple_tfidf_score(query: &str, document: &str) -> f64 {
 
     let doc_tf = term_frequency(&doc_terms);
 
-    // Simple scoring: sum of term frequencies
     let mut score = 0.0;
     for query_term in &query_terms {
         if let Some(&tf) = doc_tf.get(query_term) {
-            // Boost for exact match, with position-aware bonus
             score += tf * 2.0;
         }
     }
 
-    // Normalize by document length
     score / (1.0 + doc_terms.len() as f64).ln_1p()
 }
 
@@ -310,10 +279,53 @@ impl Bm25Scorer {
     }
 }
 
+impl Bm25Scorer {
+    /// Build a scorer from a document collection.
+    pub fn from_documents(documents: &[Document]) -> Self {
+        let mut scorer = Self::new().with_params(1.2, 0.75);
+        for doc in documents {
+            scorer.add_document(doc);
+        }
+        scorer
+    }
+
+    /// Score all documents and return sorted (id, score) pairs.
+    pub fn score_all(&self, query: &str, documents: &[Document]) -> Vec<(String, f64)> {
+        let query_terms = tokenize(query);
+        let mut scores: Vec<(String, f64)> = documents
+            .iter()
+            .map(|doc| (doc.id.clone(), self.score(&query_terms, doc)))
+            .filter(|(_, score)| *score > 0.0)
+            .collect();
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores
+    }
+}
+
 impl Default for Bm25Scorer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Reciprocal rank fusion for combining multiple ranked lists (Gortex-style k=60 default).
+pub fn rrf_fuse(rank_lists: &[Vec<String>], k: f64) -> Vec<(String, f64)> {
+    let mut scores: HashMap<String, f64> = HashMap::new();
+    for list in rank_lists {
+        for (rank, id) in list.iter().enumerate() {
+            *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k + rank as f64 + 1.0);
+        }
+    }
+    let mut fused: Vec<(String, f64)> = scores.into_iter().collect();
+    fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    fused
+}
+
+/// Lexical scoring mode for capsules and hybrid retrieval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LexicalMode {
+    TfIdf,
+    Bm25,
 }
 
 #[cfg(test)]
@@ -366,10 +378,8 @@ mod tests {
 
         let scorer = TfIdfScorer::from_documents(&docs);
 
-        // "quick" appears in 2 of 3 docs, should have lower IDF than rare terms
         assert!(scorer.idf("quick") > 0.0);
 
-        // Score for "quick" against doc1 (contains "quick")
         let query = tokenize("quick");
         let score1 = scorer.score(&query, &docs[0]);
         let score2 = scorer.score(&query, &docs[1]);
@@ -389,7 +399,6 @@ mod tests {
         let results = scorer.score_all("rust programming", &docs);
 
         assert!(!results.is_empty());
-        // doc1 and doc3 should score highest for "rust programming"
     }
 
     #[test]
@@ -399,6 +408,14 @@ mod tests {
 
         assert!(score1 > score2);
         assert!(score2 == 0.0);
+    }
+
+    #[test]
+    fn rrf_fuse_orders_by_consensus() {
+        let list_a = vec!["a".into(), "b".into(), "c".into()];
+        let list_b = vec!["b".into(), "c".into(), "a".into()];
+        let fused = rrf_fuse(&[list_a, list_b], 60.0);
+        assert_eq!(fused[0].0, "b");
     }
 
     #[test]

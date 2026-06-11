@@ -1,8 +1,7 @@
-/// End-to-end self-indexing verification against a running Bolt server.
+/// End-to-end self-indexing verification against a running FalkorDB server.
 ///
-/// Requires a running Memgraph/Neo4j-compatible server.
 /// Run with:
-///   BOLT_URI=bolt://127.0.0.1:7687 BOLT_USER=memgraph BOLT_PASSWORD=memgraph \
+///   CORTEX_TEST_GRAPH_URI=falkor://127.0.0.1:6379 \
 ///   cargo test -p cortex-graph --test selfindex_test -- --ignored --nocapture
 use cortex_analyzer::Analyzer;
 use cortex_core::{CortexConfig, SearchKind};
@@ -11,13 +10,15 @@ use cortex_indexer::Indexer;
 use std::path::PathBuf;
 
 fn config_from_env() -> CortexConfig {
+    let cache_dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/selfindex-sled-cache");
+    std::fs::create_dir_all(&cache_dir).ok();
     CortexConfig {
-        memgraph_uri: std::env::var("BOLT_URI")
-            .unwrap_or_else(|_| "bolt://127.0.0.1:7687".to_string()),
-        memgraph_user: std::env::var("BOLT_USER").unwrap_or_else(|_| "memgraph".to_string()),
-        memgraph_password: std::env::var("BOLT_PASSWORD")
-            .unwrap_or_else(|_| "memgraph".to_string()),
+        falkordb_uri: std::env::var("CORTEX_TEST_GRAPH_URI")
+            .unwrap_or_else(|_| "falkor://127.0.0.1:6379".to_string()),
+        falkordb_password: std::env::var("CORTEX_TEST_GRAPH_PASSWORD").unwrap_or_default(),
         max_batch_size: 500,
+        hash_cache_path: Some(cache_dir.join("hashes.db")),
         watched_paths: vec![],
         ..Default::default()
     }
@@ -28,18 +29,8 @@ fn repo_root() -> PathBuf {
 }
 
 #[tokio::test]
-#[ignore = "requires running Memgraph and full build"]
+#[ignore = "requires running FalkorDB and full build"]
 async fn self_index_codecortex_repository() {
-    // SAFETY: single test process configuration for cache location.
-    unsafe {
-        std::env::set_var(
-            "CORTEX_CACHE_PATH",
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/selfindex-sled-cache")
-                .display()
-                .to_string(),
-        );
-    }
     let cfg = config_from_env();
     let client = GraphClient::connect(&cfg).await.expect("connect");
     let repo = repo_root();
@@ -47,7 +38,7 @@ async fn self_index_codecortex_repository() {
 
     let _ = client.delete_repository(&repo_path).await;
 
-    let indexer = Indexer::new(client.clone(), cfg.max_batch_size).expect("indexer");
+    let indexer = Indexer::from_cortex_config(client.clone(), &cfg).expect("indexer");
     let report = indexer
         .index_path_with_options(&repo, true)
         .await

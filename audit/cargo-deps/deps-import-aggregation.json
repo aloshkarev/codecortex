@@ -1,0 +1,1466 @@
+{
+  "generated_at": "2026-05-30T13:08:53.802498+00:00",
+  "usage_source": "rust_source_scan",
+  "graph_imports": {
+    "source": "graph",
+    "edge_count": 0,
+    "rows": []
+  },
+  "note": "Graph IMPORTS edges were empty at audit time; usage metrics come from scanning `use` / `extern crate` in .rs files (same intent as CodeCortex parser).",
+  "by_crate_root": {
+    "cortex_core": {
+      "files_with_import": 63,
+      "files": [
+        "crates/cortex-analyzer/src/analyzer.rs",
+        "crates/cortex-analyzer/src/context.rs",
+        "crates/cortex-analyzer/src/cross_project.rs",
+        "crates/cortex-analyzer/src/navigation.rs",
+        "crates/cortex-cli/src/cli_indexing.rs",
+        "crates/cortex-cli/src/commands/doctor.rs",
+        "crates/cortex-cli/src/main.rs",
+        "crates/cortex-cli/src/setup_wizard.rs",
+        "crates/cortex-cli/tests/mcp_network_integration.rs",
+        "crates/cortex-core/tests/graph_index_scope.rs",
+        "crates/cortex-graph/src/backend.rs",
+        "crates/cortex-graph/src/bundle.rs",
+        "crates/cortex-graph/src/client.rs",
+        "crates/cortex-graph/src/cross_project.rs",
+        "crates/cortex-graph/src/falkordb.rs",
+        "crates/cortex-graph/src/grafeo.rs",
+        "crates/cortex-graph/src/grafeo_edge_flush.rs",
+        "crates/cortex-graph/src/memgraph.rs",
+        "crates/cortex-graph/src/migration.rs",
+        "crates/cortex-graph/src/pool.rs",
+        "crates/cortex-graph/src/query_engine.rs",
+        "crates/cortex-graph/src/schema.rs",
+        "crates/cortex-graph/src/scoped_query.rs",
+        "crates/cortex-graph/src/timeout.rs",
+        "crates/cortex-graph/src/writer.rs",
+        "crates/cortex-graph/tests/falkordb_bulk_throughput_test.rs",
+        "crates/cortex-graph/tests/falkordb_bulk_upsert_smoke.rs",
+        "crates/cortex-graph/tests/falkordb_index_explain_test.rs",
+        "crates/cortex-graph/tests/grafeo_edge_flush_test.rs",
+        "crates/cortex-graph/tests/integration_test.rs",
+        "crates/cortex-graph/tests/live_test.rs",
+        "crates/cortex-graph/tests/selfindex_test.rs",
+        "crates/cortex-indexer/src/edge_spill.rs",
+        "crates/cortex-indexer/src/indexer.rs",
+        "crates/cortex-indexer/src/report_analysis.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/network_server.rs",
+        "crates/cortex-mcp/src/server.rs",
+        "crates/cortex-mcp/src/vector_service.rs",
+        "crates/cortex-parser/src/languages/c.rs",
+        "crates/cortex-parser/src/languages/common.rs",
+        "crates/cortex-parser/src/languages/cpp.rs",
+        "crates/cortex-parser/src/languages/go.rs",
+        "crates/cortex-parser/src/languages/java.rs",
+        "crates/cortex-parser/src/languages/javascript.rs",
+        "crates/cortex-parser/src/languages/json.rs",
+        "crates/cortex-parser/src/languages/kotlin.rs",
+        "crates/cortex-parser/src/languages/php.rs",
+        "crates/cortex-parser/src/languages/python.rs",
+        "crates/cortex-parser/src/languages/ruby.rs",
+        "crates/cortex-parser/src/languages/rust.rs",
+        "crates/cortex-parser/src/languages/shell.rs",
+        "crates/cortex-parser/src/languages/swift.rs",
+        "crates/cortex-parser/src/languages/typescript.rs",
+        "crates/cortex-parser/src/parse_pool.rs",
+        "crates/cortex-parser/src/parser_impl.rs",
+        "crates/cortex-parser/src/registry.rs",
+        "crates/cortex-parser/src/signature.rs",
+        "crates/cortex-parser/tests/sample_project_rust.rs",
+        "crates/cortex-watcher/src/daemon.rs",
+        "crates/cortex-watcher/src/registry.rs",
+        "crates/cortex-watcher/src/watcher.rs",
+        "test_config.rs"
+      ],
+      "import_edges": 119,
+      "distinct_import_paths": 37,
+      "import_paths": {
+        "cortex_core::": 47,
+        "cortex_core::CortexConfig": 11,
+        "cortex_core::Result": 7,
+        "cortex_core:: {CodeEdge, EdgeKind, EntityKind, Language}": 5,
+        "cortex_core:: {EdgeKind, EntityKind, Language}": 4,
+        "cortex_core:: {EntityKind, Language}": 4,
+        "cortex_core:: {CodeEdge, CodeNode, EdgeKind, EntityKind, Language}": 3,
+        "cortex_core:: {CortexError, Result}": 3,
+        "cortex_core:: {CodeEdge, CodeNode, CortexConfig, EdgeKind, EntityKind, Language}": 2,
+        "cortex_core:: {CortexConfig, CortexError, Result}": 2,
+        "cortex_core:: {CortexConfig, SearchKind}": 2,
+        "cortex_core:: {CortexError, Language, Result}": 2,
+        "cortex_core::EntityKind": 2,
+        "cortex_core::IndexFreshness": 2,
+        "cortex_core:: {BranchIndexInfo, GitError, GitInfo, GitOperations, ProjectConfig, ProjectRef, ProjectState, ProjectStatus, ProjectSummary}": 1,
+        "cortex_core:: {CodeEdge, CodeNode, CortexConfig, CortexError, Repository, Result}": 1,
+        "cortex_core:: {CodeEdge, CodeNode, CortexError, EdgeKind, EntityKind, IndexedFile, Repository, Result}": 1,
+        "cortex_core:: {CodeEdge, CodeNode, CortexError, EdgeKind, EntityKind, Language, Result}": 1,
+        "cortex_core:: {CodeEdge, CodeNode, Language, Result}": 1,
+        "cortex_core:: {CodeEdge, CodeNode, Result}": 1,
+        "cortex_core:: {CodeEdge, CortexError, EdgeKind, IndexedFile, Result}": 1,
+        "cortex_core:: {CodeEdge, CortexError, Result}": 1,
+        "cortex_core:: {CodeNode, CortexConfig, EntityKind, Language}": 1,
+        "cortex_core:: {CodeNode, EntityKind}": 1,
+        "cortex_core:: {CodeNode, Language}": 1,
+        "cortex_core:: {CortexConfig, CortexError, GitOperations, Result}": 1,
+        "cortex_core:: {CortexConfig, FileChangeType, FileDiff, GitOperations, SearchKind}": 1,
+        "cortex_core:: {CortexConfig, GitOperations, IndexFreshness, ProjectStatus, SearchKind}": 1,
+        "cortex_core:: {CortexConfig, GitOperations}": 1,
+        "cortex_core:: {CortexConfig, Result, SearchKind}": 1,
+        "cortex_core:: {CortexConfig, Result}": 1,
+        "cortex_core:: {CortexError, GitOperations, Result}": 1,
+        "cortex_core:: {CortexError, Result, SearchKind}": 1,
+        "cortex_core:: {EdgeKind, EntityKind}": 1,
+        "cortex_core::EdgeKind": 1,
+        "cortex_core::Language": 1,
+        "cortex_core::graph_repository_path_for_index": 1
+      },
+      "imported_items_sample": [
+        "",
+        "CortexConfig",
+        "EdgeKind",
+        "EntityKind",
+        "IndexFreshness",
+        "Language",
+        "Result",
+        "cortex_core::::BranchIndexInfo",
+        "cortex_core::::CodeEdge",
+        "cortex_core::::CodeNode",
+        "cortex_core::::CortexConfig",
+        "cortex_core::::CortexError",
+        "cortex_core::::EdgeKind",
+        "cortex_core::::EntityKind",
+        "cortex_core::::FileChangeType",
+        "cortex_core::::FileDiff",
+        "cortex_core::::GitError",
+        "cortex_core::::GitInfo",
+        "cortex_core::::GitOperations",
+        "cortex_core::::IndexFreshness",
+        "cortex_core::::IndexedFile",
+        "cortex_core::::Language",
+        "cortex_core::::ProjectConfig",
+        "cortex_core::::ProjectRef",
+        "cortex_core::::ProjectState",
+        "cortex_core::::ProjectStatus",
+        "cortex_core::::ProjectSummary",
+        "cortex_core::::Repository",
+        "cortex_core::::Result",
+        "cortex_core::::SearchKind"
+      ]
+    },
+    "serde": {
+      "files_with_import": 52,
+      "files": [
+        "crates/cortex-analyzer/src/code_smells.rs",
+        "crates/cortex-analyzer/src/context.rs",
+        "crates/cortex-analyzer/src/coupling.rs",
+        "crates/cortex-analyzer/src/cross_project.rs",
+        "crates/cortex-analyzer/src/duplication.rs",
+        "crates/cortex-analyzer/src/navigation.rs",
+        "crates/cortex-analyzer/src/refactoring.rs",
+        "crates/cortex-analyzer/src/review.rs",
+        "crates/cortex-analyzer/src/smells/mod.rs",
+        "crates/cortex-core/src/config.rs",
+        "crates/cortex-core/src/language.rs",
+        "crates/cortex-core/src/model.rs",
+        "crates/cortex-core/src/project.rs",
+        "crates/cortex-graph/src/bundle.rs",
+        "crates/cortex-graph/src/falkordb_profile.rs",
+        "crates/cortex-graph/src/query_engine.rs",
+        "crates/cortex-graph/src/schema.rs",
+        "crates/cortex-graph/src/scoped_query.rs",
+        "crates/cortex-indexer/src/build_detector.rs",
+        "crates/cortex-indexer/src/incremental.rs",
+        "crates/cortex-indexer/src/indexer.rs",
+        "crates/cortex-indexer/src/parallel.rs",
+        "crates/cortex-indexer/src/report_analysis.rs",
+        "crates/cortex-indexer/src/skeleton.rs",
+        "crates/cortex-mcp/src/agent_pack.rs",
+        "crates/cortex-mcp/src/audit.rs",
+        "crates/cortex-mcp/src/cache.rs",
+        "crates/cortex-mcp/src/capsule.rs",
+        "crates/cortex-mcp/src/contracts.rs",
+        "crates/cortex-mcp/src/flags.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/impact.rs",
+        "crates/cortex-mcp/src/jobs.rs",
+        "crates/cortex-mcp/src/logic_flow.rs",
+        "crates/cortex-mcp/src/lsp_ingest.rs",
+        "crates/cortex-mcp/src/memory.rs",
+        "crates/cortex-mcp/src/metrics.rs",
+        "crates/cortex-mcp/src/quality.rs",
+        "crates/cortex-mcp/src/telemetry.rs",
+        "crates/cortex-mcp/src/tools.rs",
+        "crates/cortex-parser/src/signature.rs",
+        "crates/cortex-pipeline/src/context.rs",
+        "crates/cortex-vector/src/embedder.rs",
+        "crates/cortex-vector/src/hybrid.rs",
+        "crates/cortex-vector/src/lib.rs",
+        "crates/cortex-vector/src/schema.rs",
+        "crates/cortex-watcher/src/daemon.rs",
+        "crates/cortex-watcher/src/debounce.rs",
+        "crates/cortex-watcher/src/filter.rs",
+        "crates/cortex-watcher/src/perf.rs",
+        "crates/cortex-watcher/src/registry.rs",
+        "crates/cortex-watcher/src/remote.rs"
+      ],
+      "import_edges": 100,
+      "distinct_import_paths": 4,
+      "import_paths": {
+        "serde::": 48,
+        "serde:: {Deserialize, Serialize}": 47,
+        "serde::Serialize": 4,
+        "serde:: {Deserialize, Serialize, de::DeserializeOwned}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "Serialize",
+        "serde::::Deserialize",
+        "serde::::Serialize",
+        "serde::::de::DeserializeOwned"
+      ]
+    },
+    "tracing": {
+      "files_with_import": 13,
+      "files": [
+        "crates/cortex-graph/src/bundle.rs",
+        "crates/cortex-graph/src/client.rs",
+        "crates/cortex-graph/src/falkordb.rs",
+        "crates/cortex-graph/src/grafeo.rs",
+        "crates/cortex-graph/src/grafeo_edge_flush.rs",
+        "crates/cortex-graph/src/memgraph.rs",
+        "crates/cortex-indexer/src/indexer.rs",
+        "crates/cortex-mcp/src/memory.rs",
+        "crates/cortex-pipeline/src/pipeline.rs",
+        "crates/cortex-pipeline/src/stage.rs",
+        "crates/cortex-vector/src/json_store.rs",
+        "crates/cortex-vector/src/lancedb_store.rs",
+        "crates/cortex-watcher/src/watcher.rs"
+      ],
+      "import_edges": 23,
+      "distinct_import_paths": 10,
+      "import_paths": {
+        "tracing::": 10,
+        "tracing::warn": 3,
+        "tracing:: {debug, info, instrument, warn}": 2,
+        "tracing:: {debug, instrument}": 2,
+        "tracing:: {Level, debug, info, instrument, span, warn}": 1,
+        "tracing:: {Level, info, instrument, span}": 1,
+        "tracing:: {debug, info}": 1,
+        "tracing:: {debug, instrument, warn}": 1,
+        "tracing:: {info, instrument}": 1,
+        "tracing:: {info, warn}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "tracing::::Level",
+        "tracing::::debug",
+        "tracing::::info",
+        "tracing::::instrument",
+        "tracing::::span",
+        "tracing::::warn",
+        "warn"
+      ]
+    },
+    "anyhow": {
+      "files_with_import": 4,
+      "files": [
+        "crates/cortex-cli/src/setup_wizard.rs",
+        "crates/cortex-graph/src/client.rs",
+        "crates/cortex-pipeline/src/pipeline.rs",
+        "crates/cortex-pipeline/src/stage.rs"
+      ],
+      "import_edges": 5,
+      "distinct_import_paths": 4,
+      "import_paths": {
+        "anyhow::Result": 2,
+        "anyhow::": 1,
+        "anyhow:: {Context, Result}": 1,
+        "anyhow::Context": 1
+      },
+      "imported_items_sample": [
+        "",
+        "Context",
+        "Result",
+        "anyhow::::Context",
+        "anyhow::::Result"
+      ]
+    },
+    "tokio": {
+      "files_with_import": 14,
+      "files": [
+        "crates/cortex-graph/src/client.rs",
+        "crates/cortex-graph/src/falkordb.rs",
+        "crates/cortex-graph/src/pool.rs",
+        "crates/cortex-graph/src/timeout.rs",
+        "crates/cortex-graph/tests/falkordb_bulk_throughput_test.rs",
+        "crates/cortex-graph/tests/falkordb_bulk_upsert_smoke.rs",
+        "crates/cortex-graph/tests/falkordb_index_explain_test.rs",
+        "crates/cortex-graph/tests/integration_test.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/server.rs",
+        "crates/cortex-pipeline/src/pipeline.rs",
+        "crates/cortex-vector/src/json_store.rs",
+        "crates/cortex-watcher/src/daemon.rs",
+        "crates/cortex-watcher/src/watcher.rs"
+      ],
+      "import_edges": 16,
+      "distinct_import_paths": 11,
+      "import_paths": {
+        "tokio::time::timeout": 5,
+        "tokio::sync::RwLock": 2,
+        "tokio::runtime::Runtime": 1,
+        "tokio::sync::": 1,
+        "tokio::sync:: {Mutex, Semaphore, SemaphorePermit}": 1,
+        "tokio::sync::Mutex": 1,
+        "tokio::sync::Mutex as AsyncMutex": 1,
+        "tokio::sync::mpsc": 1,
+        "tokio::task::JoinSet": 1,
+        "tokio::time": 1,
+        "tokio::time::interval": 1
+      },
+      "imported_items_sample": [
+        "runtime::Runtime",
+        "sync::",
+        "sync::Mutex",
+        "sync::Mutex as AsyncMutex",
+        "sync::RwLock",
+        "sync::mpsc",
+        "task::JoinSet",
+        "time",
+        "time::interval",
+        "time::timeout",
+        "tokio::sync::::Mutex",
+        "tokio::sync::::Semaphore",
+        "tokio::sync::::SemaphorePermit"
+      ]
+    },
+    "async_trait": {
+      "files_with_import": 6,
+      "files": [
+        "crates/cortex-pipeline/src/stage.rs",
+        "crates/cortex-vector/src/embedder.rs",
+        "crates/cortex-vector/src/hybrid.rs",
+        "crates/cortex-vector/src/json_store.rs",
+        "crates/cortex-vector/src/lancedb_store.rs",
+        "crates/cortex-vector/src/lib.rs"
+      ],
+      "import_edges": 6,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "async_trait::async_trait": 6
+      },
+      "imported_items_sample": [
+        "async_trait"
+      ]
+    },
+    "dialoguer": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/setup_wizard.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "dialoguer::": 1,
+        "dialoguer:: {Confirm, Input, Select}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "dialoguer::::Confirm",
+        "dialoguer::::Input",
+        "dialoguer::::Select"
+      ]
+    },
+    "owo_colors": {
+      "files_with_import": 3,
+      "files": [
+        "crates/cortex-cli/src/commands/doctor.rs",
+        "crates/cortex-cli/src/main.rs",
+        "crates/cortex-cli/src/setup_wizard.rs"
+      ],
+      "import_edges": 3,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "owo_colors::OwoColorize": 3
+      },
+      "imported_items_sample": [
+        "OwoColorize"
+      ]
+    },
+    "clap": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/main.rs"
+      ],
+      "import_edges": 33,
+      "distinct_import_paths": 4,
+      "import_paths": {
+        "clap::Parser": 26,
+        "clap::CommandFactory": 5,
+        "clap::": 1,
+        "clap:: {Args, CommandFactory, Parser, Subcommand, ValueEnum}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "CommandFactory",
+        "Parser",
+        "clap::::Args",
+        "clap::::CommandFactory",
+        "clap::::Parser",
+        "clap::::Subcommand",
+        "clap::::ValueEnum"
+      ]
+    },
+    "clap_complete": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/main.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "clap_complete::": 1,
+        "clap_complete:: {Shell, generate}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "clap_complete::::Shell",
+        "clap_complete::::generate"
+      ]
+    },
+    "comfy_table": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/main.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "comfy_table::": 1,
+        "comfy_table:: {Cell, Color, ContentArrangement, Table, presets::UTF8_FULL}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "comfy_table::::Cell",
+        "comfy_table::::Color",
+        "comfy_table::::ContentArrangement",
+        "comfy_table::::Table",
+        "comfy_table::::presets::UTF8_FULL"
+      ]
+    },
+    "cortex_analyzer": {
+      "files_with_import": 5,
+      "files": [
+        "crates/cortex-cli/src/main.rs",
+        "crates/cortex-graph/tests/live_test.rs",
+        "crates/cortex-graph/tests/selfindex_test.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/server.rs"
+      ],
+      "import_edges": 8,
+      "distinct_import_paths": 5,
+      "import_paths": {
+        "cortex_analyzer::": 3,
+        "cortex_analyzer::Analyzer": 2,
+        "cortex_analyzer:: {AnalyzePathFilters, Analyzer, ApiSurfaceComparison, CodeSmell, CrossProjectAnalyzer, NavigationEngine, ProjectAnalysisContext, RefactoringEngine, RefactoringRecommendation, ReviewAnalyzer, ReviewFileInput, ReviewInput, ReviewLineRange, Severity, SmellConfig, SmellDetector, UsageKind, detect_dead_code, detect_dead_code_with_context, detect_duplicate_code, detect_duplicate_code_with_context, detect_feature_envy, detect_feature_envy_with_context, detect_inappropriate_intimacy, detect_inappropriate_intimacy_with_context, detect_shotgun_surgery, detect_shotgun_surgery_with_context}": 1,
+        "cortex_analyzer:: {AnalyzePathFilters, Analyzer, CrossProjectAnalyzer, NavigationEngine, ReviewAnalyzer, ReviewFileInput, ReviewInput, ReviewLineRange, Severity, UsageKind}": 1,
+        "cortex_analyzer:: {AnalyzePathFilters, Analyzer}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "Analyzer",
+        "cortex_analyzer::::AnalyzePathFilters",
+        "cortex_analyzer::::Analyzer",
+        "cortex_analyzer::::ApiSurfaceComparison",
+        "cortex_analyzer::::CodeSmell",
+        "cortex_analyzer::::CrossProjectAnalyzer",
+        "cortex_analyzer::::NavigationEngine",
+        "cortex_analyzer::::ProjectAnalysisContext",
+        "cortex_analyzer::::RefactoringEngine",
+        "cortex_analyzer::::RefactoringRecommendation",
+        "cortex_analyzer::::ReviewAnalyzer",
+        "cortex_analyzer::::ReviewFileInput",
+        "cortex_analyzer::::ReviewInput",
+        "cortex_analyzer::::ReviewLineRange",
+        "cortex_analyzer::::Severity",
+        "cortex_analyzer::::SmellConfig",
+        "cortex_analyzer::::SmellDetector",
+        "cortex_analyzer::::UsageKind",
+        "cortex_analyzer::::detect_dead_code",
+        "cortex_analyzer::::detect_dead_code_with_context",
+        "cortex_analyzer::::detect_duplicate_code",
+        "cortex_analyzer::::detect_duplicate_code_with_context",
+        "cortex_analyzer::::detect_feature_envy",
+        "cortex_analyzer::::detect_feature_envy_with_context",
+        "cortex_analyzer::::detect_inappropriate_intimacy",
+        "cortex_analyzer::::detect_inappropriate_intimacy_with_context",
+        "cortex_analyzer::::detect_shotgun_surgery",
+        "cortex_analyzer::::detect_shotgun_surgery_with_context"
+      ]
+    },
+    "cortex_graph": {
+      "files_with_import": 18,
+      "files": [
+        "crates/cortex-analyzer/src/analyzer.rs",
+        "crates/cortex-analyzer/src/context.rs",
+        "crates/cortex-analyzer/src/cross_project.rs",
+        "crates/cortex-analyzer/src/navigation.rs",
+        "crates/cortex-cli/src/cli_indexing.rs",
+        "crates/cortex-cli/src/commands/doctor.rs",
+        "crates/cortex-cli/src/main.rs",
+        "crates/cortex-graph/tests/falkordb_bulk_throughput_test.rs",
+        "crates/cortex-graph/tests/falkordb_bulk_upsert_smoke.rs",
+        "crates/cortex-graph/tests/falkordb_index_explain_test.rs",
+        "crates/cortex-graph/tests/grafeo_edge_flush_test.rs",
+        "crates/cortex-graph/tests/integration_test.rs",
+        "crates/cortex-graph/tests/live_test.rs",
+        "crates/cortex-graph/tests/selfindex_test.rs",
+        "crates/cortex-indexer/src/edge_spill.rs",
+        "crates/cortex-indexer/src/indexer.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/server.rs"
+      ],
+      "import_edges": 26,
+      "distinct_import_paths": 11,
+      "import_paths": {
+        "cortex_graph::GraphClient": 9,
+        "cortex_graph::": 8,
+        "cortex_graph:: {BackendKind, BundleStore, GraphClient, get_branch_indexes}": 1,
+        "cortex_graph:: {BranchIndexRecord, GraphClient, NodeWriter, create_branch_index, delete_branch_index, is_branch_index_current, upsert_file_tombstone}": 1,
+        "cortex_graph:: {BundleStore, CrossProjectQueryBuilder, GraphClient, is_branch_index_current}": 1,
+        "cortex_graph:: {BundleStore, GraphClient}": 1,
+        "cortex_graph:: {CrossProjectQueryBuilder, GraphClient}": 1,
+        "cortex_graph:: {FalkorDbClient, GraphClient}": 1,
+        "cortex_graph:: {GraphClient, NodeWriter}": 1,
+        "cortex_graph:: {GraphClient, is_branch_index_current}": 1,
+        "cortex_graph::EdgeBoltProfile": 1
+      },
+      "imported_items_sample": [
+        "",
+        "EdgeBoltProfile",
+        "GraphClient",
+        "cortex_graph::::BackendKind",
+        "cortex_graph::::BranchIndexRecord",
+        "cortex_graph::::BundleStore",
+        "cortex_graph::::CrossProjectQueryBuilder",
+        "cortex_graph::::FalkorDbClient",
+        "cortex_graph::::GraphClient",
+        "cortex_graph::::NodeWriter",
+        "cortex_graph::::create_branch_index",
+        "cortex_graph::::delete_branch_index",
+        "cortex_graph::::get_branch_indexes",
+        "cortex_graph::::is_branch_index_current",
+        "cortex_graph::::upsert_file_tombstone"
+      ]
+    },
+    "cortex_indexer": {
+      "files_with_import": 8,
+      "files": [
+        "crates/cortex-cli/src/cli_indexing.rs",
+        "crates/cortex-cli/src/main.rs",
+        "crates/cortex-graph/tests/integration_test.rs",
+        "crates/cortex-graph/tests/live_test.rs",
+        "crates/cortex-graph/tests/selfindex_test.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/server.rs",
+        "crates/cortex-watcher/src/watcher.rs"
+      ],
+      "import_edges": 11,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "cortex_indexer::Indexer": 5,
+        "cortex_indexer::": 3,
+        "cortex_indexer:: {IndexChangePlan, Indexer}": 3
+      },
+      "imported_items_sample": [
+        "",
+        "Indexer",
+        "cortex_indexer::::IndexChangePlan",
+        "cortex_indexer::::Indexer"
+      ]
+    },
+    "cortex_mcp": {
+      "files_with_import": 11,
+      "files": [
+        "crates/cortex-benches/benches/cache_benchmark.rs",
+        "crates/cortex-benches/benches/capsule_benchmark.rs",
+        "crates/cortex-benches/benches/impact_benchmark.rs",
+        "crates/cortex-benches/benches/tfidf_benchmark.rs",
+        "crates/cortex-cli/src/commands/doctor.rs",
+        "crates/cortex-cli/src/main.rs",
+        "crates/cortex-cli/tests/mcp_network_integration.rs",
+        "crates/cortex-mcp/tests/agent_pack_install.rs",
+        "crates/cortex-mcp/tests/contract_tests.rs",
+        "crates/cortex-mcp/tests/e2e/mod.rs",
+        "crates/cortex-mcp/tests/tool_surface_matrix.rs"
+      ],
+      "import_edges": 29,
+      "distinct_import_paths": 19,
+      "import_paths": {
+        "cortex_mcp::": 11,
+        "cortex_mcp:: {CacheHierarchy, L1Cache}": 1,
+        "cortex_mcp:: {CapsuleConfig, CentralityGraph, CentralityScorer, ContextCapsuleBuilder, GraphSearchResult, ImpactGraphBuilder, LogicFlowSearcher, MemoryStore, Observation, RawRelation}": 1,
+        "cortex_mcp:: {CapsuleConfig, ContextCapsuleBuilder, GraphSearchResult}": 1,
+        "cortex_mcp:: {Classification, Severity}": 1,
+        "cortex_mcp:: {Document, Provenance, TfIdfScorer}": 1,
+        "cortex_mcp:: {Document, TfIdfScorer}": 1,
+        "cortex_mcp:: {FeatureFlags, McpServeOptions, McpTransport, start_with_options}": 1,
+        "cortex_mcp:: {ImpactGraphBuilder, Provenance, RawRelation}": 1,
+        "cortex_mcp:: {PrivacyRisk, TokenPolicy, ToolCostClass, output_token_hint, tool_cards, tool_metadata, tool_metadata_for, tool_names}": 1,
+        "cortex_mcp:: {install_agent_pack, AgentPackInstallOptions}": 1,
+        "cortex_mcp:: {install_agent_pack, resolve_agent_pack, AgentPackInstallOptions, tool_cards, tool_names}": 1,
+        "cortex_mcp::Edge": 1,
+        "cortex_mcp::FeatureFlags": 1,
+        "cortex_mcp::Provenance": 1,
+        "cortex_mcp::RawEdge": 1,
+        "cortex_mcp::contracts::": 1,
+        "cortex_mcp::contracts:: {CacheHit, EnvelopeBuilder}": 1,
+        "cortex_mcp::tool_names": 1
+      },
+      "imported_items_sample": [
+        "",
+        "Edge",
+        "FeatureFlags",
+        "Provenance",
+        "RawEdge",
+        "contracts::",
+        "cortex_mcp::::AgentPackInstallOptions",
+        "cortex_mcp::::CacheHierarchy",
+        "cortex_mcp::::CapsuleConfig",
+        "cortex_mcp::::CentralityGraph",
+        "cortex_mcp::::CentralityScorer",
+        "cortex_mcp::::Classification",
+        "cortex_mcp::::ContextCapsuleBuilder",
+        "cortex_mcp::::Document",
+        "cortex_mcp::::FeatureFlags",
+        "cortex_mcp::::GraphSearchResult",
+        "cortex_mcp::::ImpactGraphBuilder",
+        "cortex_mcp::::L1Cache",
+        "cortex_mcp::::LogicFlowSearcher",
+        "cortex_mcp::::McpServeOptions",
+        "cortex_mcp::::McpTransport",
+        "cortex_mcp::::MemoryStore",
+        "cortex_mcp::::Observation",
+        "cortex_mcp::::PrivacyRisk",
+        "cortex_mcp::::Provenance",
+        "cortex_mcp::::RawRelation",
+        "cortex_mcp::::Severity",
+        "cortex_mcp::::TfIdfScorer",
+        "cortex_mcp::::TokenPolicy",
+        "cortex_mcp::::ToolCostClass"
+      ]
+    },
+    "cortex_vector": {
+      "files_with_import": 4,
+      "files": [
+        "crates/cortex-cli/src/commands/doctor.rs",
+        "crates/cortex-cli/src/main.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/vector_service.rs"
+      ],
+      "import_edges": 17,
+      "distinct_import_paths": 7,
+      "import_paths": {
+        "cortex_vector::": 8,
+        "cortex_vector:: {Embedder, OllamaEmbedder, OpenAIEmbedder}": 2,
+        "cortex_vector:: {HybridSearch, LanceStore, SearchType}": 2,
+        "cortex_vector:: {JsonStore, LanceStore, VectorStore}": 2,
+        "cortex_vector:: {Embedder, HybridResult, HybridSearch, LanceStore, MetadataValue, OllamaEmbedder, OpenAIEmbedder, SearchType, VectorDocument, VectorMetadata, VectorStore}": 1,
+        "cortex_vector:: {HybridSearch, LanceStore, VectorDocument, VectorMetadata}": 1,
+        "cortex_vector::EmbeddingProvider": 1
+      },
+      "imported_items_sample": [
+        "",
+        "EmbeddingProvider",
+        "cortex_vector::::Embedder",
+        "cortex_vector::::HybridResult",
+        "cortex_vector::::HybridSearch",
+        "cortex_vector::::JsonStore",
+        "cortex_vector::::LanceStore",
+        "cortex_vector::::MetadataValue",
+        "cortex_vector::::OllamaEmbedder",
+        "cortex_vector::::OpenAIEmbedder",
+        "cortex_vector::::SearchType",
+        "cortex_vector::::VectorDocument",
+        "cortex_vector::::VectorMetadata",
+        "cortex_vector::::VectorStore"
+      ]
+    },
+    "indicatif": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/main.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "indicatif::": 1,
+        "indicatif:: {ProgressBar, ProgressStyle}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "indicatif::::ProgressBar",
+        "indicatif::::ProgressStyle"
+      ]
+    },
+    "reqwest": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/main.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "reqwest::header::": 1,
+        "reqwest::header:: {ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue}": 1
+      },
+      "imported_items_sample": [
+        "header::",
+        "reqwest::header::::ACCEPT",
+        "reqwest::header::::AUTHORIZATION",
+        "reqwest::header::::HeaderMap",
+        "reqwest::header::::HeaderValue"
+      ]
+    },
+    "cortex_watcher": {
+      "files_with_import": 3,
+      "files": [
+        "crates/cortex-cli/src/main.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/server.rs"
+      ],
+      "import_edges": 5,
+      "distinct_import_paths": 4,
+      "import_paths": {
+        "cortex_watcher::WatchSession": 2,
+        "cortex_watcher::": 1,
+        "cortex_watcher:: {ProjectRegistry, WatchSession}": 1,
+        "cortex_watcher::ProjectRegistry": 1
+      },
+      "imported_items_sample": [
+        "",
+        "ProjectRegistry",
+        "WatchSession",
+        "cortex_watcher::::ProjectRegistry",
+        "cortex_watcher::::WatchSession"
+      ]
+    },
+    "rustyline": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/main.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "rustyline::DefaultEditor": 1,
+        "rustyline::error::ReadlineError": 1
+      },
+      "imported_items_sample": [
+        "DefaultEditor",
+        "error::ReadlineError"
+      ]
+    },
+    "tracing_subscriber": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/main.rs"
+      ],
+      "import_edges": 1,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "tracing_subscriber::EnvFilter": 1
+      },
+      "imported_items_sample": [
+        "EnvFilter"
+      ]
+    },
+    "httpmock": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/src/main.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "httpmock::Method::GET": 1,
+        "httpmock::MockServer": 1
+      },
+      "imported_items_sample": [
+        "Method::GET",
+        "MockServer"
+      ]
+    },
+    "futures_util": {
+      "files_with_import": 2,
+      "files": [
+        "crates/cortex-cli/tests/mcp_network_integration.rs",
+        "crates/cortex-mcp/src/network_server.rs"
+      ],
+      "import_edges": 6,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "futures_util::": 3,
+        "futures_util:: {SinkExt, StreamExt}": 2,
+        "futures_util:: {SinkExt, StreamExt, future}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "futures_util::::SinkExt",
+        "futures_util::::StreamExt",
+        "futures_util::::future"
+      ]
+    },
+    "serde_json": {
+      "files_with_import": 20,
+      "files": [
+        "crates/cortex-analyzer/src/analyzer.rs",
+        "crates/cortex-analyzer/src/cross_project.rs",
+        "crates/cortex-analyzer/src/navigation.rs",
+        "crates/cortex-cli/tests/integration/flow.rs",
+        "crates/cortex-cli/tests/integration/harness.rs",
+        "crates/cortex-cli/tests/mcp_network_integration.rs",
+        "crates/cortex-graph/src/backend.rs",
+        "crates/cortex-graph/src/client.rs",
+        "crates/cortex-graph/src/cross_project.rs",
+        "crates/cortex-graph/src/falkordb.rs",
+        "crates/cortex-graph/src/grafeo.rs",
+        "crates/cortex-graph/src/memgraph.rs",
+        "crates/cortex-graph/src/schema.rs",
+        "crates/cortex-mcp/src/agent_pack.rs",
+        "crates/cortex-mcp/src/contracts.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/handler_guides.rs",
+        "crates/cortex-mcp/src/network_server.rs",
+        "crates/cortex-mcp/src/server.rs",
+        "crates/cortex-mcp/tests/contract_tests.rs"
+      ],
+      "import_edges": 29,
+      "distinct_import_paths": 5,
+      "import_paths": {
+        "serde_json::Value": 9,
+        "serde_json::": 6,
+        "serde_json:: {Value, json}": 6,
+        "serde_json::json": 5,
+        "serde_json::Value as JsonValue": 3
+      },
+      "imported_items_sample": [
+        "",
+        "Value",
+        "Value as JsonValue",
+        "json",
+        "serde_json::::Value",
+        "serde_json::::json"
+      ]
+    },
+    "tokio_tungstenite": {
+      "files_with_import": 2,
+      "files": [
+        "crates/cortex-cli/tests/mcp_network_integration.rs",
+        "crates/cortex-mcp/src/network_server.rs"
+      ],
+      "import_edges": 4,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "tokio_tungstenite::connect_async": 2,
+        "tokio_tungstenite::tungstenite::Message": 1,
+        "tokio_tungstenite::tungstenite::Message as WsMessage": 1
+      },
+      "imported_items_sample": [
+        "connect_async",
+        "tungstenite::Message",
+        "tungstenite::Message as WsMessage"
+      ]
+    },
+    "integration": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-cli/tests/language_matrix_integration.rs"
+      ],
+      "import_edges": 5,
+      "distinct_import_paths": 5,
+      "import_paths": {
+        "integration::flow::run_full_functionality_suite": 1,
+        "integration::harness::": 1,
+        "integration::harness:: {IntegrationContext, command_available}": 1,
+        "integration::projects::": 1,
+        "integration::projects:: {PROJECT_FIXTURES, RepoFixture}": 1
+      },
+      "imported_items_sample": [
+        "flow::run_full_functionality_suite",
+        "harness::",
+        "integration::harness::::IntegrationContext",
+        "integration::harness::::command_available",
+        "integration::projects::::PROJECT_FIXTURES",
+        "integration::projects::::RepoFixture",
+        "projects::"
+      ]
+    },
+    "tempfile": {
+      "files_with_import": 13,
+      "files": [
+        "crates/cortex-core/src/git.rs",
+        "crates/cortex-graph/src/bundle.rs",
+        "crates/cortex-graph/src/client.rs",
+        "crates/cortex-indexer/src/build_detector.rs",
+        "crates/cortex-indexer/src/edge_spill.rs",
+        "crates/cortex-indexer/src/incremental.rs",
+        "crates/cortex-indexer/src/indexer.rs",
+        "crates/cortex-mcp/src/agent_pack.rs",
+        "crates/cortex-mcp/src/server.rs",
+        "crates/cortex-mcp/tests/agent_pack_install.rs",
+        "crates/cortex-vector/src/json_store.rs",
+        "crates/cortex-vector/src/lancedb_store.rs",
+        "crates/cortex-watcher/src/daemon.rs"
+      ],
+      "import_edges": 13,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "tempfile::TempDir": 9,
+        "tempfile::tempdir": 3,
+        "tempfile::tempfile": 1
+      },
+      "imported_items_sample": [
+        "TempDir",
+        "tempdir",
+        "tempfile"
+      ]
+    },
+    "arrow_array": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-vector/src/lancedb_store.rs"
+      ],
+      "import_edges": 4,
+      "distinct_import_paths": 4,
+      "import_paths": {
+        "arrow_array::": 1,
+        "arrow_array:: {Array, ArrayRef, FixedSizeListArray, Float32Array, Int64Array, RecordBatch, RecordBatchIterator, StringArray}": 1,
+        "arrow_array::builder::FixedSizeListBuilder": 1,
+        "arrow_array::builder::Float32Builder": 1
+      },
+      "imported_items_sample": [
+        "",
+        "arrow_array::::Array",
+        "arrow_array::::ArrayRef",
+        "arrow_array::::FixedSizeListArray",
+        "arrow_array::::Float32Array",
+        "arrow_array::::Int64Array",
+        "arrow_array::::RecordBatch",
+        "arrow_array::::RecordBatchIterator",
+        "arrow_array::::StringArray",
+        "builder::FixedSizeListBuilder",
+        "builder::Float32Builder"
+      ]
+    },
+    "arrow_schema": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-vector/src/lancedb_store.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "arrow_schema::": 1,
+        "arrow_schema:: {DataType, Field, Schema, SchemaRef}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "arrow_schema::::DataType",
+        "arrow_schema::::Field",
+        "arrow_schema::::Schema",
+        "arrow_schema::::SchemaRef"
+      ]
+    },
+    "lancedb": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-vector/src/lancedb_store.rs"
+      ],
+      "import_edges": 4,
+      "distinct_import_paths": 4,
+      "import_paths": {
+        "lancedb::connection::Connection": 1,
+        "lancedb::index::Index": 1,
+        "lancedb::query::": 1,
+        "lancedb::query:: {ExecutableQuery, QueryBase}": 1
+      },
+      "imported_items_sample": [
+        "connection::Connection",
+        "index::Index",
+        "lancedb::query::::ExecutableQuery",
+        "lancedb::query::::QueryBase",
+        "query::"
+      ]
+    },
+    "futures": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-vector/src/lancedb_store.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "futures::StreamExt": 2
+      },
+      "imported_items_sample": [
+        "StreamExt"
+      ]
+    },
+    "chrono": {
+      "files_with_import": 5,
+      "files": [
+        "crates/cortex-core/src/git.rs",
+        "crates/cortex-core/src/project.rs",
+        "crates/cortex-graph/src/schema.rs",
+        "crates/cortex-watcher/src/daemon.rs",
+        "crates/cortex-watcher/src/registry.rs"
+      ],
+      "import_edges": 9,
+      "distinct_import_paths": 4,
+      "import_paths": {
+        "chrono::": 4,
+        "chrono:: {DateTime, Utc}": 3,
+        "chrono:: {DateTime, Duration, Utc}": 1,
+        "chrono::Utc": 1
+      },
+      "imported_items_sample": [
+        "",
+        "Utc",
+        "chrono::::DateTime",
+        "chrono::::Duration",
+        "chrono::::Utc"
+      ]
+    },
+    "neo4rs": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-graph/src/client.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "neo4rs::": 1,
+        "neo4rs:: {ConfigBuilder, Graph, query}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "neo4rs::::ConfigBuilder",
+        "neo4rs::::Graph",
+        "neo4rs::::query"
+      ]
+    },
+    "rsmgclient": {
+      "files_with_import": 6,
+      "files": [
+        "crates/cortex-graph/src/client.rs",
+        "crates/cortex-graph/src/falkordb.rs",
+        "crates/cortex-graph/src/falkordb_params.rs",
+        "crates/cortex-graph/src/grafeo.rs",
+        "crates/cortex-graph/src/memgraph.rs",
+        "crates/cortex-graph/tests/falkordb_bulk_upsert_smoke.rs"
+      ],
+      "import_edges": 7,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "rsmgclient::QueryParam": 5,
+        "rsmgclient::": 1,
+        "rsmgclient:: {ConnectParams, Connection, QueryParam, Record, Value}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "QueryParam",
+        "rsmgclient::::ConnectParams",
+        "rsmgclient::::Connection",
+        "rsmgclient::::QueryParam",
+        "rsmgclient::::Record",
+        "rsmgclient::::Value"
+      ]
+    },
+    "grafeo": {
+      "files_with_import": 2,
+      "files": [
+        "crates/cortex-graph/src/grafeo.rs",
+        "crates/cortex-graph/src/grafeo_edge_flush.rs"
+      ],
+      "import_edges": 4,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "grafeo::": 2,
+        "grafeo:: {Config, GrafeoDB}": 1,
+        "grafeo:: {GrafeoDB, NodeId, Session, Value}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "grafeo::::Config",
+        "grafeo::::GrafeoDB",
+        "grafeo::::NodeId",
+        "grafeo::::Session",
+        "grafeo::::Value"
+      ]
+    },
+    "sha2": {
+      "files_with_import": 3,
+      "files": [
+        "crates/cortex-indexer/src/incremental.rs",
+        "crates/cortex-indexer/src/indexer.rs",
+        "crates/cortex-indexer/src/skeleton.rs"
+      ],
+      "import_edges": 6,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "sha2::": 3,
+        "sha2:: {Digest, Sha256}": 3
+      },
+      "imported_items_sample": [
+        "",
+        "sha2::::Digest",
+        "sha2::::Sha256"
+      ]
+    },
+    "cortex_parser": {
+      "files_with_import": 4,
+      "files": [
+        "crates/cortex-indexer/src/indexer.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-parser/benches/indexing_throughput.rs",
+        "crates/cortex-parser/tests/sample_project_rust.rs"
+      ],
+      "import_edges": 4,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "cortex_parser::ParserRegistry": 3,
+        "cortex_parser::SignatureExtractor": 1
+      },
+      "imported_items_sample": [
+        "ParserRegistry",
+        "SignatureExtractor"
+      ]
+    },
+    "ignore": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-indexer/src/indexer.rs"
+      ],
+      "import_edges": 1,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "ignore::WalkBuilder": 1
+      },
+      "imported_items_sample": [
+        "WalkBuilder"
+      ]
+    },
+    "rayon": {
+      "files_with_import": 2,
+      "files": [
+        "crates/cortex-indexer/src/indexer.rs",
+        "crates/cortex-indexer/src/parallel.rs"
+      ],
+      "import_edges": 4,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "rayon::prelude::*": 2,
+        "rayon::": 1,
+        "rayon:: {ThreadPool, ThreadPoolBuilder}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "prelude::*",
+        "rayon::::ThreadPool",
+        "rayon::::ThreadPoolBuilder"
+      ]
+    },
+    "thiserror": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-core/src/error.rs"
+      ],
+      "import_edges": 1,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "thiserror::Error": 1
+      },
+      "imported_items_sample": [
+        "Error"
+      ]
+    },
+    "tree_sitter": {
+      "files_with_import": 16,
+      "files": [
+        "crates/cortex-parser/src/languages/c.rs",
+        "crates/cortex-parser/src/languages/common.rs",
+        "crates/cortex-parser/src/languages/cpp.rs",
+        "crates/cortex-parser/src/languages/go.rs",
+        "crates/cortex-parser/src/languages/java.rs",
+        "crates/cortex-parser/src/languages/javascript.rs",
+        "crates/cortex-parser/src/languages/json.rs",
+        "crates/cortex-parser/src/languages/kotlin.rs",
+        "crates/cortex-parser/src/languages/php.rs",
+        "crates/cortex-parser/src/languages/python.rs",
+        "crates/cortex-parser/src/languages/ruby.rs",
+        "crates/cortex-parser/src/languages/rust.rs",
+        "crates/cortex-parser/src/languages/shell.rs",
+        "crates/cortex-parser/src/languages/swift.rs",
+        "crates/cortex-parser/src/languages/typescript.rs",
+        "crates/cortex-parser/src/parse_pool.rs"
+      ],
+      "import_edges": 37,
+      "distinct_import_paths": 6,
+      "import_paths": {
+        "tree_sitter::Parser": 13,
+        "tree_sitter::": 8,
+        "tree_sitter::Query": 8,
+        "tree_sitter:: {Query, QueryCursor, StreamingIterator}": 6,
+        "tree_sitter:: {Language, Parser, Tree}": 1,
+        "tree_sitter:: {Node, Query, QueryCursor, StreamingIterator, Tree}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "Parser",
+        "Query",
+        "tree_sitter::::Language",
+        "tree_sitter::::Node",
+        "tree_sitter::::Parser",
+        "tree_sitter::::Query",
+        "tree_sitter::::QueryCursor",
+        "tree_sitter::::StreamingIterator",
+        "tree_sitter::::Tree"
+      ]
+    },
+    "criterion": {
+      "files_with_import": 5,
+      "files": [
+        "crates/cortex-benches/benches/cache_benchmark.rs",
+        "crates/cortex-benches/benches/capsule_benchmark.rs",
+        "crates/cortex-benches/benches/impact_benchmark.rs",
+        "crates/cortex-benches/benches/tfidf_benchmark.rs",
+        "crates/cortex-parser/benches/indexing_throughput.rs"
+      ],
+      "import_edges": 10,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "criterion::": 5,
+        "criterion:: {BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main}": 4,
+        "criterion:: {Criterion, criterion_group, criterion_main}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "criterion::::BenchmarkId",
+        "criterion::::Criterion",
+        "criterion::::Throughput",
+        "criterion::::black_box",
+        "criterion::::criterion_group",
+        "criterion::::criterion_main"
+      ]
+    },
+    "foo": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-parser/src/languages/rust.rs"
+      ],
+      "import_edges": 1,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "foo": 1
+      },
+      "imported_items_sample": []
+    },
+    "rmcp": {
+      "files_with_import": 4,
+      "files": [
+        "crates/cortex-mcp/src/contracts.rs",
+        "crates/cortex-mcp/src/handler.rs",
+        "crates/cortex-mcp/src/handler_guides.rs",
+        "crates/cortex-mcp/src/network_server.rs"
+      ],
+      "import_edges": 11,
+      "distinct_import_paths": 9,
+      "import_paths": {
+        "rmcp::model::": 3,
+        "rmcp::ServiceExt": 1,
+        "rmcp::handler::server::wrapper::Parameters": 1,
+        "rmcp::model:: {Annotated, Prompt, PromptArgument, RawResource, Resource}": 1,
+        "rmcp::model:: {CallToolResult, Content}": 1,
+        "rmcp::model:: {ClientJsonRpcMessage, ServerJsonRpcMessage}": 1,
+        "rmcp::model::CallToolResult": 1,
+        "rmcp::transport::streamable_http_server::": 1,
+        "rmcp::transport::streamable_http_server:: {StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager}": 1
+      },
+      "imported_items_sample": [
+        "ServiceExt",
+        "handler::server::wrapper::Parameters",
+        "model::",
+        "model::CallToolResult",
+        "rmcp::model::::Annotated",
+        "rmcp::model::::CallToolResult",
+        "rmcp::model::::ClientJsonRpcMessage",
+        "rmcp::model::::Content",
+        "rmcp::model::::Prompt",
+        "rmcp::model::::PromptArgument",
+        "rmcp::model::::RawResource",
+        "rmcp::model::::Resource",
+        "rmcp::model::::ServerJsonRpcMessage",
+        "rmcp::transport::streamable_http_server::::StreamableHttpServerConfig",
+        "rmcp::transport::streamable_http_server::::StreamableHttpService",
+        "rmcp::transport::streamable_http_server::::session::local::LocalSessionManager",
+        "transport::streamable_http_server::"
+      ]
+    },
+    "schemars": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-mcp/src/handler.rs"
+      ],
+      "import_edges": 1,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "schemars::JsonSchema": 1
+      },
+      "imported_items_sample": [
+        "JsonSchema"
+      ]
+    },
+    "dashmap": {
+      "files_with_import": 3,
+      "files": [
+        "crates/cortex-mcp/src/cache.rs",
+        "crates/cortex-mcp/src/jobs.rs",
+        "crates/cortex-watcher/src/registry.rs"
+      ],
+      "import_edges": 3,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "dashmap::DashMap": 3
+      },
+      "imported_items_sample": [
+        "DashMap"
+      ]
+    },
+    "uuid": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-mcp/src/contracts.rs"
+      ],
+      "import_edges": 1,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "uuid::Uuid": 1
+      },
+      "imported_items_sample": [
+        "Uuid"
+      ]
+    },
+    "rusqlite": {
+      "files_with_import": 2,
+      "files": [
+        "crates/cortex-mcp/src/memory.rs",
+        "crates/cortex-watcher/src/daemon.rs"
+      ],
+      "import_edges": 4,
+      "distinct_import_paths": 3,
+      "import_paths": {
+        "rusqlite::": 2,
+        "rusqlite:: {Connection, OptionalExtension, params}": 1,
+        "rusqlite:: {Connection, params}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "rusqlite::::Connection",
+        "rusqlite::::OptionalExtension",
+        "rusqlite::::params"
+      ]
+    },
+    "axum": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-mcp/src/network_server.rs"
+      ],
+      "import_edges": 13,
+      "distinct_import_paths": 13,
+      "import_paths": {
+        "axum::": 1,
+        "axum:: {Router, routing::any_service}": 1,
+        "axum::extract::Extension": 1,
+        "axum::extract::Request": 1,
+        "axum::extract::ws::": 1,
+        "axum::extract::ws:: {Message, WebSocket, WebSocketUpgrade}": 1,
+        "axum::http::": 1,
+        "axum::http:: {HeaderMap, StatusCode}": 1,
+        "axum::middleware::": 1,
+        "axum::middleware:: {Next, from_fn}": 1,
+        "axum::response::": 1,
+        "axum::response:: {IntoResponse, Response}": 1,
+        "axum::routing::get": 1
+      },
+      "imported_items_sample": [
+        "",
+        "axum::::Router",
+        "axum::::routing::any_service",
+        "axum::extract::ws::::Message",
+        "axum::extract::ws::::WebSocket",
+        "axum::extract::ws::::WebSocketUpgrade",
+        "axum::http::::HeaderMap",
+        "axum::http::::StatusCode",
+        "axum::middleware::::Next",
+        "axum::middleware::::from_fn",
+        "axum::response::::IntoResponse",
+        "axum::response::::Response",
+        "extract::Extension",
+        "extract::Request",
+        "extract::ws::",
+        "http::",
+        "middleware::",
+        "response::",
+        "routing::get"
+      ]
+    },
+    "parking_lot": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-watcher/src/registry.rs"
+      ],
+      "import_edges": 1,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "parking_lot::RwLock": 1
+      },
+      "imported_items_sample": [
+        "RwLock"
+      ]
+    },
+    "notify_debouncer_mini": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-watcher/src/watcher.rs"
+      ],
+      "import_edges": 2,
+      "distinct_import_paths": 2,
+      "import_paths": {
+        "notify_debouncer_mini::": 1,
+        "notify_debouncer_mini:: {DebounceEventResult, new_debouncer}": 1
+      },
+      "imported_items_sample": [
+        "",
+        "notify_debouncer_mini::::DebounceEventResult",
+        "notify_debouncer_mini::::new_debouncer"
+      ]
+    },
+    "notify": {
+      "files_with_import": 1,
+      "files": [
+        "crates/cortex-watcher/src/watcher.rs"
+      ],
+      "import_edges": 1,
+      "distinct_import_paths": 1,
+      "import_paths": {
+        "notify::RecursiveMode": 1
+      },
+      "imported_items_sample": [
+        "RecursiveMode"
+      ]
+    }
+  }
+}

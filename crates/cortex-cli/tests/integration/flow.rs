@@ -388,14 +388,19 @@ fn run_mcp_checks(ctx: &IntegrationContext, fixture: RepoFixture, repo: &Path, r
         ("delete_repository", json!({"path": repo_path})),
     ];
 
-    let tolerated_vector_failures = [
-        "vector_index_repository",
-        "vector_index_file",
-        "vector_search",
-        "vector_search_hybrid",
-        "vector_index_status",
-        "vector_delete_repository",
-    ];
+    let test_embedder = std::env::var("CORTEX_TEST_EMBEDDER").ok().as_deref() == Some("1");
+    let tolerated_vector_failures: &[&str] = if test_embedder {
+        &[]
+    } else {
+        &[
+            "vector_index_repository",
+            "vector_index_file",
+            "vector_search",
+            "vector_search_hybrid",
+            "vector_index_status",
+            "vector_delete_repository",
+        ]
+    };
     let tolerated_heavy_transport_failures = ["get_impact_graph", "search_logic_flow"];
 
     for (name, args) in calls {
@@ -452,7 +457,14 @@ fn mcp_request(
     let mut child = Command::new(&ctx.bin_path)
         .arg("mcp")
         .arg("start")
-        .env("HOME", ctx.home_dir.as_os_str())
+        .env("HOME", ctx.home_dir.as_os_str());
+    if std::env::var("CORTEX_TEST_EMBEDDER").ok().as_deref() == Some("1") {
+        child.env("CORTEX_TEST_EMBEDDER", "1");
+    }
+    if std::env::var("CORTEX_TEST_GRAPH").ok().as_deref() == Some("1") {
+        child.env("CORTEX_TEST_GRAPH", "1");
+    }
+    let mut child = child
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

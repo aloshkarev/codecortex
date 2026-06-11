@@ -1,3 +1,4 @@
+use crate::symbol_resolve::definitional_kind_cypher_predicate;
 use cortex_core::Result;
 use cortex_graph::GraphClient;
 use serde::{Deserialize, Serialize};
@@ -216,10 +217,13 @@ impl NavigationEngine {
 
     pub async fn quick_info(&self, symbol: &str) -> Result<Vec<QuickInfo>> {
         let branch_clause = self.branch_where("n");
+
+        // Single aggregated Cypher (FalkorDB and other backends) — avoids N+1 count queries.
         let cypher = format!(
             "MATCH (n:CodeNode {{name: $symbol}})
              WHERE n.repository_path = $repo
                {branch_clause}
+             WITH n
              OPTIONAL MATCH (caller)-[:CALLS]->(n)
              WITH n, count(DISTINCT caller) AS caller_count
              OPTIONAL MATCH (n)-[:CALLS]->(callee)
@@ -433,12 +437,12 @@ impl NavigationEngine {
 
     async fn find_by_name_global(&self, symbol: &str) -> Result<Vec<DefinitionResult>> {
         let branch_clause = self.branch_where("n");
+        let kind_pred = definitional_kind_cypher_predicate("n");
         let cypher = format!(
             "MATCH (n:CodeNode {{name: $symbol}})
              WHERE n.repository_path = $repo
                {branch_clause}
-               AND n.kind IN ['FUNCTION', 'METHOD', 'CLASS', 'STRUCT', 'TRAIT',
-                              'INTERFACE', 'ENUM', 'TYPE_ALIAS', 'CONSTANT', 'VARIABLE']
+               AND {kind_pred}
              RETURN n.name AS name, n.qualified_name AS qualified_name, n.kind AS kind,
                     n.path AS path, n.line_number AS line,
                     substring(coalesce(n.source, ''), 0, 200) AS preview
@@ -501,14 +505,18 @@ impl NavigationEngine {
         branch_a: &str,
         branch_b: &str,
     ) -> Result<Vec<SymbolDiffEntry>> {
+        // FalkorDB does not support EXISTS { MATCH ... }; use OPTIONAL MATCH anti-join.
         let cypher = "MATCH (a:CodeNode)
              WHERE a.repository_path = $repo
                AND a.branch = $branch_a
                AND a.kind IN ['FUNCTION', 'METHOD', 'CLASS', 'STRUCT', 'TRAIT', 'ENUM']
-               AND NOT EXISTS {
-                 MATCH (b:CodeNode {name: a.name, kind: a.kind, branch: $branch_b})
-                 WHERE b.repository_path = $repo
-               }
+             OPTIONAL MATCH (b:CodeNode)
+             WHERE b.repository_path = $repo
+               AND b.branch = $branch_b
+               AND b.name = a.name
+               AND b.kind = a.kind
+             WITH a, b
+             WHERE b IS NULL
              RETURN a.name AS name, a.qualified_name AS qualified_name,
                     a.kind AS kind, a.path AS path, a.line_number AS line
              ORDER BY a.path, a.name
@@ -550,8 +558,11 @@ impl NavigationEngine {
              WHERE s.repository_path = $repo
                AND s.branch = $source
                AND s.kind IN ['FUNCTION', 'METHOD', 'CLASS', 'STRUCT']
-             MATCH (t:CodeNode {name: s.name, kind: s.kind, branch: $target})
+             MATCH (t:CodeNode)
              WHERE t.repository_path = $repo
+               AND t.branch = $target
+               AND t.name = s.name
+               AND t.kind = s.kind
                AND s.source <> t.source
              RETURN s.name AS name, s.kind AS kind, s.path AS path,
                     s.line_number AS source_line, t.line_number AS target_line,
@@ -711,6 +722,22 @@ pub fn extract_signature_from_source(source: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_only_symbols_cypher_uses_optional_match_not_exists() {
+        // Guard against FalkorDB rejecting `NOT EXISTS { MATCH ... }` in find_branch_only_symbols.
+        let src = include_str!("navigation.rs");
+        let fn_start = src.find("async fn find_branch_only_symbols").expect("fn");
+        let fn_body = &src[fn_start..fn_start + 2500];
+        assert!(
+            fn_body.contains("OPTIONAL MATCH"),
+            "expected OPTIONAL MATCH anti-join for FalkorDB"
+        );
+        assert!(
+            !fn_body.contains("NOT EXISTS"),
+            "FalkorDB does not support NOT EXISTS subqueries in branch diff"
+        );
+    }
 
     #[test]
     fn test_extract_signature() {

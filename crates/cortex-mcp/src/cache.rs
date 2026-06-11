@@ -10,7 +10,6 @@
 
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
-use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -66,7 +65,7 @@ pub struct L1Cache {
     /// Maximum number of entries
     max_entries: usize,
     /// Entry metadata for TTL tracking
-    metadata: DashMap<String, (Instant, Duration, String)>, // (created_at, ttl, repo_revision)
+    metadata: DashMap<String, (Instant, Duration, String)>,
 }
 
 impl L1Cache {
@@ -97,65 +96,59 @@ impl L1Cache {
 
     /// Get a value from the cache
     pub fn get<T: DeserializeOwned>(&self, key: &str, repo_revision: &str) -> Option<T> {
-        // Check metadata by reference to avoid cloning when we will return None
-        let meta = self.metadata.get(key)?;
-        let (created_at, ttl, cached_revision) = meta.value();
-        if created_at.elapsed() > *ttl {
-            drop(meta);
-            self.remove(key);
-            return None;
-        }
-        if cached_revision != repo_revision {
-            drop(meta);
-            self.remove(key);
-            return None;
-        }
-        drop(meta);
+        // Check metadata first - extract values and drop the guard before any mutations
+        let (created_at, ttl, cached_revision) = {
+            let meta = self.metadata.get(key)?;
+            let (created_at, ttl, cached_revision) = meta.value().clone();
+            (created_at, ttl, cached_revision)
+        };
 
-        // Get the value
+        if created_at.elapsed() > ttl {
+            self.remove(key);
+            return None;
+        }
+
+        if cached_revision != repo_revision {
+            self.remove(key);
+            return None;
+        }
+
         let bytes = self.store.get(key)?;
         serde_json::from_slice(bytes.value()).ok()
     }
 
     /// Put a value into the cache
-    pub fn put<T: Serialize>(&self, key: &str, value: T, repo_revision: &str) {
-        // Evict old entries if at capacity
+    pub fn put<T: Serialize>(&self, key: String, value: T, repo_revision: String) {
         if self.store.len() >= self.max_entries {
             self.evict_expired();
             if self.store.len() >= self.max_entries {
-                // Still at capacity, remove oldest entries
                 self.evict_oldest(self.max_entries / 10);
             }
         }
 
         if let Ok(bytes) = serde_json::to_vec(&value) {
-            let key_owned = key.to_string();
-            let rev_owned = repo_revision.to_string();
-            self.store.insert(key_owned.clone(), bytes);
+            self.store.insert(key.clone(), bytes);
             self.metadata
-                .insert(key_owned, (Instant::now(), self.default_ttl, rev_owned));
+                .insert(key, (Instant::now(), self.default_ttl, repo_revision));
         }
     }
 
     /// Put a value with a custom TTL
     pub fn put_with_ttl<T: Serialize>(
         &self,
-        key: &str,
+        key: String,
         value: T,
         ttl: Duration,
-        repo_revision: &str,
+        repo_revision: String,
     ) {
-        // Evict old entries if at capacity
         if self.store.len() >= self.max_entries {
             self.evict_expired();
         }
 
         if let Ok(bytes) = serde_json::to_vec(&value) {
-            let key_owned = key.to_string();
-            let rev_owned = repo_revision.to_string();
-            self.store.insert(key_owned.clone(), bytes);
+            self.store.insert(key.clone(), bytes);
             self.metadata
-                .insert(key_owned, (Instant::now(), ttl, rev_owned));
+                .insert(key, (Instant::now(), ttl, repo_revision));
         }
     }
 
@@ -173,8 +166,8 @@ impl L1Cache {
 
     /// Invalidate all entries for a specific repository
     pub fn invalidate_repo(&self, repo_path: &str) {
-        let prefix = format!("{}:", repo_path);
-        self.retain(|k, _| !k.starts_with(&prefix));
+        // Keys are `{tool}:{repo_path}:{params_hash}` (see `make_key`).
+        self.retain(|k, _| k.split(':').nth(1) != Some(repo_path));
     }
 
     /// Get the number of entries
@@ -207,6 +200,9 @@ impl L1Cache {
 
     /// Evict the oldest entries
     fn evict_oldest(&self, count: usize) {
+        if count == 0 {
+            return;
+        }
         let mut entries: Vec<(String, Instant)> = self
             .metadata
             .iter()
@@ -216,8 +212,15 @@ impl L1Cache {
             })
             .collect();
 
-        entries.sort_by_key(|(_, t)| *t);
+        if entries.len() <= count {
+            for (key, _) in entries {
+                self.remove(&key);
+            }
+            return;
+        }
 
+        let nth = count - 1;
+        entries.select_nth_unstable_by(nth, |a, b| a.1.cmp(&b.1));
         for (key, _) in entries.into_iter().take(count) {
             self.remove(&key);
         }
@@ -262,17 +265,14 @@ impl L2Cache {
 
     /// Create a new L2 cache at the default location
     pub fn default_path() -> Self {
-        let base_path = env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("."));
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
         Self {
-            base_path: base_path.join(".cortex/cache"),
+            base_path: PathBuf::from(home).join(".cortex/cache"),
         }
     }
 
     /// Get the cache file path for a key
     fn get_path(&self, key: &str) -> PathBuf {
-        // Hash the key to create a safe filename
         let hash = format!("{:x}", md5::compute(key));
         self.base_path.join(&hash)
     }
@@ -292,14 +292,11 @@ impl L2Cache {
         let content = std::fs::read(&path).ok()?;
         let entry: L2CacheEntry<T> = serde_json::from_slice(&content).ok()?;
 
-        // Check revision
         if entry.repo_revision != repo_revision {
-            // Entry is stale, remove it
             let _ = std::fs::remove_file(path);
             return None;
         }
 
-        // Check TTL
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .ok()?
@@ -353,7 +350,6 @@ impl L2Cache {
     /// Invalidate all entries for a specific repository
     pub fn invalidate_repo(&self, _repo_path: &str) {
         // For L2, we'd need to scan all files and check their content
-        // This is expensive, so for now we just note it
         // In practice, revision-based invalidation handles this
     }
 }
@@ -400,15 +396,13 @@ impl CacheHierarchy {
         key: &str,
         repo_revision: &str,
     ) -> (Option<T>, &'static str) {
-        // Try L1 first
         if let Some(value) = self.l1.get(key, repo_revision) {
             return (Some(value), "l1");
         }
 
-        // Try L2
         if let Some(value) = self.l2.get(key, repo_revision) {
-            // Populate L1 for faster subsequent access
-            self.l1.put(key, &value, repo_revision);
+            self.l1
+                .put(key.to_string(), &value, repo_revision.to_string());
             return (Some(value), "l2");
         }
 
@@ -416,11 +410,10 @@ impl CacheHierarchy {
     }
 
     /// Put a value into the cache hierarchy
-    pub fn put<T: Serialize + Clone>(&self, key: &str, value: T, repo_revision: &str) {
-        // Put in both L1 and L2
-        self.l1.put(key, &value, repo_revision);
+    pub fn put<T: Serialize + Clone>(&self, key: &str, value: T, repo_revision: String) {
+        self.l1.put(key.to_string(), &value, repo_revision.clone());
         self.l2
-            .put(key, value, repo_revision, Duration::from_secs(300)); // 5 min L2 TTL
+            .put(key, value, &repo_revision, Duration::from_secs(300));
     }
 
     /// Put a value with custom TTLs
@@ -428,12 +421,13 @@ impl CacheHierarchy {
         &self,
         key: &str,
         value: T,
-        repo_revision: &str,
+        repo_revision: String,
         l1_ttl: Duration,
         l2_ttl: Duration,
     ) {
-        self.l1.put_with_ttl(key, &value, l1_ttl, repo_revision);
-        self.l2.put(key, value, repo_revision, l2_ttl);
+        self.l1
+            .put_with_ttl(key.to_string(), &value, l1_ttl, repo_revision.clone());
+        self.l2.put(key, value, &repo_revision, l2_ttl);
     }
 
     /// Remove a value from all cache levels
@@ -519,7 +513,7 @@ mod tests {
     fn l1_cache_basic_operations() {
         let cache = L1Cache::new();
 
-        cache.put("key1", "value1".to_string(), "rev1");
+        cache.put("key1".to_string(), "value1".to_string(), "rev1".to_string());
 
         let value: Option<String> = cache.get("key1", "rev1");
         assert_eq!(value, Some("value1".to_string()));
@@ -529,9 +523,8 @@ mod tests {
     fn l1_cache_returns_none_for_expired() {
         let cache = L1Cache::with_settings(Duration::from_millis(1), 100);
 
-        cache.put("key1", "value1".to_string(), "rev1");
+        cache.put("key1".to_string(), "value1".to_string(), "rev1".to_string());
 
-        // Wait for expiration
         std::thread::sleep(Duration::from_millis(5));
 
         let value: Option<String> = cache.get("key1", "rev1");
@@ -542,7 +535,7 @@ mod tests {
     fn l1_cache_returns_none_for_wrong_revision() {
         let cache = L1Cache::new();
 
-        cache.put("key1", "value1".to_string(), "rev1");
+        cache.put("key1".to_string(), "value1".to_string(), "rev1".to_string());
 
         let value: Option<String> = cache.get("key1", "rev2");
         assert!(value.is_none());
@@ -552,7 +545,7 @@ mod tests {
     fn l1_cache_remove() {
         let cache = L1Cache::new();
 
-        cache.put("key1", "value1".to_string(), "rev1");
+        cache.put("key1".to_string(), "value1".to_string(), "rev1".to_string());
         cache.remove("key1");
 
         let value: Option<String> = cache.get("key1", "rev1");
@@ -563,8 +556,8 @@ mod tests {
     fn l1_cache_clear() {
         let cache = L1Cache::new();
 
-        cache.put("key1", "value1".to_string(), "rev1");
-        cache.put("key2", "value2".to_string(), "rev1");
+        cache.put("key1".to_string(), "value1".to_string(), "rev1".to_string());
+        cache.put("key2".to_string(), "value2".to_string(), "rev1".to_string());
         cache.clear();
 
         assert!(cache.is_empty());
@@ -574,6 +567,27 @@ mod tests {
     fn l1_cache_make_key() {
         let key = L1Cache::make_key("get_context_capsule", "/repo/path", "abc123");
         assert_eq!(key, "get_context_capsule:/repo/path:abc123");
+    }
+
+    #[test]
+    fn l1_cache_invalidate_repo() {
+        let cache = L1Cache::new();
+        let key = L1Cache::make_key("get_patch_context", "/repo/a", "hash1");
+        cache.put(key.clone(), "v".to_string(), "rev1".to_string());
+        let other = L1Cache::make_key("get_patch_context", "/repo/b", "hash1");
+        cache.put(other, "v2".to_string(), "rev1".to_string());
+
+        cache.invalidate_repo("/repo/a");
+
+        assert!(cache.get::<String>(&key, "rev1").is_none());
+        assert!(
+            cache
+                .get::<String>(
+                    &L1Cache::make_key("get_patch_context", "/repo/b", "hash1"),
+                    "rev1"
+                )
+                .is_some()
+        );
     }
 
     #[test]
@@ -589,18 +603,18 @@ mod tests {
     fn cache_hierarchy_put_and_get() {
         let cache = CacheHierarchy::new();
 
-        cache.put("key1", "value1".to_string(), "rev1");
+        cache.put("key1", "value1".to_string(), "rev1".to_string());
 
         let (value, hit): (Option<String>, _) = cache.get("key1", "rev1");
         assert_eq!(value, Some("value1".to_string()));
-        assert_eq!(hit, "l1"); // First hit should be from L1
+        assert_eq!(hit, "l1");
     }
 
     #[test]
     fn cache_hierarchy_remove() {
         let cache = CacheHierarchy::new();
 
-        cache.put("key1", "value1".to_string(), "rev1");
+        cache.put("key1", "value1".to_string(), "rev1".to_string());
         cache.remove("key1");
 
         let (value, _): (Option<String>, _) = cache.get("key1", "rev1");
@@ -611,8 +625,8 @@ mod tests {
     fn cache_stats() {
         let cache = CacheHierarchy::new();
 
-        cache.put("key1", "value1".to_string(), "rev1");
-        cache.put("key2", "value2".to_string(), "rev1");
+        cache.put("key1", "value1".to_string(), "rev1".to_string());
+        cache.put("key2", "value2".to_string(), "rev1".to_string());
 
         let stats = cache.stats();
         assert_eq!(stats.l1_entries, 2);

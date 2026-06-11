@@ -21,10 +21,9 @@ REPO_URL="https://github.com/aloshkarev/codecortex"
 CORTEX_CONFIG_DIR="${HOME}/.cortex"
 CORTEX_BIN_DIR="${HOME}/.local/bin"
 CORTEX_DATA_DIR="${HOME}/.cortex/data"
-MEMGRAPH_URI="memgraph://localhost:7687"
-MEMGRAPH_USER="memgraph"
-MEMGRAPH_PASSWORD="memgraph"
-CONTAINER_NAME="codecortex-memgraph"
+FALKORDB_URI="falkor://127.0.0.1:6379"
+FALKORDB_PASSWORD=""
+CONTAINER_NAME="codecortex-falkordb"
 VECTOR_PATH="${HOME}/.cortex/vectors"
 
 # Colors
@@ -39,8 +38,7 @@ NC='\033[0m' # No Color
 NON_INTERACTIVE=false
 INSTALL_METHOD=""
 START_SERVICES=true
-INSTALL_MEMGRAPH=false   # opt-in: use --memgraph or answer yes at the prompt
-INSTALL_DOCKER=false     # opt-in: use --docker to also install Docker
+INSTALL_FALKORDB=true
 PREFER_NIX=true
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -237,16 +235,16 @@ check_dependencies() {
         fi
     fi
 
-    # Check for Docker (informational only — Memgraph setup is opt-in)
+    # Check for Docker (for FalkorDB)
     if command_exists docker; then
         log_success "Docker found: $(docker --version)"
     else
-        log_info "Docker not found — skipping Docker-based Memgraph setup"
-        log_info "  Use --memgraph to install Memgraph, or point CodeCortex at your existing server"
-        # Don't abort; user may have a dedicated/remote Memgraph server.
-        # Honour explicit --memgraph / --no-memgraph: do not clear a requested or skipped intent here.
-        if [ "$INSTALL_MEMGRAPH" != "true" ] && [ "$INSTALL_MEMGRAPH" != "skip" ]; then
-            INSTALL_MEMGRAPH=false
+        log_warning "Docker not found - FalkorDB installation will be limited"
+        if [ "$INSTALL_FALKORDB" = true ]; then
+            if ! confirm "Continue without Docker? (FalkorDB will not be available)" "n"; then
+                exit 1
+            fi
+            INSTALL_FALKORDB=false
         fi
     fi
 
@@ -525,7 +523,7 @@ verify_installation() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Memgraph Installation
+# FalkorDB Installation
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Check if a port is available
@@ -556,15 +554,14 @@ find_available_port() {
     echo $start_port  # Fallback to start port
 }
 
-install_memgraph_docker() {
-    log_step "Setting up Memgraph with Docker"
+install_falkordb_docker() {
+    log_step "Setting up FalkorDB with Docker"
 
     if ! command_exists docker; then
         log_error "Docker not found. Please install Docker first."
         return 1
     fi
 
-    # Check if Docker daemon is running
     if ! docker info &>/dev/null; then
         log_warning "Docker daemon not running. Attempting to start..."
 
@@ -587,143 +584,67 @@ install_memgraph_docker() {
         esac
     fi
 
-    # Check for existing container FIRST (before any port checking)
     local existing_container=""
     if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         existing_container="${CONTAINER_NAME}"
-    elif docker ps -a --format '{{.Names}}' | grep -q '^memgraph$'; then
-        existing_container="memgraph"
     fi
 
     if [ -n "$existing_container" ]; then
-        log_info "Found existing Memgraph container (${existing_container})"
+        log_info "Found existing FalkorDB container (${existing_container})"
 
-        # Get port from existing container before starting it
         local port
-        port=$(docker port "$existing_container" 7687 2>/dev/null | cut -d: -f2 || echo "7687")
-        MEMGRAPH_URI="memgraph://localhost:${port}"
+        port=$(docker port "$existing_container" 6379 2>/dev/null | cut -d: -f2 || echo "6379")
+        FALKORDB_URI="falkor://127.0.0.1:${port}"
 
         if docker ps --format '{{.Names}}' | grep -q "^${existing_container}$"; then
-            log_success "Memgraph is already running on port ${port}"
+            log_success "FalkorDB is already running on port ${port}"
         else
-            log_info "Starting existing Memgraph container..."
+            log_info "Starting existing FalkorDB container..."
             docker start "$existing_container"
             sleep 3
-            log_success "Memgraph started on port ${port}"
+            log_success "FalkorDB started on port ${port}"
         fi
     else
-        # No existing container - find available port BEFORE pulling image
-        local port=7687
+        local port=6379
 
-        if ! check_port_available 7687; then
-            log_info "Port 7687 is in use, finding available port..."
-            port=$(find_available_port 7688 10)
+        if ! check_port_available 6379; then
+            log_info "Port 6379 is in use, finding available port..."
+            port=$(find_available_port 6380 10)
             log_info "Will use port ${port}"
         fi
 
-        MEMGRAPH_URI="memgraph://localhost:${port}"
+        FALKORDB_URI="falkor://127.0.0.1:${port}"
 
-        # Now pull and create container
-        log_info "Pulling Memgraph Docker image..."
-        run_with_retry 3 docker pull memgraph/memgraph-mage:3.8.1
+        log_info "Pulling FalkorDB Docker image..."
+        run_with_retry 3 docker pull falkordb/falkordb:latest
 
-        log_info "Creating Memgraph container on port ${port}..."
+        log_info "Creating FalkorDB container on port ${port}..."
         run_with_retry 2 docker run -d \
             --name "${CONTAINER_NAME}" \
-            -p "${port}:7687" \
-            -v codecortex-memgraph:/var/lib/memgraph \
-            memgraph/memgraph-mage:3.8.1 \
-            --also-log-to-stderr=true
+            -p "${port}:6379" \
+            -v codecortex-falkordb:/data \
+            falkordb/falkordb:latest
 
         sleep 3
-        log_success "Memgraph started on port ${port}"
+        log_success "FalkorDB started on port ${port}"
     fi
 }
 
-install_memgraph_native() {
-    log_step "Installing Memgraph Natively"
-
-    local os=$(get_os)
-
-    case "$os" in
-        macos)
-            if command_exists brew; then
-                log_info "Installing Memgraph via Homebrew..."
-                brew install memgraph
-                log_success "Memgraph installed. Start with: brew services start memgraph"
-            else
-                log_error "Homebrew required for native Memgraph installation on macOS"
-                return 1
-            fi
-            ;;
-        linux)
-            if is_ubuntu; then
-                log_info "Installing Memgraph on Ubuntu..."
-
-                # Add Memgraph repository
-                curl -L https://download.memgraph.com/memgraph-keyring.gpg | sudo gpg --dearmor -o /usr/share/keyrings/memgraph-keyring.gpg
-                echo "deb [signed-by=/usr/share/keyrings/memgraph-keyring.gpg] https://download.memgraph.com/debian stable main" | sudo tee /etc/apt/sources.list.d/memgraph.list
-
-                sudo apt-get update
-                sudo apt-get install -y memgraph
-
-                log_success "Memgraph installed. Start with: sudo systemctl start memgraph"
-            else
-                log_warning "Native installation only supported on Ubuntu/Debian. Use Docker instead."
-                return 1
-            fi
-            ;;
-        *)
-            log_error "Unsupported OS for native Memgraph installation"
-            return 1
-            ;;
-    esac
-}
-
-setup_memgraph() {
-    # If user explicitly skipped with --no-memgraph, honour it silently.
-    if [ "$INSTALL_MEMGRAPH" = "skip" ]; then
-        log_info "Skipping Memgraph installation (--no-memgraph)"
+setup_falkordb() {
+    if [ "$INSTALL_FALKORDB" = false ]; then
+        log_info "Skipping FalkorDB installation"
         return 0
     fi
 
-    # If not explicitly requested, ask in interactive mode.
-    if [ "$INSTALL_MEMGRAPH" = false ]; then
-        if [ "$NON_INTERACTIVE" = true ]; then
-            log_info "Skipping Memgraph setup (use --memgraph to install, or configure manually)"
-            return 0
-        fi
-        echo ""
-        log_info "Graph backend setup (optional)"
-        echo "  CodeCortex requires a Memgraph or Neo4j server."
-        echo "  If you already have one running (local or remote), answer 'n' and"
-        echo "  update memgraph_uri in ~/.cortex/config.toml after install."
-        if ! confirm "Install Memgraph via Docker now?" "n"; then
-            log_info "Skipping Memgraph setup — update ~/.cortex/config.toml with your server URI"
-            return 0
-        fi
-        INSTALL_MEMGRAPH=true
-    fi
-
-    log_step "Setting up Memgraph"
-
-    local use_docker=true
+    log_step "Setting up FalkorDB"
 
     if ! command_exists docker; then
-        if confirm "Docker not found. Install Memgraph natively instead?"; then
-            use_docker=false
-        else
-            log_warning "Skipping Memgraph installation"
-            INSTALL_MEMGRAPH=false
-            return 0
-        fi
+        log_warning "Docker not found - skipping FalkorDB container setup"
+        INSTALL_FALKORDB=false
+        return 0
     fi
 
-    if [ "$use_docker" = true ]; then
-        install_memgraph_docker
-    else
-        install_memgraph_native
-    fi
+    install_falkordb_docker
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -740,24 +661,18 @@ setup_config() {
 
     local config_file="${CORTEX_CONFIG_DIR}/config.toml"
 
-    # Never overwrite an existing config (regular file, symlink, etc.).
-    # Use -L so a dangling symlink is still treated as "exists" and we do not clobber.
-    if [ -e "$config_file" ] || [ -L "$config_file" ]; then
-        log_info "Configuration file already exists — leaving unchanged: ${config_file}"
+    if [ -f "$config_file" ]; then
+        log_info "Configuration file already exists at ${config_file}"
         return 0
     fi
 
-    # Get Memgraph credentials
     if [ "$NON_INTERACTIVE" = false ]; then
-        read -rp "Memgraph URI [${MEMGRAPH_URI}]: " uri_input
-        MEMGRAPH_URI="${uri_input:-$MEMGRAPH_URI}"
+        read -rp "FalkorDB URI [${FALKORDB_URI}]: " uri_input
+        FALKORDB_URI="${uri_input:-$FALKORDB_URI}"
 
-        read -rp "Memgraph username [${MEMGRAPH_USER}]: " user_input
-        MEMGRAPH_USER="${user_input:-$MEMGRAPH_USER}"
-
-        read -rsp "Memgraph password [${MEMGRAPH_PASSWORD}]: " pass_input
+        read -rsp "FalkorDB password (Redis AUTH) [${FALKORDB_PASSWORD}]: " pass_input
         echo
-        MEMGRAPH_PASSWORD="${pass_input:-$MEMGRAPH_PASSWORD}"
+        FALKORDB_PASSWORD="${pass_input:-$FALKORDB_PASSWORD}"
     fi
 
     # Detect LLM provider
@@ -781,13 +696,11 @@ setup_config() {
 # CodeCortex Configuration
 # Generated by install.sh
 
-# Graph Database (Memgraph or Neo4j)
-memgraph_uri = "${MEMGRAPH_URI}"
-memgraph_user = "${MEMGRAPH_USER}"
-memgraph_password = "${MEMGRAPH_PASSWORD}"
-# Backend type: "memgraph" (default) or "neo4j"
-# Can also be set via CORTEX_BACKEND_TYPE environment variable
-backend_type = "memgraph"
+# Graph Database (FalkorDB)
+backend_type = "falkordb"
+falkordb_uri = "${FALKORDB_URI}"
+falkordb_graph = "codecortex"
+falkordb_password = "${FALKORDB_PASSWORD}"
 
 # Vector Store Configuration
 [vector]
@@ -1027,8 +940,8 @@ setup_systemd_service() {
 [Unit]
 Description=CodeCortex MCP Server
 Documentation=${REPO_URL}
-After=network.target network-online.target memgraph.service docker.service
-Wants=network-online.target memgraph.service
+After=network.target network-online.target docker.service
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -1096,7 +1009,7 @@ run_verification() {
 
     # Verify database connection (quick check)
     log_info "Testing database connection..."
-    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "${CONTAINER_NAME}\|memgraph"; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "${CONTAINER_NAME}"; then
         log_success "Database: Container running"
     else
         log_warning "Database: Container not running"
@@ -1195,22 +1108,14 @@ print_summary() {
     esac
 
     echo ""
-    if [ "$INSTALL_MEMGRAPH" = true ]; then
-        echo -e "  ${YELLOW}Memgraph:${NC}"
-        echo ""
-        echo "    # Check Memgraph status (Docker)"
-        echo "    docker ps | grep ${CONTAINER_NAME}"
-        echo ""
-        echo "    # Start Memgraph if stopped"
-        echo "    docker start ${CONTAINER_NAME}"
-        echo ""
-    else
-        echo -e "  ${YELLOW}Graph backend:${NC}"
-        echo ""
-        echo "    Update memgraph_uri in ~/.cortex/config.toml to point at your server."
-        echo "    Then run: cortex doctor"
-        echo ""
-    fi
+    echo -e "  ${YELLOW}FalkorDB:${NC}"
+    echo ""
+    echo "    # Check FalkorDB status (Docker)"
+    echo "    docker ps | grep ${CONTAINER_NAME}"
+    echo ""
+    echo "    # Start FalkorDB if stopped"
+    echo "    docker start ${CONTAINER_NAME}"
+    echo ""
 
     if [ "$NON_INTERACTIVE" = true ]; then
         echo -e "  ${YELLOW}Note:${NC} Run 'cortex setup' for interactive configuration"
@@ -1233,23 +1138,15 @@ show_help() {
     echo "Options:"
     echo "  --non-interactive    Run without prompts (use defaults)"
     echo "  --no-nix             Do not use Nix even if installed"
-    echo "  --memgraph           Install and start Memgraph via Docker (opt-in, default: off)"
-    echo "  --no-memgraph        Explicitly skip Memgraph setup (suppresses interactive prompt)"
-    echo "  --no-service         Skip launchd/systemd service setup"
+    echo "  --no-falkordb        Skip FalkorDB installation"
+    echo "  --no-service         Skip service setup"
     echo "  --help               Show this help message"
     echo ""
-    echo "Memgraph / Docker behaviour:"
-    echo "  By default the installer does NOT install Docker or Memgraph."
-    echo "  If you have an existing Memgraph or Neo4j server (local or remote),"
-    echo "  skip this step and update memgraph_uri in ~/.cortex/config.toml."
-    echo "  Use --memgraph to have the installer pull and start a Memgraph container."
-    echo ""
     echo "Examples:"
-    echo "  $0                           # Interactive installation (asks about Memgraph)"
-    echo "  $0 --non-interactive         # Non-interactive, skips Memgraph (configure manually)"
-    echo "  $0 --memgraph                # Also install Memgraph via Docker"
-    echo "  $0 --no-memgraph             # Suppress the Memgraph prompt entirely"
+    echo "  $0                           # Interactive installation"
+    echo "  $0 --non-interactive         # Non-interactive with defaults"
     echo "  $0 --no-nix                  # Force Cargo/binary installer path"
+    echo "  $0 --no-falkordb             # Skip FalkorDB setup"
     echo ""
 }
 
@@ -1269,14 +1166,8 @@ main() {
                 PREFER_NIX=false
                 shift
                 ;;
-            --memgraph)
-                # Explicitly requested: install Memgraph via Docker
-                INSTALL_MEMGRAPH=true
-                shift
-                ;;
-            --no-memgraph)
-                # Explicitly skipped: suppress the interactive prompt too
-                INSTALL_MEMGRAPH="skip"
+            --no-falkordb)
+                INSTALL_FALKORDB=false
                 shift
                 ;;
             --no-service)
@@ -1331,8 +1222,8 @@ main() {
     # Verify installation
     verify_installation
 
-    # Setup Memgraph
-    setup_memgraph
+    # Setup FalkorDB
+    setup_falkordb
 
     # Setup configuration
     setup_config

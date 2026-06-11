@@ -34,16 +34,13 @@ pub fn detect_divergent_change(
             continue; // Too small to have divergent change
         }
 
-        // Group methods by naming patterns (prefix/subject)
         let method_groups = group_methods_by_subject(&class_info.methods);
 
-        // If there are multiple distinct groups with low overlap, it's divergent change
         if method_groups.len() >= 2 {
             let group_sizes: Vec<usize> = method_groups.values().map(|g| g.len()).collect();
             let total_methods: usize = group_sizes.iter().sum();
             let max_group = group_sizes.iter().max().unwrap_or(&0);
 
-            // If the largest group is less than 50% of methods, we have divergence
             if (*max_group as f64) / (total_methods as f64) < 0.5 {
                 smells.push(CodeSmell {
                     smell_type: SmellType::DivergentChange,
@@ -79,17 +76,14 @@ pub fn detect_parallel_inheritance(
     let lines: Vec<&str> = source.lines().collect();
     let lang = SourceLanguage::from_file_path(file_path);
 
-    // Find all inheritance hierarchies
     let hierarchies = extract_inheritance_hierarchies(&lines, lang);
 
-    // Look for parallel naming patterns
     for (base1, children1) in &hierarchies {
         for (base2, children2) in &hierarchies {
             if base1 >= base2 {
                 continue; // Avoid duplicate comparisons
             }
 
-            // Check if children have parallel naming patterns
             let parallel_pairs = find_parallel_pairs(children1, children2);
 
             if parallel_pairs.len() >= config.min_parallel_pairs {
@@ -133,13 +127,11 @@ pub fn detect_shotgun_surgery(
     let lines: Vec<&str> = source.lines().collect();
     let lang = SourceLanguage::from_file_path(file_path);
 
-    // Find functions/methods and their dependencies
     let functions = extract_function_info(&lines, lang);
 
-    // Track which functions are called from how many different files/contexts
     let mut call_counts: HashMap<String, usize> = HashMap::new();
 
-    for func_info in functions.values() {
+    for (_func_name, func_info) in &functions {
         for called in &func_info.calls {
             *call_counts.entry(called.clone()).or_default() += 1;
         }
@@ -148,7 +140,6 @@ pub fn detect_shotgun_surgery(
     // Functions called from many places may indicate shotgun surgery
     for (called_func, callers) in &call_counts {
         if *callers >= config.min_shotgun_callers {
-            // Find where this function is defined
             if let Some(func_info) = functions.get(called_func) {
                 smells.push(CodeSmell {
                     smell_type: SmellType::ShotgunSurgery,
@@ -220,7 +211,6 @@ pub fn detect_shotgun_surgery_with_context(
     smells
 }
 
-// Data structures
 
 struct ClassInfo {
     line_number: u32,
@@ -233,7 +223,6 @@ struct FunctionInfo {
     calls: Vec<String>,
 }
 
-// Helper functions
 
 fn extract_classes(lines: &[&str], lang: SourceLanguage) -> HashMap<String, ClassInfo> {
     let mut classes: HashMap<String, ClassInfo> = HashMap::new();
@@ -292,7 +281,6 @@ fn extract_inheritance_hierarchies(
     for line in lines {
         let trimmed = line.trim();
 
-        // Look for inheritance patterns
         if let Some((child, parent)) = extract_inheritance_pair(trimmed, lang) {
             hierarchies.entry(parent).or_default().push(child);
         }
@@ -329,7 +317,6 @@ fn extract_function_info(lines: &[&str], lang: SourceLanguage) -> HashMap<String
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            // Extract function calls
             let calls = extract_function_calls(trimmed);
             if let Some(info) = functions.get_mut(func_name) {
                 info.calls.extend(calls);
@@ -348,12 +335,10 @@ fn group_methods_by_subject(methods: &[String]) -> HashMap<String, Vec<String>> 
     let mut groups: HashMap<String, Vec<String>> = HashMap::new();
 
     for method in methods {
-        // Extract subject from method name (e.g., "get" from "getUser", "save" from "saveUser")
         let subject = extract_method_subject(method);
         groups.entry(subject).or_default().push(method.clone());
     }
 
-    // Filter out groups with only one method
     groups.retain(|_, v| v.len() > 1);
 
     groups
@@ -395,7 +380,6 @@ fn find_parallel_pairs(children1: &[String], children2: &[String]) -> Vec<(Strin
     let mut pairs = Vec::new();
 
     for child1 in children1 {
-        // Extract the "difference" part (e.g., "Button" from "HTMLButton")
         let suffix1 = extract_class_suffix(child1);
 
         for child2 in children2 {
@@ -476,7 +460,8 @@ fn extract_class_name(line: &str) -> String {
     let line = line.trim();
 
     for prefix in ["impl ", "struct ", "class ", "pub struct ", "pub class "] {
-        if let Some(rest) = line.strip_prefix(prefix) {
+        if line.starts_with(prefix) {
+            let rest = &line[prefix.len()..];
             return rest
                 .split(|c: char| c.is_whitespace() || c == '{' || c == '<' || c == '(')
                 .find(|s| !s.is_empty())
@@ -511,15 +496,15 @@ fn extract_function_name(line: &str) -> String {
 fn extract_function_calls(line: &str) -> Vec<String> {
     let mut calls = Vec::new();
 
-    // Simple pattern: identifier followed by (
     let chars: Vec<char> = line.chars().collect();
     let mut current_ident = String::new();
 
-    for c in &chars {
-        if c.is_alphanumeric() || *c == '_' {
-            current_ident.push(*c);
-        } else if *c == '(' && !current_ident.is_empty() {
-            // Check if this is likely a function call (not a keyword)
+    for i in 0..chars.len() {
+        let c = chars[i];
+
+        if c.is_alphanumeric() || c == '_' {
+            current_ident.push(c);
+        } else if c == '(' && !current_ident.is_empty() {
             if !is_keyword(&current_ident) {
                 calls.push(current_ident.clone());
             }

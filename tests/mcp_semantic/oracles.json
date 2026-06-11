@@ -1,0 +1,1867 @@
+{
+  "version": 1,
+  "anchors": {
+    "symbol": "tool_names",
+    "flow_from": "tool_names",
+    "flow_to": "build_symbol_resolver",
+    "source_file": "crates/cortex-mcp/src/tools.rs",
+    "rel_source": "crates/cortex-mcp/src/handler.rs",
+    "bogus_symbol": "__codecortex_no_such_symbol__"
+  },
+  "oracles": [
+    {
+      "tool": "check_health",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Reports graph backend health",
+      "args": {},
+      "assertions": [
+        {
+          "type": "exists",
+          "path": "status"
+        },
+        {
+          "type": "exists",
+          "path": "data/graph"
+        }
+      ],
+      "description_keywords": [
+        "health",
+        "graph"
+      ]
+    },
+    {
+      "tool": "index_status",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Reports graph freshness for repo",
+      "args": {
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "contains",
+          "path": "data/freshness/graph",
+          "substring": "fresh"
+        }
+      ],
+      "description_keywords": [
+        "freshness",
+        "index"
+      ]
+    },
+    {
+      "tool": "recommend_tools",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Suggests graph tools for caller tasks",
+      "args": {
+        "task": "who calls tool_names function in crates/cortex-mcp"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "one_of_tools",
+          "path": "data/tools",
+          "tools": [
+            "analyze_code_relationships",
+            "find_code",
+            "get_impact_graph",
+            "find_all_usages",
+            "go_to_definition",
+            "get_patch_context",
+            "index_status",
+            "check_health"
+          ]
+        }
+      ],
+      "description_keywords": [
+        "recommend"
+      ]
+    },
+    {
+      "tool": "get_tool_guidance",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Returns guidance for find_code",
+      "args": {
+        "tool_name": "find_code"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        }
+      ],
+      "description_keywords": [
+        "guidance"
+      ]
+    },
+    {
+      "tool": "explain_index_freshness",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Explains freshness states",
+      "args": {
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        }
+      ],
+      "description_keywords": [
+        "freshness"
+      ]
+    },
+    {
+      "tool": "diagnose",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Runs diagnostic checks",
+      "args": {
+        "check": "all",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ],
+      "description_keywords": [
+        "diagnos"
+      ]
+    },
+    {
+      "tool": "find_code",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Finds symbols by name in scoped paths",
+      "args": {
+        "query": "tool_names",
+        "kind": "name",
+        "include_paths": [
+          "crates/cortex-mcp"
+        ]
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/results",
+          "min": 1
+        }
+      ],
+      "description_keywords": [
+        "search",
+        "symbol"
+      ]
+    },
+    {
+      "tool": "go_to_definition",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns definition location for symbol",
+      "args": {
+        "symbol": "tool_names",
+        "from_file": "crates/cortex-mcp/src/tools.rs",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/definitions",
+          "min": 1
+        },
+        {
+          "type": "contains",
+          "path": "data/definitions/0/name",
+          "substring": "tool_names"
+        }
+      ],
+      "description_keywords": [
+        "definition"
+      ],
+      "negative_control": {
+        "args": {
+          "symbol": "__codecortex_no_such_symbol__",
+          "from_file": "crates/cortex-mcp/src/tools.rs",
+          "repo_path": "${REPO}"
+        },
+        "assertions": [
+          {
+            "type": "max_length",
+            "path": "data/definitions",
+            "max": 0
+          }
+        ]
+      }
+    },
+    {
+      "tool": "find_all_usages",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Finds usages of anchor symbol",
+      "args": {
+        "symbol": "find_code",
+        "from_file": "crates/cortex-mcp/src/handler.rs",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/groups",
+          "min": 1
+        }
+      ],
+      "description_keywords": [
+        "usages"
+      ]
+    },
+    {
+      "tool": "quick_info",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns quick info for symbol",
+      "args": {
+        "symbol": "tool_names"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        }
+      ],
+      "description_keywords": [
+        "information",
+        "symbol"
+      ]
+    },
+    {
+      "tool": "get_signature",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns signature for symbol",
+      "args": {
+        "symbol": "tool_names",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        }
+      ],
+      "description_keywords": [
+        "signature"
+      ],
+      "allow_status": [
+        "partial"
+      ]
+    },
+    {
+      "tool": "get_skeleton",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns skeleton for source file",
+      "args": {
+        "path": "${REPO}/crates/cortex-mcp/src/tools.rs",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        }
+      ],
+      "description_keywords": [
+        "skeleton"
+      ]
+    },
+    {
+      "tool": "analyze_code_relationships",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns relationship analysis for target symbol",
+      "args": {
+        "query_type": "find_complexity",
+        "target": "tool_names",
+        "include_paths": [
+          "crates/cortex-mcp"
+        ]
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/results",
+          "min": 1
+        }
+      ],
+      "description_keywords": [
+        "callers"
+      ]
+    },
+    {
+      "tool": "search_logic_flow",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Finds paths between symbols",
+      "args": {
+        "from_symbol": "tool_names",
+        "to_symbol": "tool_names",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/paths",
+          "min": 1
+        }
+      ],
+      "description_keywords": [
+        "path",
+        "flow"
+      ],
+      "allow_status": [
+        "partial"
+      ]
+    },
+    {
+      "tool": "get_impact_graph",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns impact nodes for symbol",
+      "args": {
+        "symbol": "tool_names",
+        "repo_path": "${REPO}",
+        "depth": 2,
+        "budget_tokens": 4000
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/nodes",
+          "min": 1
+        }
+      ],
+      "description_keywords": [
+        "impact"
+      ],
+      "allow_status": [
+        "partial"
+      ]
+    },
+    {
+      "tool": "find_dead_code",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Find dead code; anchor symbol must not appear in results",
+      "args": {
+        "include_paths": [
+          "crates/cortex-mcp"
+        ],
+        "limit": 100
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "anchor_absent",
+          "path": "data/results",
+          "field": "name",
+          "value": "tool_names"
+        }
+      ],
+      "description_keywords": [
+        "dead"
+      ]
+    },
+    {
+      "tool": "calculate_cyclomatic_complexity",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns complexity rankings",
+      "args": {
+        "top_n": 10
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/results",
+          "min": 1
+        }
+      ],
+      "description_keywords": [
+        "complexity"
+      ]
+    },
+    {
+      "tool": "find_patterns",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Detects patterns in repo",
+      "args": {
+        "repo_path": "${REPO}",
+        "max_results": 10
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ],
+      "description_keywords": [
+        "pattern"
+      ]
+    },
+    {
+      "tool": "get_patch_context",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns patch context pack",
+      "args": {
+        "task": "audit MCP tools",
+        "include_paths": [
+          "crates/cortex-mcp"
+        ],
+        "budget_tokens": 4000,
+        "mode": "feature"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data/task"
+        }
+      ],
+      "description_keywords": [
+        "patch",
+        "context"
+      ]
+    },
+    {
+      "tool": "get_api_contract",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns API contract for symbol",
+      "args": {
+        "symbol": "tool_names",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        }
+      ],
+      "description_keywords": [
+        "contract"
+      ]
+    },
+    {
+      "tool": "get_test_context",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns test context for symbol",
+      "args": {
+        "symbol": "tool_names",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        }
+      ],
+      "description_keywords": [
+        "test"
+      ]
+    },
+    {
+      "tool": "get_delta_context",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Returns branch delta context",
+      "args": {
+        "source_branch": "HEAD",
+        "target_branch": "HEAD",
+        "budget_tokens": 4000
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        }
+      ],
+      "description_keywords": [
+        "delta",
+        "branch"
+      ]
+    },
+    {
+      "tool": "branch_structural_diff",
+      "profile": [
+        "pr",
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Compares branches at symbol level",
+      "args": {
+        "source_branch": "HEAD",
+        "target_branch": "HEAD",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ],
+      "description_keywords": [
+        "branch"
+      ]
+    },
+    {
+      "tool": "get_context_capsule",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph_and_vector",
+      "description_claim": "Returns context capsule",
+      "args": {
+        "query": "MCP tool routing",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        },
+        {
+          "type": "min_length",
+          "path": "data/capsule_items",
+          "min": 1
+        }
+      ],
+      "description_keywords": [
+        "capsule"
+      ]
+    },
+    {
+      "tool": "summarize_module",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Summarizes module",
+      "args": {
+        "path": "${REPO}/crates/cortex-mcp",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ],
+      "description_keywords": [
+        "module"
+      ]
+    },
+    {
+      "tool": "estimate_context_cost",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Estimates context cost",
+      "args": {
+        "task": "audit",
+        "include_paths": [
+          "crates/cortex-mcp"
+        ]
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "pr_review",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "PR review analysis",
+      "args": {
+        "base_ref": "HEAD",
+        "head_ref": "HEAD",
+        "repo_path": "${REPO}",
+        "path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ],
+      "description_keywords": [
+        "review"
+      ]
+    },
+    {
+      "tool": "explain_result",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Explains prior tool result",
+      "args": {
+        "query": "tool_names",
+        "tool": "find_code",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "analyze_refactoring",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Refactoring suggestions",
+      "args": {
+        "symbol": "tool_names",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "find_tests",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Finds tests for symbol",
+      "args": {
+        "symbol": "tool_names",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ],
+      "description_keywords": [
+        "test"
+      ]
+    },
+    {
+      "tool": "vector_search",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "vector",
+      "description_claim": "Semantic search returns hits",
+      "args": {
+        "query": "resolve project context MCP",
+        "repo_path": "${REPO}",
+        "k": 3
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/results",
+          "min": 1
+        },
+        {
+          "type": "rank_contains",
+          "path": "data/results",
+          "field": "metadata/path",
+          "substring": "tools.rs",
+          "max_rank": 0
+        }
+      ],
+      "description_keywords": [
+        "semantic"
+      ]
+    },
+    {
+      "tool": "vector_search_hybrid",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph_and_vector",
+      "description_claim": "Hybrid search returns hits",
+      "args": {
+        "query": "MCP tool handler",
+        "repo_path": "${REPO}",
+        "k": 3
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/results",
+          "min": 1
+        },
+        {
+          "type": "rank_contains",
+          "path": "data/results",
+          "field": "metadata/path",
+          "substring": "handler.rs",
+          "max_rank": 0
+        },
+        {
+          "type": "scores_descending",
+          "path": "data/results"
+        }
+      ],
+      "description_keywords": [
+        "hybrid"
+      ]
+    },
+    {
+      "tool": "vector_index_status",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "vector",
+      "description_claim": "Vector index status",
+      "args": {
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data"
+        },
+        {
+          "type": "gte",
+          "path": "data/repository_documents",
+          "min": 1
+        }
+      ]
+    },
+    {
+      "tool": "add_code_to_graph",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Indexes path into graph",
+      "args": {
+        "path": "${REPO}/crates/cortex-mcp",
+        "force": false,
+        "include_vector": false,
+        "wait": true,
+        "wait_timeout_secs": 300
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data/state"
+        }
+      ]
+    },
+    {
+      "tool": "watch_directory",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Starts directory watch",
+      "args": {
+        "path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "list_watched_paths",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Lists watched paths",
+      "args": {},
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data/paths"
+        }
+      ]
+    },
+    {
+      "tool": "unwatch_directory",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Stops watch",
+      "args": {
+        "path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "execute_cypher_query",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Cypher returns rows",
+      "args": {
+        "query": "RETURN 1 AS ok"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "vector_index_repository",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "vector",
+      "description_claim": "Vector indexes repo scope",
+      "args": {
+        "path": "${REPO}",
+        "repo_path": "${REPO}",
+        "include_paths": [
+          "crates/cortex-mcp"
+        ],
+        "max_files": 200
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "vector_index_file",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "vector",
+      "description_claim": "Vector indexes file",
+      "args": {
+        "path": "${REPO}/crates/cortex-mcp/src/tools.rs",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "search_across_projects",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "vector",
+      "description_claim": "Cross-project search",
+      "args": {
+        "query": "handler",
+        "repositories": [
+          "${REPO}"
+        ],
+        "k": 3
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/results",
+          "min": 1
+        },
+        {
+          "type": "rank_contains",
+          "path": "data/results",
+          "field": "metadata/path",
+          "substring": "cortex-mcp",
+          "max_rank": 0
+        }
+      ]
+    },
+    {
+      "tool": "vector_delete_repository",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "vector",
+      "description_claim": "Dry-run vector delete",
+      "args": {
+        "repo_path": "${REPO}",
+        "dry_run": true
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "find_similar_across_projects",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Similar symbols",
+      "args": {
+        "symbol": "tool_names",
+        "repo_path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data/results"
+        }
+      ]
+    },
+    {
+      "tool": "find_shared_dependencies",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Shared deps",
+      "args": {
+        "repos": [
+          "${REPO}"
+        ]
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data/results"
+        }
+      ]
+    },
+    {
+      "tool": "compare_api_surface",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "API compare",
+      "args": {
+        "repo_a": "${REPO}",
+        "repo_b": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "workspace_setup",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Workspace setup",
+      "args": {
+        "repo_path": "${REPO}",
+        "non_interactive": true
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "cortex_a2a_spawn_session",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Spawns A2A session",
+      "args": {
+        "task": "semantic audit",
+        "workflow": "consensus_review",
+        "include_paths": [
+          "crates/cortex-mcp"
+        ],
+        "return_immediately": true
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "freshness"
+        },
+        {
+          "type": "exists",
+          "path": "task_id"
+        },
+        {
+          "type": "exists",
+          "path": "suggested_next_tools"
+        }
+      ]
+    },
+    {
+      "tool": "cortex_a2a_spawn_session",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Spawns impact_review with graph-backed summary",
+      "args": {
+        "task": "review impact of spawn_session",
+        "workflow": "impact_review",
+        "include_paths": [
+          "crates/cortex-mcp"
+        ],
+        "target_symbol": "spawn_session",
+        "return_immediately": true,
+        "wait_for_completion": true
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "contains",
+          "path": "result.summary",
+          "substring": "get_impact_graph"
+        }
+      ]
+    },
+    {
+      "tool": "cortex_a2a_list_tasks",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Lists A2A tasks",
+      "args": {},
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "manage_codecortex",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Manage codecortex assess",
+      "args": {
+        "action": "assess"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "submit_lsp_edges",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "graph",
+      "description_claim": "Submit LSP edges",
+      "args": {
+        "repo_path": "${REPO}",
+        "edges": [
+          {
+            "caller_fqn": "a::f",
+            "callee_fqn": "b::g",
+            "file": "crates/cortex-mcp/src/tools.rs",
+            "line": 1
+          }
+        ]
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "save_observation",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Save observation",
+      "args": {
+        "repo_path": "${REPO}",
+        "text": "semantic audit",
+        "severity": "low"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "get_session_context",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Session context",
+      "args": {
+        "repo_path": "${REPO}",
+        "max_items": 5
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "search_memory",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Search memory",
+      "args": {
+        "repo_path": "${REPO}",
+        "query": "audit",
+        "max_items": 5
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "list_indexed_repositories",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "List repos",
+      "args": {},
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "exists",
+          "path": "data/shared_functions"
+        }
+      ]
+    },
+    {
+      "tool": "delete_repository",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Delete dry-run",
+      "args": {
+        "path": "${REPO}",
+        "dry_run": true
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "get_repository_stats",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Repo stats",
+      "args": {},
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "check_job_status",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Job status",
+      "args": {
+        "id": "semantic-audit-fake-job"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "list_jobs",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "List jobs",
+      "args": {},
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "export_bundle",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Export bundle",
+      "args": {
+        "repository_path": "${REPO}",
+        "output_path": "${REPO}/target/mcp-semantic-bundle.ccx"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "load_bundle",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Load bundle",
+      "args": {
+        "path": "${REPO}/target/mcp-semantic-bundle.ccx"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "list_projects",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "List projects",
+      "args": {},
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "add_project",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Add project",
+      "args": {
+        "path": "${REPO}",
+        "track_branch": true
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "remove_project",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Remove project",
+      "args": {
+        "path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "set_current_project",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Set current",
+      "args": {
+        "path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "get_current_project",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Get current",
+      "args": {},
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "list_branches",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "List branches",
+      "args": {
+        "path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "refresh_project",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Refresh",
+      "args": {
+        "path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "project_status",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Status",
+      "args": {
+        "path": "${REPO}",
+        "include_queue": true
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "project_sync",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Sync",
+      "args": {
+        "path": "${REPO}",
+        "force": false
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "project_branch_diff",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Branch diff",
+      "args": {
+        "path": "${REPO}",
+        "source": "HEAD",
+        "target": "HEAD"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "project_queue_status",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Queue",
+      "args": {
+        "path": "${REPO}",
+        "limit": 5
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "project_metrics",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "project",
+      "description_claim": "Metrics",
+      "args": {
+        "path": "${REPO}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        }
+      ]
+    },
+    {
+      "tool": "cortex_a2a_get_task",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Requires live task_id; artifacts should expose metadata.mcpToolId or task.metadata.extensionUri",
+      "args": {},
+      "assertions": [],
+      "skip": "a2a_chain"
+    },
+    {
+      "tool": "cortex_a2a_send_message",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Requires live task_id from spawn chain",
+      "args": {},
+      "assertions": [],
+      "skip": "a2a_chain"
+    },
+    {
+      "tool": "cortex_a2a_cancel_task",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Requires live task_id from spawn chain",
+      "args": {},
+      "assertions": [],
+      "skip": "a2a_chain"
+    },
+    {
+      "tool": "cortex_a2a_subscribe_task",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Requires live task_id from spawn chain",
+      "args": {},
+      "assertions": [],
+      "skip": "a2a_chain"
+    },
+    {
+      "tool": "cortex_a2a_list_push_configs",
+      "profile": [
+        "nightly"
+      ],
+      "tier": "none",
+      "description_claim": "Requires live task_id from spawn chain",
+      "args": {},
+      "assertions": [],
+      "skip": "a2a_chain"
+    },
+    {
+      "tool": "vector_index_repository",
+      "profile": [
+        "vector_pr"
+      ],
+      "tier": "vector",
+      "description_claim": "Vector indexes fixture repo",
+      "args": {
+        "path": "${FIXTURE}",
+        "repo_path": "${FIXTURE}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "gte",
+          "path": "data/indexed_documents",
+          "min": 3
+        }
+      ],
+      "description_keywords": [
+        "vector",
+        "semantic"
+      ]
+    },
+    {
+      "tool": "vector_index_status",
+      "profile": [
+        "vector_pr"
+      ],
+      "tier": "vector",
+      "description_claim": "Fixture vector index status",
+      "args": {
+        "repo_path": "${FIXTURE}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "gte",
+          "path": "data/repository_documents",
+          "min": 3
+        }
+      ]
+    },
+    {
+      "tool": "vector_search",
+      "profile": [
+        "vector_pr"
+      ],
+      "tier": "vector",
+      "description_claim": "Semantic search ranks auth anchor",
+      "args": {
+        "query": "validate user session token",
+        "repo_path": "${FIXTURE}",
+        "k": 3
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "min_length",
+          "path": "data/results",
+          "min": 1
+        },
+        {
+          "type": "rank_contains",
+          "path": "data/results",
+          "field": "metadata/path",
+          "substring": "auth.rs",
+          "max_rank": 0
+        }
+      ],
+      "negative_control": {
+        "args": {
+          "query": "completely unrelated quantum physics",
+          "repo_path": "${FIXTURE}",
+          "k": 3
+        },
+        "assertions": [
+          {
+            "type": "rank_contains",
+            "path": "data/results",
+            "field": "metadata/path",
+            "substring": "noise.rs",
+            "max_rank": 0
+          }
+        ]
+      },
+      "description_keywords": [
+        "semantic"
+      ]
+    },
+    {
+      "tool": "vector_search_hybrid",
+      "profile": [
+        "vector_pr"
+      ],
+      "tier": "graph_and_vector",
+      "description_claim": "Hybrid search ranks payments anchor",
+      "args": {
+        "query": "refund payment processing",
+        "repo_path": "${FIXTURE}",
+        "k": 3
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "rank_contains",
+          "path": "data/results",
+          "field": "metadata/path",
+          "substring": "payments.rs",
+          "max_rank": 0
+        },
+        {
+          "type": "scores_descending",
+          "path": "data/results"
+        }
+      ],
+      "description_keywords": [
+        "hybrid"
+      ]
+    },
+    {
+      "tool": "vector_index_file",
+      "profile": [
+        "vector_pr"
+      ],
+      "tier": "vector",
+      "description_claim": "Vector indexes single fixture file",
+      "args": {
+        "path": "${FIXTURE}/src/auth.rs",
+        "repo_path": "${FIXTURE}"
+      },
+      "assertions": [
+        {
+          "type": "not_error"
+        },
+        {
+          "type": "gte",
+          "path": "data/indexed_documents",
+          "min": 1
+        }
+      ]
+    },
+    {
+      "tool": "tools_search",
+      "tier": "none",
+      "description_claim": "Lazy discovery search for deferred MCP tools",
+      "description_keywords": [
+        "discovery",
+        "search"
+      ]
+    },
+    {
+      "tool": "tool_profile",
+      "tier": "none",
+      "description_claim": "Reports lazy tool discovery live and deferred tool surface",
+      "description_keywords": [
+        "profile",
+        "lazy"
+      ]
+    },
+    {
+      "tool": "ctx_stats",
+      "tier": "none",
+      "description_claim": "List buffered large tool responses available for re-cutting",
+      "description_keywords": [
+        "buffer",
+        "response"
+      ]
+    },
+    {
+      "tool": "ctx_grep",
+      "tier": "none",
+      "description_claim": "Regex search within a buffered tool response",
+      "description_keywords": [
+        "grep",
+        "buffer"
+      ]
+    },
+    {
+      "tool": "ctx_slice",
+      "tier": "none",
+      "description_claim": "Return a line range from a buffered tool response",
+      "description_keywords": [
+        "slice",
+        "buffer"
+      ]
+    },
+    {
+      "tool": "ctx_peek",
+      "tier": "none",
+      "description_claim": "Preview head and tail of a buffered tool response",
+      "description_keywords": [
+        "peek",
+        "buffer"
+      ]
+    }
+  ]
+}

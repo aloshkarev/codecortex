@@ -1,0 +1,36 @@
+---
+description: A2A hybrid orchestration — delegate multi-step analysis via cortex_a2a_spawn_session; configure via ~/.cortex/config.toml only
+globs: crates/**/*,src/**/*
+alwaysApply: false
+---
+
+# CodeCortex A2A
+
+## Isolation
+
+For multi-step analysis (PR review, kernel/eBPF impact, cross-module refactors), **do not** chain many MCP tools in the host context.
+
+**Do:** call `cortex_a2a_spawn_session` once, then poll task status via the returned `task_id`.
+
+**Do not:** pull large Cypher result sets, raw AST dumps, or full build logs into the host context. Sub-agents exchange `CodeInsight` and graph blackboard pointers.
+
+## Configuration
+
+All A2A settings live in `~/.cortex/config.toml` — **not** environment variables.
+
+```toml
+[a2a]
+enabled = true
+
+[mcp.tools]
+a2a_spawn_session = true
+
+[a2a.server]
+http_enabled = true
+
+[mcp.network]
+transport = "multi"
+listen = "127.0.0.1:3001"
+```
+
+See [docs/A2A.md](docs/A2A.md) and `codecortex://guide/a2a` after MCP connect.

@@ -263,13 +263,11 @@ impl ToolStats {
 
     /// Get p50 (median) duration estimate (simplified)
     pub fn p50_estimate_ms(&self) -> f64 {
-        // Simple estimate: use average as proxy for median
         self.avg_duration_ms()
     }
 
     /// Get p95 duration estimate (simplified)
     pub fn p95_estimate_ms(&self) -> f64 {
-        // Simple estimate: max * 0.8 or avg * 1.5
         self.max_duration_ms
             .map(|m| (m as f64 * 0.8).max(self.avg_duration_ms() * 1.5))
             .unwrap_or(0.0)
@@ -324,16 +322,13 @@ impl TelemetryRegistry {
 
     /// Record a telemetry event
     pub fn record(&mut self, telemetry: ToolTelemetry) {
-        // Update stats
         self.stats
             .entry(telemetry.tool_name.clone())
             .or_default()
             .record(&telemetry);
 
-        // Add to recent records
         self.recent.push(telemetry);
 
-        // Trim if needed
         if self.recent.len() > self.max_recent {
             self.recent.remove(0);
         }
@@ -509,7 +504,7 @@ mod tests {
         let t = collector.finish(false, false);
 
         assert_eq!(t.tool_name, "test_tool");
-        assert!(t.duration_ms < 1000); // Should be fast
+        assert!(t.duration_ms < 1000);
         assert_eq!(t.cache_hit, "l2");
         assert_eq!(t.rows_scanned, Some(100));
         assert_eq!(t.extra_metrics.get("custom"), Some(&serde_json::json!(42)));

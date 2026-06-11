@@ -9,10 +9,6 @@
 # For non-interactive setup (uses defaults):
 #   curl -fsSL https://raw.githubusercontent.com/aloshkarev/codecortex/main/quickstart.sh | bash -s -- --non-interactive
 #
-# Memgraph via Docker is opt-in (matches install.sh):
-#   ... | bash -s -- --memgraph
-#   ... | bash -s -- --no-memgraph   # skip and suppress interactive prompt
-#
 
 set -euo pipefail
 
@@ -21,8 +17,6 @@ INSTALL_DIR="${HOME}/.cortex"
 REPO_DIR=""
 NON_INTERACTIVE=false
 PREFER_NIX=true
-INSTALL_MEMGRAPH=false   # opt-in: use --memgraph or answer yes at the prompt
-INSTALL_DOCKER=false     # opt-in: parity with install.sh (reserved)
 
 # Colors
 RED='\033[0;31m'
@@ -38,25 +32,6 @@ log_warning() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERR]${NC} $1"; }
 
 command_exists() { command -v "$1" &>/dev/null; }
-
-confirm() {
-    if [ "$NON_INTERACTIVE" = true ]; then
-        return 0
-    fi
-    local prompt="${1:-Continue?}"
-    local default="${2:-y}"
-
-    if [ "$default" = "y" ]; then
-        prompt="$prompt [Y/n]"
-    else
-        prompt="$prompt [y/N]"
-    fi
-
-    read -rp "$prompt: " response
-    response=${response:-$default}
-
-    [[ "$response" =~ ^[Yy]$ ]]
-}
 
 run_with_retry() {
     local retries=${1:-3}
@@ -186,24 +161,6 @@ verify_build_prereqs_final() {
     return 0
 }
 
-show_help() {
-    echo "CodeCortex quickstart"
-    echo ""
-    echo "Usage: $0 [options]"
-    echo ""
-    echo "Options:"
-    echo "  --non-interactive, -y  Non-interactive (skips Memgraph unless --memgraph)"
-    echo "  --no-nix               Do not use Nix even if installed"
-    echo "  --memgraph             Install / start Memgraph via Docker (opt-in)"
-    echo "  --no-memgraph          Skip Memgraph (suppresses interactive prompt)"
-    echo "  --help, -h             Show this help"
-    echo ""
-    echo "By default this script does not start Memgraph. Use --memgraph or choose"
-    echo "yes when prompted. Point memgraph_uri in ${INSTALL_DIR}/config.toml at an"
-    echo "existing Memgraph or Neo4j server if you skip Docker setup."
-    echo ""
-}
-
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -215,22 +172,9 @@ while [[ $# -gt 0 ]]; do
             PREFER_NIX=false
             shift
             ;;
-        --memgraph)
-            INSTALL_MEMGRAPH=true
-            shift
-            ;;
-        --no-memgraph)
-            INSTALL_MEMGRAPH="skip"
-            shift
-            ;;
-        --help|-h)
-            show_help
-            exit 0
-            ;;
         *)
-            log_error "Unknown option: $1"
-            show_help
-            exit 1
+            log_warning "Unknown argument: $1"
+            shift
             ;;
     esac
 done
@@ -316,19 +260,15 @@ if [ "$USE_NIX" = false ]; then
     verify_build_prereqs
 fi
 
-# Check Docker (informational only — Memgraph setup is opt-in)
+# Check Docker (optional but recommended)
 if command_exists docker; then
-    log_success "Docker found: $(docker --version)"
-    if ! docker info &>/dev/null; then
-        log_warning "Docker is installed but not running — start it before Memgraph via Docker"
+    if docker info &>/dev/null; then
+        log_success "Docker: available and running"
+    else
+        log_warning "Docker: installed but not running"
     fi
 else
-    log_info "Docker not found — skipping Docker-based Memgraph setup"
-    log_info "  Use --memgraph to install Memgraph, or point CodeCortex at your existing server"
-    # Honour explicit --memgraph / --no-memgraph: do not clear a requested or skipped intent here.
-    if [ "$INSTALL_MEMGRAPH" != "skip" ] && [ "$INSTALL_MEMGRAPH" != "true" ]; then
-        INSTALL_MEMGRAPH=false
-    fi
+    log_warning "Docker: not installed (required for FalkorDB)"
 fi
 
 # Check Ollama (optional)
@@ -399,83 +339,58 @@ fi
 
 log_success "Binary installed: ${BIN_DIR}/cortex"
 
-# Step 5: Setup Memgraph (Docker, opt-in — same flow as install.sh)
-CONTAINER_NAME="codecortex-memgraph"
-MEMGRAPH_PORT=7687
+# Step 5: Setup FalkorDB (Docker)
+CONTAINER_NAME="codecortex-falkordb"
+FALKORDB_PORT=6379
 
-if [ "$INSTALL_MEMGRAPH" = "skip" ]; then
-    log_info "Skipping Memgraph installation (--no-memgraph)"
-elif [ "$INSTALL_MEMGRAPH" = false ]; then
-    if [ "$NON_INTERACTIVE" = true ]; then
-        log_info "Skipping Memgraph setup (use --memgraph to install, or configure manually)"
-    else
-        echo ""
-        log_info "Graph backend setup (optional)"
-        echo "  CodeCortex requires a Memgraph or Neo4j server."
-        echo "  If you already have one running (local or remote), answer 'n' and"
-        echo "  update memgraph_uri in ${INSTALL_DIR}/config.toml after quickstart."
-        if ! confirm "Install Memgraph via Docker now?" "n"; then
-            log_info "Skipping Memgraph setup — update ${INSTALL_DIR}/config.toml with your server URI"
-        else
-            INSTALL_MEMGRAPH=true
-        fi
-    fi
-fi
+log_info "Setting up FalkorDB..."
 
-if [ "$INSTALL_MEMGRAPH" = true ]; then
-    log_info "Setting up Memgraph..."
-    if ! command_exists docker; then
-        log_warning "Docker not found. Install Docker for Memgraph, or connect to an existing instance."
-        log_info "Update memgraph_uri in ${INSTALL_DIR}/config.toml with your server URI."
-        INSTALL_MEMGRAPH=false
-    elif ! docker info &>/dev/null; then
-        log_warning "Docker not running. Start Docker, then run:"
-        echo "  docker run -d --name ${CONTAINER_NAME} -p ${MEMGRAPH_PORT}:7687 memgraph/memgraph:3.8.1"
-        INSTALL_MEMGRAPH=false
+if command_exists docker; then
+    if ! docker info &>/dev/null; then
+        log_warning "Docker not running. Please start Docker and run:"
+        echo "  docker run -d --name ${CONTAINER_NAME} -p ${FALKORDB_PORT}:6379 falkordb/falkordb:latest"
     else
-        # Check for existing container FIRST (before any port checking)
         EXISTING_CONTAINER=""
         if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
             EXISTING_CONTAINER="${CONTAINER_NAME}"
-        elif docker ps -a --format '{{.Names}}' | grep -q '^memgraph$'; then
-            EXISTING_CONTAINER="memgraph"
         fi
 
         if [ -n "$EXISTING_CONTAINER" ]; then
-            MEMGRAPH_PORT=$(docker port "$EXISTING_CONTAINER" 7687 2>/dev/null | cut -d: -f2 || echo "7687")
+            FALKORDB_PORT=$(docker port "$EXISTING_CONTAINER" 6379 2>/dev/null | cut -d: -f2 || echo "6379")
 
             if ! docker ps --format '{{.Names}}' | grep -q "^${EXISTING_CONTAINER}$"; then
                 docker start "$EXISTING_CONTAINER"
                 sleep 2
             fi
-            log_success "Memgraph container running on port ${MEMGRAPH_PORT}"
+            log_success "FalkorDB container running on port ${FALKORDB_PORT}"
         else
-            if check_port 7687; then
-                log_info "Port 7687 is in use, finding available port..."
-                MEMGRAPH_PORT=$(find_available_port 7688 10)
+            if check_port 6379; then
+                log_info "Port 6379 is in use, finding available port..."
+                FALKORDB_PORT=$(find_available_port 6380 10)
             fi
 
-            run_with_retry 3 docker pull memgraph/memgraph:3.8.1
+            run_with_retry 3 docker pull falkordb/falkordb:latest
             run_with_retry 2 docker run -d \
                 --name "${CONTAINER_NAME}" \
-                -p "${MEMGRAPH_PORT}:7687" \
-                -v codecortex-memgraph:/var/lib/memgraph \
-                memgraph/memgraph:3.8.1 \
-                --also-log-to-stderr=true
+                -p "${FALKORDB_PORT}:6379" \
+                -v codecortex-falkordb:/data \
+                falkordb/falkordb:latest
             sleep 2
-            log_success "Memgraph container started on port ${MEMGRAPH_PORT}"
+            log_success "FalkorDB container started on port ${FALKORDB_PORT}"
         fi
     fi
+else
+    log_warning "Docker not found. Install Docker to use FalkorDB, or connect to an existing instance."
+    log_info "You will need to configure FalkorDB manually."
 fi
 
 # Step 6: Create configuration
-mkdir -p "${INSTALL_DIR}"
+mkdir -p "${HOME}/.cortex"
 
 # Determine vector store path
-VECTOR_PATH="${INSTALL_DIR}/vectors"
-config_file="${INSTALL_DIR}/config.toml"
+VECTOR_PATH="${HOME}/.cortex/vectors"
 
-# Determine LLM settings based on available services (used for new config + summary)
+# Determine LLM settings based on available services
 if curl -s http://127.0.0.1:11434/api/tags &>/dev/null; then
     LLM_PROVIDER="ollama"
     EMBEDDING_MODEL="nomic-embed-text"
@@ -490,22 +405,17 @@ else
     log_warning "No LLM provider detected - embeddings disabled"
 fi
 
-# Create TOML config (never overwrite an existing file — same as install.sh)
-if [ -e "$config_file" ] || [ -L "$config_file" ]; then
-    log_info "Configuration file already exists — leaving unchanged: ${config_file}"
-else
-    cat > "$config_file" <<EOF
+# Create TOML config
+if [ ! -f "${HOME}/.cortex/config.toml" ]; then
+    cat > "${HOME}/.cortex/config.toml" <<EOF
 # CodeCortex Configuration
 # Generated by quickstart.sh
 
-# Graph Database (Memgraph or Neo4j)
-# Use memgraph://host for Memgraph, or neo4j://host for Neo4j
-memgraph_uri = "memgraph://127.0.0.1:${MEMGRAPH_PORT}"
-memgraph_user = ""
-memgraph_password = ""
-# Backend type: "memgraph" (default) or "neo4j"
-# Can also be set via CORTEX_BACKEND_TYPE environment variable
-backend_type = "memgraph"
+# Graph Database (FalkorDB)
+backend_type = "falkordb"
+falkordb_uri = "falkor://127.0.0.1:${FALKORDB_PORT}"
+falkordb_graph = "codecortex"
+falkordb_password = ""
 
 # Vector Store Configuration
 [vector]
@@ -544,14 +454,16 @@ pool_connection_timeout_secs = 30
 # Watched Paths (add repositories to watch)
 watched_paths = []
 EOF
-    log_success "Configuration saved to ${config_file}"
+    log_success "Config created: ${HOME}/.cortex/config.toml"
+else
+    log_info "Config already exists: ${HOME}/.cortex/config.toml"
+fi
 
-    # Pull Ollama model if needed (only after creating a fresh config — matches install.sh)
-    if [ "$LLM_PROVIDER" = "ollama" ] && [ -n "$EMBEDDING_MODEL" ]; then
-        if ! ollama list 2>/dev/null | grep -q "$EMBEDDING_MODEL"; then
-            log_info "Pulling Ollama embedding model: ${EMBEDDING_MODEL}..."
-            ollama pull "$EMBEDDING_MODEL" || log_warning "Failed to pull model - run manually: ollama pull ${EMBEDDING_MODEL}"
-        fi
+# Step 7: Pull Ollama model if needed
+if [ "$LLM_PROVIDER" = "ollama" ] && [ -n "$EMBEDDING_MODEL" ]; then
+    if ! ollama list 2>/dev/null | grep -q "$EMBEDDING_MODEL"; then
+        log_info "Pulling Ollama embedding model: ${EMBEDDING_MODEL}..."
+        ollama pull "$EMBEDDING_MODEL" || log_warning "Failed to pull model - run manually: ollama pull ${EMBEDDING_MODEL}"
     fi
 fi
 
@@ -579,21 +491,17 @@ else
 fi
 
 # Verify configuration
-if [ -e "$config_file" ] || [ -L "$config_file" ]; then
-    log_success "Config: ${config_file}"
+if [ -f "${HOME}/.cortex/config.toml" ]; then
+    log_success "Config: ${HOME}/.cortex/config.toml"
 else
     log_warning "Config file not found"
 fi
 
 # Verify database container
-if [ "$INSTALL_MEMGRAPH" = true ]; then
-    if command_exists docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -q "${CONTAINER_NAME}\|memgraph"; then
-        log_success "Database: Memgraph container running"
-    else
-        log_info "Database: Memgraph container not running (start with: docker start ${CONTAINER_NAME})"
-    fi
+if command_exists docker && docker ps --format '{{.Names}}' 2>/dev/null | grep -q "${CONTAINER_NAME}"; then
+    log_success "Database: Container running"
 else
-    log_info "Graph backend: update memgraph_uri in ${config_file}, then run: cortex doctor"
+    log_info "Database: Container not running (start with: docker start ${CONTAINER_NAME})"
 fi
 
 # Verify MCP tools
@@ -612,13 +520,9 @@ echo ""
 echo -e "  ${YELLOW}Installation Summary:${NC}"
 echo ""
 echo "    Binary:     ${BIN_DIR}/cortex"
-echo "    Config:     ${config_file}"
+echo "    Config:     ${HOME}/.cortex/config.toml"
 echo "    Vectors:    ${VECTOR_PATH}"
-if [ "$INSTALL_MEMGRAPH" = true ]; then
-    echo "    Database:   memgraph://127.0.0.1:${MEMGRAPH_PORT}"
-else
-    echo "    Graph:      set memgraph_uri in ${config_file}, then: cortex doctor"
-fi
+echo "    Database:   falkor://127.0.0.1:${FALKORDB_PORT}"
 echo "    Embeddings: ${LLM_PROVIDER}"
 echo ""
 echo -e "  ${YELLOW}Next Steps:${NC}"

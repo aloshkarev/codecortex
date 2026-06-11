@@ -78,6 +78,8 @@ pub enum EdgeKind {
     TypeReference,
     /// Field access expression (e.g. obj.field).
     FieldAccess,
+    /// Near-duplicate clone relationship (MinHash+LSH at index time).
+    SimilarTo,
 }
 
 impl EdgeKind {
@@ -103,6 +105,7 @@ impl EdgeKind {
             Self::MemberOf => "MEMBER_OF",
             Self::TypeReference => "TYPE_REFERENCE",
             Self::FieldAccess => "FIELD_ACCESS",
+            Self::SimilarTo => "SIMILAR_TO",
         }
     }
 }
@@ -114,6 +117,38 @@ pub enum SearchKind {
     Pattern,
     Type,
     Content,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexFreshness {
+    Fresh,
+    Warming,
+    Stale,
+    Partial,
+    Unknown,
+}
+
+impl Default for IndexFreshness {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+impl IndexFreshness {
+    pub fn is_trustworthy_for_impact(self) -> bool {
+        matches!(self, Self::Fresh)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fresh => "fresh",
+            Self::Warming => "warming",
+            Self::Stale => "stale",
+            Self::Partial => "partial",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,6 +179,15 @@ pub struct IndexedFile {
     pub content_hash: String,
     pub nodes: Vec<CodeNode>,
     pub edges: Vec<CodeEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FreshnessReport {
+    pub graph: IndexFreshness,
+    pub vector: IndexFreshness,
+    pub overall: IndexFreshness,
+    pub repair_commands: Vec<String>,
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +245,7 @@ mod tests {
         assert_eq!(EdgeKind::MemberOf.cypher_rel_type(), "MEMBER_OF");
         assert_eq!(EdgeKind::TypeReference.cypher_rel_type(), "TYPE_REFERENCE");
         assert_eq!(EdgeKind::FieldAccess.cypher_rel_type(), "FIELD_ACCESS");
+        assert_eq!(EdgeKind::SimilarTo.cypher_rel_type(), "SIMILAR_TO");
     }
 
     #[test]

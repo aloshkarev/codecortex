@@ -5,9 +5,19 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[build-dependencies]
+tonic-prost-build = "0.14"
+
 [dependencies]
 anyhow.workspace = true
+async-stream = "0.3"
+async-trait.workspace = true
 axum = { version = "0.8", features = ["ws"] }
+prost = "0.14"
+prost-types = "0.14"
+tonic = { version = "0.14", features = ["transport"] }
+tonic-prost = "0.14"
+cortex-a2a = { path = "../cortex-a2a" }
 cortex-analyzer = { path = "../cortex-analyzer" }
 cortex-core = { path = "../cortex-core" }
 cortex-graph = { path = "../cortex-graph" }
@@ -17,20 +27,26 @@ cortex-vector = { path = "../cortex-vector" }
 cortex-watcher = { path = "../cortex-watcher" }
 dashmap.workspace = true
 futures-util = "0.3"
-lru = "0.16"
 rmcp.workspace = true
 rusqlite = { version = "0.38", features = ["bundled"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
 tokio-stream = "0.1"
+tokio.workspace = true
 tracing.workspace = true
 uuid = { version = "1.10", features = ["v4"] }
 
 [dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+httpmock = "0.7"
 jsonschema = "0.45"
-reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "rustls"] }
 tempfile = "3.10"
-tokio-tungstenite = "0.28"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net"] }
+tokio-tungstenite = "0.29"
+tonic = { version = "0.14", features = ["transport"] }
+uuid = { version = "1.10", features = ["v4"] }
+
+# gRPC contract tests call A2aGrpcService in-process (server-only codegen).

@@ -1,0 +1,29 @@
+---
+description: CodeCortex patch planning, branch/PR review, and context packs — use before edits or merge review
+alwaysApply: false
+---
+
+# CodeCortex workflows
+
+## Patch planning (before edits)
+
+1. `check_health` → `index_status`
+2. `get_patch_context` (`task`, `include_paths`, `budget_tokens`, `mode`)
+3. `get_api_contract`, `get_test_context`
+4. Narrow file reads only where packs are thin
+
+MCP prompt: `codecortex_patch_plan`
+
+## Branch / PR review
+
+1. `get_delta_context` → `branch_structural_diff`
+2. `get_impact_graph` on risky symbols
+3. `get_test_context`; optional `pr_review`
+
+MCP prompt: `codecortex_branch_review`
+
+## MUST NOT
+
+- Claim safe to merge if `freshness` is not proven fresh.
+
+**Sync:** skill [codecortex-workflows](../../skills/codecortex-workflows/SKILL.md) · subagents `codecortex-patch-planner`, `codecortex-pr-reviewer`

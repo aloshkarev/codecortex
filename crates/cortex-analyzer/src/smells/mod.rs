@@ -16,6 +16,21 @@ mod dispensables;
 mod language;
 mod oo_abusers;
 
+/// Skip smell heuristics on test-only symbols/paths (reduces false positives).
+pub fn is_test_artifact(file_path: &str, symbol_name: &str) -> bool {
+    let path = file_path.replace('\\', "/");
+    if path.contains("/tests/")
+        || path.ends_with("_test.rs")
+        || path.contains("/test/")
+        || path.starts_with("tests/")
+    {
+        return true;
+    }
+    symbol_name.starts_with("test_")
+        || symbol_name.ends_with("_test")
+        || symbol_name.contains("test_") && symbol_name.contains("_enum_variants")
+}
+
 pub use bloaters::{
     detect_data_clumps, detect_large_classes, detect_long_functions, detect_long_parameter_lists,
     detect_primitive_obsession, detect_switch_statements,

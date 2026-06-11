@@ -189,8 +189,8 @@ linux_install() {
 [Unit]
 Description=CodeCortex MCP Server
 Documentation=${REPO_URL}
-After=network.target network-online.target memgraph.service docker.service
-Wants=network-online.target memgraph.service
+After=network.target network-online.target docker.service
+Wants=network-online.target
 
 [Service]
 Type=simple

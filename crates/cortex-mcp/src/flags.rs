@@ -1,11 +1,13 @@
 //! Feature Flag Registry for CodeCortex MCP Tools
 //!
-//! Centralized management of feature flags that control tool availability
-//! and behavior. Flags are configured via environment variables following
-//! the pattern: `CORTEX_FLAG_MCP_<FLAG_NAME>_ENABLED`
+//! Primary source: `[mcp.tools]` in `~/.cortex/config.toml` via [`FeatureFlags::from_config`].
+//! Legacy `CORTEX_FLAG_MCP_*_ENABLED` environment variables are still honored when config
+//! does not override a tool (env is read as fallback in [`from_config`]).
 
 #![allow(dead_code)]
 
+use cortex_core::CortexConfig;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -46,8 +48,10 @@ fn read_flag_from_env(env_key: &str, default: bool) -> bool {
 }
 
 /// Registry of all feature flags for MCP tools
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureFlags {
+    /// Enable `cortex_a2a_spawn_session` meta-tool (also requires `[a2a].enabled`).
+    pub a2a_spawn_session: bool,
     /// Enable context capsule tool (hybrid retrieval)
     pub context_capsule: bool,
     /// Enable impact graph tool (blast radius analysis)
@@ -60,6 +64,8 @@ pub struct FeatureFlags {
     pub skeleton: bool,
     /// Enable workspace setup tool
     pub workspace_setup: bool,
+    /// Enable manage_codecortex orchestration tool
+    pub manage_codecortex: bool,
     /// Enable LSP edge ingestion
     pub lsp_ingest: bool,
     /// Enable memory read operations
@@ -86,6 +92,9 @@ impl FeatureFlags {
     /// Environment variable prefix for all MCP flags
     const ENV_PREFIX: &'static str = "CORTEX_FLAG_MCP";
 
+    /// Default when `CORTEX_FLAG_MCP_<NAME>_ENABLED` is unset (opt-out via `=0`).
+    const DEFAULT_TOOL_ENABLED: bool = true;
+
     /// Create a flag key from a flag name
     fn make_env_key(name: &str) -> String {
         let normalized = name
@@ -101,24 +110,103 @@ impl FeatureFlags {
         format!("{}_{}_ENABLED", Self::ENV_PREFIX, normalized)
     }
 
-    /// Load feature flags from environment variables
+    fn env_tool_flag(name: &str) -> bool {
+        read_flag_from_env(&Self::make_env_key(name), Self::DEFAULT_TOOL_ENABLED)
+    }
+
+    /// Load from TOML config; env vars fill gaps for legacy deployments.
+    pub fn from_config(config: &CortexConfig) -> Self {
+        let t = &config.mcp.tools;
+        let mut flags = Self {
+            a2a_spawn_session: t.a2a_spawn_session,
+            context_capsule: merge_tool_flag(t.context_capsule, "context_capsule"),
+            impact_graph: merge_tool_flag(t.impact_graph, "impact_graph"),
+            logic_flow: merge_tool_flag(t.logic_flow, "logic_flow"),
+            index_status: merge_tool_flag(t.index_status, "index_status"),
+            skeleton: merge_tool_flag(t.skeleton, "skeleton"),
+            workspace_setup: merge_tool_flag(t.workspace_setup, "workspace_setup"),
+            manage_codecortex: merge_tool_flag(t.manage_codecortex, "manage_codecortex"),
+            lsp_ingest: merge_tool_flag(t.lsp_ingest, "lsp_ingest"),
+            memory_read: merge_tool_flag(t.memory_read, "memory_read"),
+            memory_write: merge_tool_flag(t.memory_write, "memory_write"),
+            vector_read: merge_tool_flag(t.vector_read, "vector_read"),
+            vector_write: merge_tool_flag(t.vector_write, "vector_write"),
+            cache_enabled: merge_tool_flag(t.cache_enabled, "cache"),
+            telemetry_enabled: merge_tool_flag(t.telemetry_enabled, "telemetry"),
+            tfidf_scoring: merge_tool_flag(t.tfidf_scoring, "tfidf_scoring"),
+            centrality_scoring: merge_tool_flag(t.centrality_scoring, "centrality_scoring"),
+        };
+        crate::mcp_profile::McpProfile::from_config_kind(config.mcp.resolved_profile())
+            .apply_to_flags(&mut flags);
+        flags
+    }
+
+    /// Load feature flags from environment variables (legacy).
     pub fn from_env() -> Self {
-        Self {
-            context_capsule: read_flag_from_env(&Self::make_env_key("context_capsule"), false),
-            impact_graph: read_flag_from_env(&Self::make_env_key("impact_graph"), false),
-            logic_flow: read_flag_from_env(&Self::make_env_key("logic_flow"), false),
-            index_status: read_flag_from_env(&Self::make_env_key("index_status"), false),
-            skeleton: read_flag_from_env(&Self::make_env_key("skeleton"), false),
-            workspace_setup: read_flag_from_env(&Self::make_env_key("workspace_setup"), false),
-            lsp_ingest: read_flag_from_env(&Self::make_env_key("lsp_ingest"), false),
-            memory_read: read_flag_from_env(&Self::make_env_key("memory_read"), false),
-            memory_write: read_flag_from_env(&Self::make_env_key("memory_write"), false),
-            vector_read: read_flag_from_env(&Self::make_env_key("vector_read"), true),
-            vector_write: read_flag_from_env(&Self::make_env_key("vector_write"), true),
-            cache_enabled: read_flag_from_env(&Self::make_env_key("cache"), true),
-            telemetry_enabled: read_flag_from_env(&Self::make_env_key("telemetry"), true),
-            tfidf_scoring: read_flag_from_env(&Self::make_env_key("tfidf_scoring"), true),
-            centrality_scoring: read_flag_from_env(&Self::make_env_key("centrality_scoring"), true),
+        let mut flags = Self {
+            a2a_spawn_session: Self::env_tool_flag("a2a_spawn_session"),
+            context_capsule: Self::env_tool_flag("context_capsule"),
+            impact_graph: Self::env_tool_flag("impact_graph"),
+            logic_flow: Self::env_tool_flag("logic_flow"),
+            index_status: Self::env_tool_flag("index_status"),
+            skeleton: Self::env_tool_flag("skeleton"),
+            workspace_setup: Self::env_tool_flag("workspace_setup"),
+            manage_codecortex: Self::env_tool_flag("manage_codecortex"),
+            lsp_ingest: Self::env_tool_flag("lsp_ingest"),
+            memory_read: Self::env_tool_flag("memory_read"),
+            memory_write: Self::env_tool_flag("memory_write"),
+            vector_read: Self::env_tool_flag("vector_read"),
+            vector_write: Self::env_tool_flag("vector_write"),
+            cache_enabled: Self::env_tool_flag("cache"),
+            telemetry_enabled: Self::env_tool_flag("telemetry"),
+            tfidf_scoring: Self::env_tool_flag("tfidf_scoring"),
+            centrality_scoring: Self::env_tool_flag("centrality_scoring"),
+        };
+        crate::mcp_profile::McpProfile::from_env().apply_to_flags(&mut flags);
+        flags
+    }
+
+    /// Create from environment variables, then enable named CLI overrides.
+    ///
+    /// Names accept either `snake_case` or `kebab-case`. The group override
+    /// `memory` enables both memory read and memory write tools.
+    pub fn from_config_with_overrides(config: &CortexConfig, enabled: &[String]) -> Self {
+        let mut flags = Self::from_config(config);
+        Self::apply_cli_enable_overrides(&mut flags, enabled);
+        crate::mcp_profile::McpProfile::from_config_kind(config.mcp.resolved_profile())
+            .apply_to_flags(&mut flags);
+        flags
+    }
+
+    pub fn from_env_with_overrides(enabled: &[String]) -> Self {
+        let mut flags = Self::from_env();
+        Self::apply_cli_enable_overrides(&mut flags, enabled);
+        crate::mcp_profile::McpProfile::from_env().apply_to_flags(&mut flags);
+        flags
+    }
+
+    fn apply_cli_enable_overrides(flags: &mut Self, enabled: &[String]) {
+        for name in enabled {
+            match name.replace('-', "_").to_ascii_lowercase().as_str() {
+                "a2a_spawn_session" => flags.a2a_spawn_session = true,
+                "context_capsule" => flags.context_capsule = true,
+                "impact_graph" => flags.impact_graph = true,
+                "logic_flow" => flags.logic_flow = true,
+                "index_status" => flags.index_status = true,
+                "skeleton" => flags.skeleton = true,
+                "workspace_setup" => flags.workspace_setup = true,
+                "manage_codecortex" => flags.manage_codecortex = true,
+                "lsp_ingest" => flags.lsp_ingest = true,
+                "memory" => {
+                    flags.memory_read = true;
+                    flags.memory_write = true;
+                }
+                "memory_read" => flags.memory_read = true,
+                "memory_write" => flags.memory_write = true,
+                "vector_read" => flags.vector_read = true,
+                "vector_write" => flags.vector_write = true,
+                other => tracing::warn!("Unknown MCP --enable flag ignored: {other}"),
+            }
         }
     }
 
@@ -129,13 +217,20 @@ impl FeatureFlags {
 
     /// Check if a specific flag is enabled by name
     pub fn is_enabled(&self, flag_name: &str) -> bool {
+        self.is_enabled_or(flag_name, false)
+    }
+
+    /// Check a flag, returning `default` for unknown flag names.
+    pub fn is_enabled_or(&self, flag_name: &str, default: bool) -> bool {
         match flag_name {
+            "a2a_spawn_session" | "mcp.a2a_spawn_session.enabled" => self.a2a_spawn_session,
             "context_capsule" | "mcp.context_capsule.enabled" => self.context_capsule,
             "impact_graph" | "mcp.impact_graph.enabled" => self.impact_graph,
             "logic_flow" | "mcp.logic_flow.enabled" => self.logic_flow,
             "index_status" | "mcp.index_status.enabled" => self.index_status,
             "skeleton" | "mcp.skeleton.enabled" => self.skeleton,
             "workspace_setup" | "mcp.workspace_setup.enabled" => self.workspace_setup,
+            "manage_codecortex" | "mcp.manage_codecortex.enabled" => self.manage_codecortex,
             "lsp_ingest" | "mcp.lsp_ingest.enabled" => self.lsp_ingest,
             "memory_read" | "mcp.memory.read.enabled" => self.memory_read,
             "memory_write" | "mcp.memory.write.enabled" => self.memory_write,
@@ -147,7 +242,7 @@ impl FeatureFlags {
             "centrality_scoring" => self.centrality_scoring,
             _ => {
                 tracing::warn!("Unknown feature flag requested: {}", flag_name);
-                false
+                default
             }
         }
     }
@@ -155,12 +250,14 @@ impl FeatureFlags {
     /// Get all flag names and their current values
     pub fn all_flags(&self) -> HashMap<&'static str, bool> {
         let mut flags = HashMap::new();
+        flags.insert("a2a_spawn_session", self.a2a_spawn_session);
         flags.insert("context_capsule", self.context_capsule);
         flags.insert("impact_graph", self.impact_graph);
         flags.insert("logic_flow", self.logic_flow);
         flags.insert("index_status", self.index_status);
         flags.insert("skeleton", self.skeleton);
         flags.insert("workspace_setup", self.workspace_setup);
+        flags.insert("manage_codecortex", self.manage_codecortex);
         flags.insert("lsp_ingest", self.lsp_ingest);
         flags.insert("memory_read", self.memory_read);
         flags.insert("memory_write", self.memory_write);
@@ -173,55 +270,17 @@ impl FeatureFlags {
         flags
     }
 
-    /// Create from environment variables, then enable any flags named in `enabled`.
-    ///
-    /// Names accept either `snake_case` or `kebab-case` (dashes are normalised to underscores).
-    ///
-    /// Supported override names:
-    /// - `context_capsule` / `context-capsule`
-    /// - `impact_graph` / `impact-graph`
-    /// - `logic_flow` / `logic-flow`
-    /// - `index_status` / `index-status`
-    /// - `skeleton`
-    /// - `workspace_setup` / `workspace-setup`
-    /// - `lsp_ingest` / `lsp-ingest`
-    /// - `memory` (enables both `memory_read` and `memory_write`)
-    /// - `memory_read` / `memory-read`
-    /// - `memory_write` / `memory-write`
-    pub fn from_env_with_overrides(enabled: &[String]) -> Self {
-        let mut flags = Self::from_env();
-        for name in enabled {
-            match name.replace('-', "_").to_ascii_lowercase().as_str() {
-                "context_capsule" => flags.context_capsule = true,
-                "impact_graph" => flags.impact_graph = true,
-                "logic_flow" => flags.logic_flow = true,
-                "index_status" => flags.index_status = true,
-                "skeleton" => flags.skeleton = true,
-                "workspace_setup" => flags.workspace_setup = true,
-                "lsp_ingest" => flags.lsp_ingest = true,
-                "memory" => {
-                    flags.memory_read = true;
-                    flags.memory_write = true;
-                }
-                "memory_read" => flags.memory_read = true,
-                "memory_write" => flags.memory_write = true,
-                other => {
-                    tracing::warn!("Unknown --enable flag ignored: {other}");
-                }
-            }
-        }
-        flags
-    }
-
     /// Create a new instance with all flags enabled (for testing)
     pub fn all_enabled() -> Self {
         Self {
+            a2a_spawn_session: true,
             context_capsule: true,
             impact_graph: true,
             logic_flow: true,
             index_status: true,
             skeleton: true,
             workspace_setup: true,
+            manage_codecortex: true,
             lsp_ingest: true,
             memory_read: true,
             memory_write: true,
@@ -237,12 +296,14 @@ impl FeatureFlags {
     /// Create a new instance with all flags disabled (for testing)
     pub fn all_disabled() -> Self {
         Self {
+            a2a_spawn_session: false,
             context_capsule: false,
             impact_graph: false,
             logic_flow: false,
             index_status: false,
             skeleton: false,
             workspace_setup: false,
+            manage_codecortex: false,
             lsp_ingest: false,
             memory_read: false,
             memory_write: false,
@@ -253,6 +314,14 @@ impl FeatureFlags {
             tfidf_scoring: false,
             centrality_scoring: false,
         }
+    }
+}
+
+fn merge_tool_flag(config_value: bool, env_name: &str) -> bool {
+    if std::env::var(FeatureFlags::make_env_key(env_name)).is_ok() {
+        FeatureFlags::env_tool_flag(env_name)
+    } else {
+        config_value
     }
 }
 
@@ -269,10 +338,10 @@ mod tests {
     #[test]
     fn feature_flags_defaults_from_env() {
         let flags = FeatureFlags::from_env();
-        // Without env vars set, most flags should be disabled by default
-        assert!(!flags.context_capsule);
-        assert!(!flags.impact_graph);
-        // Cache and telemetry should be enabled by default
+        // Without env vars set, MCP tools are enabled by default (opt-out via =0)
+        assert!(flags.context_capsule);
+        assert!(flags.impact_graph);
+        assert!(flags.manage_codecortex);
         assert!(flags.cache_enabled);
         assert!(flags.telemetry_enabled);
     }
@@ -334,7 +403,15 @@ mod tests {
         let all = flags.all_flags();
         assert!(all.contains_key("context_capsule"));
         assert!(all.contains_key("impact_graph"));
-        assert_eq!(all.len(), 15);
+        assert_eq!(all.len(), 17);
+    }
+
+    #[test]
+    fn from_config_respects_a2a_spawn_session() {
+        let mut config = CortexConfig::default();
+        config.mcp.tools.a2a_spawn_session = true;
+        let flags = FeatureFlags::from_config(&config);
+        assert!(flags.a2a_spawn_session);
     }
 
     #[test]
@@ -347,5 +424,16 @@ mod tests {
             FeatureFlags::make_env_key("memory.read"),
             "CORTEX_FLAG_MCP_MEMORY_READ_ENABLED"
         );
+    }
+
+    #[test]
+    fn strict_mcp_profile_tightens_flags() {
+        let mut flags = FeatureFlags::all_enabled();
+        crate::mcp_profile::McpProfile::Strict.apply_to_flags(&mut flags);
+        assert!(!flags.vector_write);
+        assert!(!flags.memory_write);
+        assert!(!flags.memory_read);
+        assert!(!flags.context_capsule);
+        assert!(flags.vector_read);
     }
 }

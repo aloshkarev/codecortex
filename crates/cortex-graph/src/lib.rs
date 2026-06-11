@@ -1,23 +1,22 @@
 //! # CodeCortex Graph Library
 //!
-//! Graph database client and query engine for code intelligence.
+//! Graph database client and query engine for code intelligence (FalkorDB-only).
 //!
 //! ## Overview
 //!
 //! This crate provides graph database integration:
 //!
-//! - **Graph Client**: [`GraphClient`] for Neo4j/Memgraph connections
+//! - **Graph Client**: [`GraphClient`] for FalkorDB connections
 //! - **Query Engine**: [`QueryEngine`] for building and executing Cypher queries
 //! - **Bundle Store**: [`BundleStore`] for exporting/importing graph data
 //! - **Node Writer**: [`NodeWriter`] for batch node insertion
 //! - **Connection Pool**: [`ConnectionPool`] for managing database connections
 //! - **Schema Migrations**: [`MigrationManager`] for versioned schema changes
-//! - **Multiple Backends**: [`BackendKind`] for Neo4j, Memgraph, Neptune support
 //! - **Query Timeouts**: [`TimeoutExecutor`] for query timeout handling
 //!
 //! ## Connection
 //!
-//! The client connects to Neo4j or Memgraph databases using bolt protocol:
+//! The client connects to FalkorDB using the Redis protocol:
 //!
 //! ```rust,no_run
 //! use cortex_graph::GraphClient;
@@ -72,10 +71,14 @@
 //! ```
 
 pub mod backend;
+pub mod blackboard;
 pub mod bundle;
 pub mod client;
 pub mod cross_project;
-pub mod memgraph;
+mod edge_profile;
+pub mod falkordb;
+pub mod falkordb_params;
+pub mod falkordb_profile;
 pub mod migration;
 pub mod pool;
 pub mod query_engine;
@@ -84,17 +87,25 @@ pub mod scoped_query;
 pub mod timeout;
 pub mod writer;
 
-pub use backend::{BackendConfig, BackendKind, BackendStats, QueryOptions, QueryResult};
+pub use backend::{
+    BackendConfig, BackendKind, BackendStats, QueryOptions, QueryResult, detect_backend_from_config,
+};
+pub use blackboard::{AgentInsightRecord, BlackboardWriter, insight_id};
 pub use bundle::BundleStore;
 pub use client::GraphClient;
 pub use cross_project::CrossProjectQueryBuilder;
-pub use memgraph::MemgraphClient;
+pub use edge_profile::{EdgeWriteProfile, RelTypeBoltStats};
+pub use falkordb::FalkorDbClient;
+pub use falkordb_params::GraphParam;
+pub use falkordb_profile::{FalkorDbProfileSnapshot, falkordb_profile_enabled};
 pub use migration::{CURRENT_VERSION, MIGRATIONS, Migration, MigrationManager, MigrationResult};
 pub use pool::{ConnectionPool, PoolConfig, PoolStats, PooledConnection};
 pub use query_engine::{AnalysisQuery, QueryEngine};
 pub use schema::{
-    BranchIndexRecord, create_branch_index, delete_branch_index, ensure_constraints,
-    ensure_navigation_schema, get_branch_indexes, is_branch_index_current, mark_branch_index_stale,
+    BranchIndexRecord, clear_file_tombstone, create_branch_index, delete_branch_index,
+    delete_file_index, ensure_constraints, ensure_navigation_schema, get_branch_indexes,
+    is_branch_index_current, mark_branch_index_stale, mark_branch_vector_fresh,
+    upsert_file_tombstone, warn_if_falkordb_codenode_id_index_missing,
 };
 pub use scoped_query::{QueryScope, ScopedQueryBuilder, ScopedResult};
 pub use timeout::{QueryTiming, QueryType, TimeoutConfig, TimeoutExecutor};

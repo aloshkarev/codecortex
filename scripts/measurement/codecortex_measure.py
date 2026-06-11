@@ -96,6 +96,21 @@ def init_db(conn: sqlite3.Connection) -> None:
             vector_read_enabled INTEGER,
             vector_write_enabled INTEGER
         );
+
+        CREATE TABLE IF NOT EXISTS context_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+            task_key TEXT,
+            tool TEXT NOT NULL,
+            mode TEXT,
+            freshness TEXT,
+            source_exposure TEXT,
+            estimated_tokens INTEGER NOT NULL CHECK (estimated_tokens >= 0),
+            omitted_count INTEGER NOT NULL CHECK (omitted_count >= 0),
+            latency_ms INTEGER,
+            recorded_at TEXT NOT NULL,
+            notes TEXT
+        );
         """
     )
     conn.commit()
@@ -290,6 +305,35 @@ def cmd_tokens_import(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_context_log(args: argparse.Namespace) -> int:
+    conn = connect(args.db)
+    init_db(conn)
+    conn.execute(
+        """
+        INSERT INTO context_events (
+            session_id, task_key, tool, mode, freshness, source_exposure,
+            estimated_tokens, omitted_count, latency_ms, recorded_at, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            args.session_id,
+            args.task_key,
+            args.tool,
+            args.mode,
+            args.freshness,
+            args.source_exposure,
+            args.estimated_tokens,
+            args.omitted_count,
+            args.latency_ms,
+            utc_now(),
+            args.notes,
+        ),
+    )
+    conn.commit()
+    print(f"Logged context event for {args.tool} in session {args.session_id}")
+    return 0
+
+
 def cmd_snapshot(args: argparse.Namespace) -> int:
     conn = connect(args.db)
     init_db(conn)
@@ -345,10 +389,14 @@ def _aggregate(conn: sqlite3.Connection, where_sql: str, params: tuple) -> Dict[
         COALESCE(AVG(t.rework), 0) AS rework_rate,
         COALESCE(SUM(u.prompt_tokens), 0) AS prompt_tokens,
         COALESCE(SUM(u.completion_tokens), 0) AS completion_tokens,
-        COALESCE(SUM(u.total_tokens), 0) AS total_tokens
+        COALESCE(SUM(u.total_tokens), 0) AS total_tokens,
+        COALESCE(SUM(c.estimated_tokens), 0) AS context_estimated_tokens,
+        COALESCE(SUM(c.omitted_count), 0) AS context_omitted_count,
+        COALESCE(AVG(c.latency_ms), 0) AS context_latency_avg_ms
     FROM sessions s
     LEFT JOIN tasks t ON t.session_id = s.session_id
     LEFT JOIN token_usage u ON u.session_id = s.session_id
+    LEFT JOIN context_events c ON c.session_id = s.session_id
     WHERE {where_sql}
     GROUP BY s.mode
     """
@@ -399,6 +447,8 @@ def cmd_report(args: argparse.Namespace) -> int:
             - baseline.get("success_rate", 0.0),
             "rework_rate_delta": cortex.get("rework_rate", 0.0)
             - baseline.get("rework_rate", 0.0),
+            "context_estimated_tokens_delta": cortex.get("context_estimated_tokens", 0.0)
+            - baseline.get("context_estimated_tokens", 0.0),
         },
     }
 
@@ -482,6 +532,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_import.add_argument("--provider", required=True, help="cursor/openai/anthropic/etc")
     p_import.add_argument("--default-model", default=None, help="Used when CSV has no model col")
     p_import.set_defaults(func=cmd_tokens_import)
+
+    p_context = sub.add_parser("context-log", help="Log MCP context pack size/freshness/privacy metadata")
+    p_context.add_argument("--session-id", required=True)
+    p_context.add_argument("--task-key", default=None)
+    p_context.add_argument("--tool", required=True)
+    p_context.add_argument("--mode", default=None)
+    p_context.add_argument("--freshness", default=None)
+    p_context.add_argument("--source-exposure", default=None)
+    p_context.add_argument("--estimated-tokens", required=True, type=int)
+    p_context.add_argument("--omitted-count", default=0, type=int)
+    p_context.add_argument("--latency-ms", default=None, type=int)
+    p_context.add_argument("--notes", default=None)
+    p_context.set_defaults(func=cmd_context_log)
 
     p_snap = sub.add_parser("snapshot", help="Capture MCP readiness snapshot")
     p_snap.add_argument("--session-id", required=True)

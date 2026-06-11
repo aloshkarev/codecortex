@@ -16,6 +16,7 @@ It is designed for practical A/B operation in Cursor workflows.
   - starts `cortex mcp start`, writes logs, stores MCP snapshot
 - `scripts/measurement/token_usage.template.csv`
   - import template for token usage exports
+- context-event logging for MCP context pack size, freshness, source exposure, omitted count, and latency
 
 ## Quick start (5 minutes)
 
@@ -70,13 +71,28 @@ python3 scripts/measurement/codecortex_measure.py tokens-import \
   --provider cursor
 ```
 
-6) Close session:
+6) Log context pack metadata when using MCP context tools:
+
+```bash
+python3 scripts/measurement/codecortex_measure.py context-log \
+  --session-id "$SESSION_ID" \
+  --task-key "TASK-001" \
+  --tool get_patch_context \
+  --mode feature \
+  --freshness fresh \
+  --source-exposure snippets \
+  --estimated-tokens 4210 \
+  --omitted-count 3 \
+  --latency-ms 880
+```
+
+7) Close session:
 
 ```bash
 python3 scripts/measurement/codecortex_measure.py session-end --session-id "$SESSION_ID"
 ```
 
-7) Generate report:
+8) Generate report:
 
 ```bash
 python3 scripts/measurement/codecortex_measure.py report
@@ -153,3 +169,4 @@ If `diagnose` fails (for example DB auth issue), snapshot still stores partial d
 - Keep assistant/model settings stable during experiment windows.
 - Record rework honestly for quality control.
 - Review weekly using `report` output in JSON and table formats.
+- Capture context events for every `get_context_capsule`, `get_patch_context`, `get_delta_context`, and `get_test_context` call used during treatment sessions.

@@ -184,7 +184,6 @@ impl CompileCommand {
     pub fn include_paths(&self) -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
-        // Use arguments if available, otherwise parse command string
         let args: Vec<String> = if let Some(ref args) = self.arguments {
             args.clone()
         } else if let Some(ref cmd) = self.command {
@@ -230,7 +229,6 @@ impl CompileCommand {
     pub fn defines(&self) -> HashMap<String, Option<String>> {
         let mut defines = HashMap::new();
 
-        // Use arguments if available, otherwise parse command string
         let args: Vec<String> = if let Some(ref args) = self.arguments {
             args.clone()
         } else if let Some(ref cmd) = self.command {
@@ -285,7 +283,6 @@ impl BuildDetector {
             ..Default::default()
         };
 
-        // Check for each build system
         let mut detected = Vec::new();
 
         if self.has_cargo() {
@@ -339,12 +336,10 @@ impl BuildDetector {
             config.source_dirs.push(self.root.join("Tests"));
         }
 
-        // Load compile_commands.json if present (for C/C++ projects)
         if detected.contains(&BuildSystem::CMake) || detected.contains(&BuildSystem::Make) {
             self.load_compile_commands(&mut config);
         }
 
-        // Deduplicate build systems
         config.build_systems = detected
             .into_iter()
             .collect::<HashSet<_>>()
@@ -432,7 +427,6 @@ impl BuildDetector {
     fn enrich_cargo_config(&self, config: &mut ProjectConfig) {
         let cargo_toml = self.root.join("Cargo.toml");
         if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
-            // Simple TOML parsing for name and version
             for line in content.lines() {
                 let line = line.trim();
                 if line.starts_with("name = ") {
@@ -443,19 +437,16 @@ impl BuildDetector {
             }
         }
 
-        // Add standard Rust source directories
         config.source_dirs.push(self.root.join("src"));
         config.source_dirs.push(self.root.join("tests"));
         config.source_dirs.push(self.root.join("benches"));
         config.source_dirs.push(self.root.join("examples"));
 
-        // Exclude target directory
         config.exclude_patterns.push("target/**".to_string());
     }
 
     /// Enrich config with CMake information
     fn enrich_cmake_config(&self, config: &mut ProjectConfig) {
-        // Add common C/C++ source directories
         for dir in &["src", "include", "lib", "inc", "source"] {
             let path = self.root.join(dir);
             if path.exists() {
@@ -463,7 +454,6 @@ impl BuildDetector {
             }
         }
 
-        // Add common include paths
         for dir in &["include", "inc", "src"] {
             let path = self.root.join(dir);
             if path.exists() {
@@ -471,7 +461,6 @@ impl BuildDetector {
             }
         }
 
-        // Standard defines for CMake projects
         config.defines.insert("NDEBUG".to_string(), None);
     }
 
@@ -488,7 +477,6 @@ impl BuildDetector {
             }
         }
 
-        // Add standard Go source directories
         for dir in &["cmd", "pkg", "internal", "api"] {
             let path = self.root.join(dir);
             if path.exists() {
@@ -496,7 +484,6 @@ impl BuildDetector {
             }
         }
 
-        // Exclude vendor directory
         config.exclude_patterns.push("vendor/**".to_string());
     }
 
@@ -514,7 +501,6 @@ impl BuildDetector {
             }
         }
 
-        // Exclude common Python cache directories
         config.exclude_patterns.push("__pycache__/**".to_string());
         config.exclude_patterns.push("*.pyc".to_string());
         config.exclude_patterns.push(".venv/**".to_string());
@@ -530,7 +516,6 @@ impl BuildDetector {
             config.name = pkg["name"].as_str().map(|s| s.to_string());
             config.version = pkg["version"].as_str().map(|s| s.to_string());
 
-            // Add dependencies
             if let Some(deps) = pkg["dependencies"].as_object() {
                 for (name, value) in deps {
                     config.dependencies.push(Dependency {
@@ -553,7 +538,6 @@ impl BuildDetector {
             }
         }
 
-        // Exclude node_modules
         config.exclude_patterns.push("node_modules/**".to_string());
     }
 
@@ -570,10 +554,8 @@ impl BuildDetector {
                 config.version = pkg["version"].as_str().map(|s| s.to_string());
             }
 
-            // Add dependencies if not already present
             if let Some(deps) = pkg["dependencies"].as_object() {
                 for (name, value) in deps {
-                    // Avoid duplicates
                     if !config.dependencies.iter().any(|d| &d.name == name) {
                         config.dependencies.push(Dependency {
                             name: name.clone(),
@@ -598,7 +580,6 @@ impl BuildDetector {
             }
         }
 
-        // Exclude node_modules (same as npm)
         if !config
             .exclude_patterns
             .iter()
@@ -610,7 +591,6 @@ impl BuildDetector {
 
     /// Load compile_commands.json for C/C++ projects
     fn load_compile_commands(&self, config: &mut ProjectConfig) {
-        // Check common locations for compile_commands.json
         let locations = [
             self.root.join("compile_commands.json"),
             self.root.join("build/compile_commands.json"),
@@ -623,7 +603,6 @@ impl BuildDetector {
                 && let Ok(content) = std::fs::read_to_string(&path)
                 && let Ok(commands) = serde_json::from_str::<Vec<CompileCommand>>(&content)
             {
-                // Extract include paths and defines from all commands
                 let mut all_includes = HashSet::new();
                 let mut all_defines = HashMap::new();
 

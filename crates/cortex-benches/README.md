@@ -12,6 +12,12 @@ This crate contains benchmarks for critical performance paths in CodeCortex:
 | `impact_benchmark` | Impact graph construction | `cortex-mcp` |
 | `cache_benchmark` | L1/L2 cache operations | `cortex-mcp` |
 | `tfidf_benchmark` | TF-IDF scoring | `cortex-indexer` |
+| `parse_batch_benchmark` | Parse fixture tree batch | `cortex-parser` |
+| `pipeline_stage_benchmark` | Pipeline construct / empty run | `cortex-pipeline` |
+| `watcher_perf_benchmark` | Bounded event queue saturation | `cortex-watcher` |
+| `vector_smoke_benchmark` | Lance store open (temp dir) | `cortex-vector` |
+| `graph_bulk_benchmark` | Synthetic node build + writer chunk split | `cortex-core` |
+| `hybrid_search_benchmark` | Hybrid rerank with mock store/embedder | `cortex-vector` |
 
 ## Running Benchmarks
 

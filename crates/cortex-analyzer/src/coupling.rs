@@ -204,7 +204,6 @@ impl CouplingAnalyzer {
             0.0
         };
 
-        // Build relations
         let relations = self.build_coupling_relations(module, ce);
 
         let abstractness = 0.0; // Would need abstract class detection
@@ -249,7 +248,6 @@ impl CouplingAnalyzer {
         let method_count = methods.len();
         let field_count = fields.len();
 
-        // Calculate LCOM (Lack of Cohesion of Methods)
         // LCOM = P - Q where P = pairs of methods that don't share fields
         // and Q = pairs of methods that share fields
         let mut shared_pairs = 0usize;
@@ -287,10 +285,8 @@ impl CouplingAnalyzer {
             0.0
         };
 
-        // Determine cohesion type based on LCOM and patterns
         let cohesion_type = self.determine_cohesion_type(lcom, method_count, field_count);
 
-        // Calculate cohesion score (inverse of LCOM)
         let cohesion_score = 1.0 - lcom;
 
         CohesionMetrics {
@@ -364,7 +360,6 @@ impl CouplingAnalyzer {
             self.find_cycles_from(start, start, &mut visited, &mut path, &mut cycles);
         }
 
-        // Remove duplicates
         let mut unique_cycles: Vec<Vec<String>> = Vec::new();
         for cycle in cycles {
             let mut sorted = cycle.clone();
@@ -532,7 +527,6 @@ mod tests {
     #[test]
     fn find_unstable_modules() {
         let mut analyzer = CouplingAnalyzer::new();
-        // Create a very unstable module (high ce, low ca)
         analyzer.add_dependency("unstable", "dep1");
         analyzer.add_dependency("unstable", "dep2");
         analyzer.add_dependency("unstable", "dep3");

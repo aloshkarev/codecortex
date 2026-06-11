@@ -1,6 +1,6 @@
 //! # CodeCortex MCP Server Library
 //!
-//! Model Context Protocol server implementation with a broad set of production-ready tools.
+//! Model Context Protocol server implementation with 46 production-ready tools.
 //!
 //! ## Overview
 //!
@@ -50,7 +50,7 @@
 //! // Tools are automatically registered and available to MCP clients
 //! let tools = cortex_mcp::tool_names();
 //! assert!(!tools.is_empty());
-//! assert_eq!(tools.len(), cortex_mcp::tool_catalog::TOOL_NAMES.len());
+//! assert_eq!(tools.len(), 46);
 //! ```
 //!
 //! ## Quality Metrics
@@ -74,40 +74,68 @@
 //!
 //! ## Feature Flags
 //!
-//! Tools can be enabled/disabled via environment variables:
+//! Tools are enabled by default; opt out via environment variables:
 //!
-//! - `CORTEX_FLAG_<TOOL_NAME>_ENABLED=0/1`
-//! - Example: `CORTEX_FLAG_MCP_MEMORY_READ_ENABLED=0`
+//! - `CORTEX_FLAG_MCP_<TOOL_NAME>_ENABLED=0` (or `1` to force on)
+//! - Example: `CORTEX_FLAG_MCP_IMPACT_GRAPH_ENABLED=0`
+//!
+//! ## Enterprise defaults
+//!
+//! - `CORTEX_MCP_PROFILE=strict`: tightens optional MCP surfaces (see [`McpProfile`]).
+//! - `CORTEX_MCP_AUDIT_LOG=/path/to.jsonl`: newline-delimited JSON audit for envelope-based tools.
 
+mod a2a_facade;
+pub mod a2a_grpc;
+mod a2a_host;
+pub mod a2a_http;
+pub mod a2a_services;
+pub mod agent_pack;
+mod audit;
 mod cache;
 mod capsule;
 mod centrality;
 pub mod contracts;
 mod flags;
 pub mod handler;
+mod handler_guides;
+pub mod host_guard;
 mod impact;
+pub mod intelligence;
 mod jobs;
+mod lazy_tools;
 mod logic_flow;
 mod lsp_ingest;
+mod mcp_profile;
+mod mcp_protocol;
 mod memory;
 mod metrics;
 mod network_server;
 mod project_tools;
 pub mod quality;
+mod rerank;
+mod response_buffer;
+mod savings;
 #[allow(deprecated, dead_code)]
 mod server;
 mod telemetry;
 mod tfidf;
-pub mod tool_catalog;
+mod tools;
 mod vector_service;
 
+pub use agent_pack::{
+    AgentPackInstallOptions, AgentPackInstallResult, install_agent_pack, resolve_agent_pack,
+};
+pub use audit::{ToolAuditEvent, log_tool_audit};
 pub use cache::{CacheHierarchy, CacheStats, L1Cache, L2Cache};
 pub use capsule::{
     CapsuleConfig, CapsuleItem, ContextCapsuleBuilder, ContextCapsuleResult, GraphSearchResult,
     IntentWeights,
 };
 pub use centrality::{CentralityGraph, CentralityScorer, CombinedCentrality, Edge};
-pub use contracts::{CacheHit, EnvelopeBuilder, EnvelopeMeta, EnvelopeStatus, ErrorBody};
+pub use contracts::{
+    CacheHit, EnvelopeBuilder, EnvelopeMeta, EnvelopeStatus, ErrorBody, FreshnessState,
+    OmittedItem, ResponseScope, SourcePolicy, TokenBudget, TokenSavings,
+};
 pub use flags::FeatureFlags;
 pub use handler::{CortexHandler, McpServeOptions, McpTransport, start_with_options};
 pub use impact::{
@@ -117,6 +145,7 @@ pub use impact::{
 pub use jobs::JobRegistry;
 pub use logic_flow::{LogicFlowResult, LogicFlowSearcher, RawEdge, ScoredPath};
 pub use lsp_ingest::{IngestedEdge, LspEdgeIngester, LspEdgeInput, MergeMode};
+pub use mcp_profile::McpProfile;
 pub use memory::{
     AuditEntry, Classification, MemoryStore, Observation, Severity, generate_observation_id,
 };
@@ -124,23 +153,31 @@ pub use metrics::{
     HealthCheck, HealthCheckStatus, HealthChecker, HealthStatus, LatencySnapshot, MetricsRegistry,
     MetricsSnapshot, TimerGuard, global_metrics,
 };
+pub use network_server::{NetworkState, start_network};
 pub use quality::{
     QualityConfig, QualityHealthStatus, QualityRegistry, QualitySummaryReport, QualityTimer,
     ToolQualityMetrics,
 };
+pub use savings::{
+    SavingsBucket, SavingsEvent, SavingsLedger, SavingsReport, SavingsTotals, SessionCounters,
+    compute_token_savings, finish_counted_response, flush as flush_savings, init_from_config,
+    load_report as load_savings_report, record_call as record_savings_call, reset as reset_savings,
+    savings_dir, savings_enabled,
+};
 pub use telemetry::{TelemetryCollector, TelemetryRegistry, ToolTelemetry};
-pub use tfidf::{Document, TfIdfScorer, tokenize};
+pub use rerank::{content_etag, rerank_candidates, RerankCandidate, RerankWeights};
+pub use tfidf::{Bm25Scorer, Document, LexicalMode, TfIdfScorer, rrf_fuse, tokenize};
+pub use tools::{
+    IndexTier, PrivacyRisk, TimeoutTier, TokenPolicy, ToolCard, ToolCostClass, ToolGuidance,
+    ToolMetadata, output_token_hint, tool_cards, tool_guidance_for, tool_metadata,
+    tool_metadata_for, tool_names,
+};
+pub use vector_service::collect_indexable_code_files;
 pub use vector_service::{VectorIndexResult, VectorService};
-
-/// Names of all tools this server exposes (alphabetically sorted; same as MCP registration).
-#[must_use]
-pub fn tool_names() -> &'static [&'static str] {
-    tool_catalog::TOOL_NAMES
-}
 
 #[cfg(test)]
 mod tests {
-    use super::tool_names;
+    use super::{tool_metadata, tool_names};
     use std::collections::HashSet;
 
     #[test]
@@ -148,6 +185,13 @@ mod tests {
         let tools = tool_names();
         let unique: HashSet<_> = tools.iter().copied().collect();
         assert_eq!(tools.len(), unique.len());
+    }
+
+    #[test]
+    fn exported_tool_metadata_covers_names() {
+        let tools: HashSet<_> = tool_names().iter().copied().collect();
+        let metadata: HashSet<_> = tool_metadata().iter().map(|meta| meta.name).collect();
+        assert_eq!(tools, metadata);
     }
 
     #[test]
@@ -166,104 +210,5 @@ mod tests {
         assert!(tools.contains(&"vector_search"));
         assert!(tools.contains(&"vector_search_hybrid"));
         assert!(tools.contains(&"vector_index_status"));
-    }
-}
-
-#[cfg(test)]
-mod tool_metadata_contract {
-    use super::tool_catalog::{self, ToolHints};
-    use crate::handler::CortexHandler;
-    use cortex_core::config::CortexConfig;
-    use rmcp::{ServerHandler, model::Tool};
-
-    #[test]
-    fn initialize_instructions_include_resource_uri() {
-        let h = CortexHandler::new(CortexConfig::default());
-        let info = h.get_info();
-        let inst = info
-            .instructions
-            .as_ref()
-            .expect("server should expose instructions");
-        assert!(inst.len() > 200, "instructions should be substantive");
-        assert!(
-            inst.contains(tool_catalog::TOOL_ROUTING_RESOURCE_URI),
-            "instructions should point agents at the routing resource"
-        );
-    }
-
-    #[test]
-    fn tool_definitions_align_with_catalog() {
-        let h = CortexHandler::new(CortexConfig::default());
-        let mut tools: Vec<Tool> = h.tool_definitions_for_test();
-        tools.sort_by(|a, b| a.name.cmp(&b.name));
-        assert_eq!(
-            tools.len(),
-            tool_catalog::TOOL_NAMES.len(),
-            "handler and catalog must expose the same tool count"
-        );
-        for (tool, expected_name) in tools.iter().zip(tool_catalog::TOOL_NAMES.iter()) {
-            assert_eq!(
-                tool.name.as_ref(),
-                *expected_name,
-                "tool list ordering / membership drift"
-            );
-            let desc = tool.description.as_deref().unwrap_or("");
-            assert!(
-                desc.len() >= 48,
-                "tool {:?} should have a substantive description",
-                tool.name
-            );
-            let hints: ToolHints = tool_catalog::hints_for(expected_name)
-                .unwrap_or_else(|| panic!("catalog missing hints for {expected_name}"));
-            let ann = tool
-                .annotations
-                .as_ref()
-                .unwrap_or_else(|| panic!("tool {:?} missing annotations", tool.name));
-            assert_eq!(
-                ann.read_only_hint,
-                Some(hints.read_only),
-                "read_only_hint mismatch for {:?}",
-                tool.name
-            );
-            assert_eq!(
-                ann.open_world_hint,
-                Some(hints.open_world),
-                "open_world_hint mismatch for {:?}",
-                tool.name
-            );
-            if hints.destructive {
-                assert_eq!(
-                    ann.destructive_hint,
-                    Some(true),
-                    "expected destructive for {:?}",
-                    tool.name
-                );
-            } else {
-                assert_ne!(
-                    ann.destructive_hint,
-                    Some(true),
-                    "unexpected destructive for {:?}",
-                    tool.name
-                );
-            }
-            // idempotent_hint is only meaningful when read_only_hint is false (per MCP notes).
-            if !hints.read_only {
-                if hints.idempotent {
-                    assert_eq!(
-                        ann.idempotent_hint,
-                        Some(true),
-                        "expected idempotent for {:?}",
-                        tool.name
-                    );
-                } else {
-                    assert_ne!(
-                        ann.idempotent_hint,
-                        Some(true),
-                        "unexpected idempotent for {:?}",
-                        tool.name
-                    );
-                }
-            }
-        }
     }
 }

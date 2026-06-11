@@ -22,19 +22,16 @@ enum SourceLanguage {
 
 impl SourceLanguage {
     fn from_file_path(path: &str) -> Self {
-        let ext = Path::new(path).extension().and_then(|s| s.to_str());
-        match ext {
-            Some(e) if e.eq_ignore_ascii_case("py") => Self::Python,
-            Some(e) if e.eq_ignore_ascii_case("rb") => Self::Ruby,
-            Some(e) if e.eq_ignore_ascii_case("php") => Self::Php,
-            Some(e)
-                if e.eq_ignore_ascii_case("sh")
-                    || e.eq_ignore_ascii_case("bash")
-                    || e.eq_ignore_ascii_case("zsh") =>
-            {
-                Self::Shell
-            }
-            Some(e) if e.eq_ignore_ascii_case("json") => Self::Json,
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        match ext.as_deref() {
+            Some("py") => Self::Python,
+            Some("rb") => Self::Ruby,
+            Some("php") => Self::Php,
+            Some("sh") | Some("bash") | Some("zsh") => Self::Shell,
+            Some("json") => Self::Json,
             _ => Self::Unknown,
         }
     }
@@ -131,7 +128,6 @@ impl DuplicationDetector {
         let mut duplicates = Vec::new();
         let mut all_blocks: Vec<(String, usize, usize, Vec<String>)> = Vec::new();
 
-        // Extract code blocks from each source
         for (file_path, source) in sources {
             let lang = SourceLanguage::from_file_path(file_path);
             let blocks = self.extract_blocks(source, lang);
@@ -140,7 +136,6 @@ impl DuplicationDetector {
             }
         }
 
-        // Compare blocks for similarity
         for i in 0..all_blocks.len() {
             for j in (i + 1)..all_blocks.len() {
                 let (file1, start1, end1, tokens1) = &all_blocks[i];
@@ -175,7 +170,6 @@ impl DuplicationDetector {
             }
         }
 
-        // Sort by similarity descending
         duplicates.sort_by(|a, b| {
             b.similarity
                 .partial_cmp(&a.similarity)
@@ -237,13 +231,11 @@ impl DuplicationDetector {
         let lines: Vec<&str> = source.lines().collect();
         let mut blocks = Vec::new();
 
-        // Use sliding window to extract blocks
         for window_size in self.config.min_lines..=lines.len().min(100) {
             for start in 0..=(lines.len() - window_size) {
                 let end = start + window_size;
                 let block_lines = &lines[start..end];
 
-                // Skip if block is mostly empty or comments
                 if self.is_significant_block(block_lines, lang) {
                     let tokens = self.tokenize_block(block_lines, lang);
                     if tokens.len() >= self.config.min_tokens {
@@ -263,12 +255,10 @@ impl DuplicationDetector {
         for line in lines {
             let trimmed = line.trim();
 
-            // Skip empty lines
             if trimmed.is_empty() {
                 continue;
             }
 
-            // Skip comment-only lines
             if is_comment_line(trimmed, lang) {
                 continue;
             }
@@ -294,7 +284,6 @@ impl DuplicationDetector {
                 continue;
             }
 
-            // Split into tokens
             for token in self.tokenize_line(trimmed, lang) {
                 let normalized = if self.config.normalize_identifiers {
                     self.normalize_token(&token)
@@ -333,7 +322,6 @@ impl DuplicationDetector {
                     tokens.push(current_token.clone());
                     current_token.clear();
                 }
-                // Include punctuation as separate tokens
                 tokens.push(c.to_string());
             }
         }
@@ -347,13 +335,11 @@ impl DuplicationDetector {
 
     /// Normalize a token (replace identifiers with placeholders)
     fn normalize_token(&self, token: &str) -> String {
-        // Check if it's an identifier (starts with letter or underscore)
         if token
             .chars()
             .next()
             .is_some_and(|c| c.is_alphabetic() || c == '_')
         {
-            // Check if it's a keyword
             let keywords = [
                 "fn", "let", "const", "if", "else", "for", "while", "loop", "match", "return",
                 "struct", "enum", "impl", "trait", "pub", "mod", "use", "def", "class", "import",
@@ -381,7 +367,6 @@ impl DuplicationDetector {
             return 0.0;
         }
 
-        // Use Jaccard similarity
         let set1: HashSet<&str> = tokens1.iter().map(|s| s.as_str()).collect();
         let set2: HashSet<&str> = tokens2.iter().map(|s| s.as_str()).collect();
 
@@ -429,7 +414,6 @@ impl DuplicationDetector {
                     line.to_string()
                 };
 
-                // Skip empty lines and comments
                 if normalized.is_empty() || is_comment_line(normalized.as_str(), lang) {
                     continue;
                 }
@@ -445,7 +429,6 @@ impl DuplicationDetector {
             }
         }
 
-        // Return only lines that appear multiple times
         line_occurrences
             .into_iter()
             .filter(|(_, locations)| locations.len() > 1)
@@ -563,7 +546,6 @@ fn function_two() {
 }
 "#;
         let duplicates = detector.find_duplicates_in_file(source, "test.rs");
-        // Should not find duplicates as functions are different
         assert!(duplicates.is_empty() || duplicates.iter().all(|d| d.similarity < 0.9));
     }
 

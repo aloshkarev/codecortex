@@ -30,7 +30,6 @@ pub const MIGRATIONS: &[Migration] = &[Migration {
     version: 1,
     name: "initial_schema",
     statements: &[
-        // Label indexes (Memgraph supports these)
         "CREATE INDEX ON :Repository;",
         "CREATE INDEX ON :Directory;",
         "CREATE INDEX ON :File;",
@@ -41,7 +40,6 @@ pub const MIGRATIONS: &[Migration] = &[Migration {
         "CREATE INDEX ON :Module;",
         "CREATE INDEX ON :CallTarget;",
         "CREATE INDEX ON :CodeNode;",
-        // Label-property indexes for faster lookups
         "CREATE INDEX ON :Repository(path);",
         "CREATE INDEX ON :Directory(path);",
         "CREATE INDEX ON :File(path);",
@@ -88,7 +86,6 @@ impl<'a> MigrationManager<'a> {
 
     /// Get the current schema version from the database
     pub async fn current_version(&self) -> Result<MigrationVersion> {
-        // Ensure migration tracking node exists
         self.ensure_migration_node().await?;
 
         let result = self
@@ -138,7 +135,6 @@ impl<'a> MigrationManager<'a> {
         let mut applied = false;
         let mut error = None;
 
-        // Check if already applied
         let current = self.current_version().await?;
         if migration.version <= current {
             return Ok(MigrationResult {
@@ -150,7 +146,6 @@ impl<'a> MigrationManager<'a> {
             });
         }
 
-        // Apply statements
         for statement in migration.statements {
             if let Err(e) = self.client.run(statement).await {
                 // Ignore "already exists" errors for idempotency
@@ -165,7 +160,6 @@ impl<'a> MigrationManager<'a> {
         }
 
         if error.is_none() {
-            // Update version
             let update_result = self
                 .client
                 .run(&format!(
@@ -282,7 +276,6 @@ mod tests {
         assert!(initial.is_some());
 
         let initial = initial.unwrap();
-        // Should have label-only indexes
         let label_index_count = initial
             .statements
             .iter()
@@ -300,7 +293,6 @@ mod tests {
         assert!(initial.is_some());
 
         let initial = initial.unwrap();
-        // Should have label-property indexes (statements containing INDEX ON :Label(property))
         let prop_index_count = initial
             .statements
             .iter()

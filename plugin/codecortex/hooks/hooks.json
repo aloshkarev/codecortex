@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/session-codecortex-context.sh"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/subagent-codecortex-inject.sh",
+        "matcher": "codecortex-indexer|codecortex-analyzer|codecortex-pr-reviewer|codecortex-patch-planner"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/preflight-before-edit.sh",
+        "matcher": "Write|StrReplace"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/after-task-codecortex.sh",
+        "matcher": "Task"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/subagent-codecortex-followup.sh",
+        "matcher": "codecortex-indexer|codecortex-analyzer|codecortex-pr-reviewer|codecortex-patch-planner"
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/mcp-codecortex-reminder.sh"
+      }
+    ]
+  }
+}

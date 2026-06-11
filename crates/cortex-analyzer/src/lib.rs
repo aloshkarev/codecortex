@@ -67,11 +67,13 @@ pub mod code_smells;
 pub mod context;
 pub mod coupling;
 pub mod cross_project;
+pub mod clones;
 pub mod duplication;
 pub mod navigation;
 pub mod refactoring;
 pub mod review;
 pub mod smells;
+pub mod symbol_resolve;
 
 pub use analyzer::{AnalyzePathFilters, Analyzer};
 pub use code_smells::{
@@ -86,6 +88,7 @@ pub use cross_project::{
     ApiSurfaceComparison, CrossProjectAnalyzer, CrossProjectLocation, CrossProjectMatch,
     SharedDependency,
 };
+pub use clones::{find_clone_pairs, tokenize_body, CloneCandidate, FunctionBody};
 pub use duplication::{CodeLocation, DuplicateBlock, DuplicationConfig, DuplicationDetector};
 pub use navigation::{
     BranchStructuralDiff, DefinitionConfidence, DefinitionResult, ImpactEntry, ModifiedSymbolEntry,
@@ -110,4 +113,9 @@ pub use smells::{
     detect_primitive_obsession, detect_refused_bequest, detect_shotgun_surgery,
     detect_shotgun_surgery_with_context, detect_speculative_generality, detect_switch_statements,
     detect_temporary_fields,
+};
+pub use symbol_resolve::{
+    ResolveOutcome, ResolveSymbolInput, SymbolHit, SymbolResolver, callable_kinds_cypher_list,
+    definitional_kind_cypher_predicate, entity_kind_from_graph_kind, is_callable_kind,
+    is_definitional_kind, normalize_repo_relative_file, normalize_repo_scope,
 };

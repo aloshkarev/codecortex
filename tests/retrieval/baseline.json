@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "note": "Placeholder baseline metrics structure. Update after first full MCP retrieval-eval run.",
+  "generated_at": null,
+  "pipeline": null,
+  "metrics": {
+    "overall": {
+      "r_at_1": null,
+      "r_at_5": null,
+      "r_at_20": null,
+      "mrr": null,
+      "cases": null
+    },
+    "by_tier": {
+      "exact": {
+        "r_at_1": null,
+        "r_at_5": 0.5,
+        "r_at_20": null,
+        "mrr": null,
+        "cases": null
+      },
+      "concept": {
+        "r_at_1": null,
+        "r_at_5": null,
+        "r_at_20": null,
+        "mrr": null,
+        "cases": null
+      },
+      "multi_hop": {
+        "r_at_1": null,
+        "r_at_5": null,
+        "r_at_20": null,
+        "mrr": null,
+        "cases": null
+      }
+    },
+    "token_efficiency": {
+      "recall_at_2k": null,
+      "recall_at_10k": null
+    }
+  },
+  "strict_floors": {
+    "exact": {
+      "r_at_5": 0.5
+    }
+  }
+}

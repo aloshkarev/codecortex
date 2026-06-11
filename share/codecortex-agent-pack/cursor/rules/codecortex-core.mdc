@@ -1,0 +1,26 @@
+---
+description: CodeCortex default loop — MCP preflight, freshness guardrails, and skill pointers for all agent work in this repo
+alwaysApply: true
+---
+
+# CodeCortex core
+
+Use **user-codecortex** MCP for repository intelligence (not backend/DB MCPs).
+
+## Discover → Act → Verify
+
+1. **Discover** — `resources/read` → `codecortex://guide/agent-workflows`; `recommend_tools` when unsure.
+2. **Act** — scoped tools with `include_paths` / `budget_tokens`; `get_patch_context` before broad reads.
+3. **Verify** — `check_health`, `index_status`, response `freshness`.
+
+## MUST
+
+- Treat `freshness: stale`, `partial`, or `unknown` as a warning before high-confidence impact claims.
+- Prefer metadata, signatures, skeletons, and bounded snippets over full files.
+- Use `recommend_tools` / `get_tool_guidance` instead of loading the full catalog every turn.
+
+## MUST NOT
+
+- Substitute CodeCortex for live backend schema, auth, or deployment (see `codecortex://guide/agent-platforms`).
+
+**Sync:** [AGENTS.md](plugin README + AGENTS.md in repo) · skills: `.cursor/skills/codecortex*` · index: [cursor/RULES-INDEX.md](../../cursor/RULES-INDEX.md)

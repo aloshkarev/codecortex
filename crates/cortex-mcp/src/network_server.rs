@@ -1,4 +1,6 @@
 use crate::FeatureFlags;
+use crate::a2a_http::merge_a2a_router;
+use crate::a2a_services::build_a2a_hub;
 use crate::handler::{CortexHandler, McpServeOptions, McpTransport};
 use axum::extract::Extension;
 use axum::extract::Request;
@@ -21,13 +23,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 #[derive(Clone)]
-struct NetworkState {
-    config: CortexConfig,
-    token: Option<String>,
-    max_clients: usize,
-    idle_timeout_secs: u64,
-    ws_clients: Arc<AtomicUsize>,
-    feature_flags: FeatureFlags,
+pub struct NetworkState {
+    pub config: CortexConfig,
+    pub feature_flags: FeatureFlags,
+    pub token: Option<String>,
+    pub max_clients: usize,
+    pub idle_timeout_secs: u64,
+    pub ws_clients: Arc<AtomicUsize>,
+    pub a2a_hub: Arc<cortex_a2a::A2aHub>,
 }
 
 fn unauthorized_response() -> Response {
@@ -77,6 +80,95 @@ async fn ws_upgrade(ws: WebSocketUpgrade, Extension(state): Extension<NetworkSta
     ws.on_upgrade(move |socket| websocket_loop(socket, shared))
 }
 
+async fn ws_a2a_upgrade(
+    ws: WebSocketUpgrade,
+    Extension(state): Extension<NetworkState>,
+) -> Response {
+    let shared = state.clone();
+    ws.on_upgrade(move |socket| ws_a2a_loop(socket, shared))
+}
+
+fn terminal_task_state(state: &cortex_a2a::wire::TaskStateWire) -> bool {
+    matches!(
+        state,
+        cortex_a2a::wire::TaskStateWire::TaskStateCompleted
+            | cortex_a2a::wire::TaskStateWire::TaskStateFailed
+            | cortex_a2a::wire::TaskStateWire::TaskStateCanceled
+            | cortex_a2a::wire::TaskStateWire::TaskStateRejected
+    )
+}
+
+async fn ws_a2a_loop(socket: WebSocket, state: NetworkState) {
+    use axum::extract::ws::Message;
+    use cortex_a2a::StreamResponseWire;
+    use futures_util::{SinkExt, StreamExt};
+
+    let (mut sink, mut stream) = socket.split();
+    while let Some(msg) = stream.next().await {
+        let Ok(Message::Text(text)) = msg else {
+            break;
+        };
+        let Ok(body) = serde_json::from_str::<serde_json::Value>(&text) else {
+            let _ = sink
+                .send(Message::Text(r#"{"error":"invalid json"}"#.into()))
+                .await;
+            continue;
+        };
+        if body.get("type").and_then(|v| v.as_str()) != Some("a2a_subscribe") {
+            let _ = sink
+                .send(Message::Text(
+                    r#"{"error":"expected type a2a_subscribe"}"#.into(),
+                ))
+                .await;
+            continue;
+        }
+        let Some(task_id_str) = body.get("task_id").and_then(|v| v.as_str()) else {
+            let _ = sink
+                .send(Message::Text(r#"{"error":"missing task_id"}"#.into()))
+                .await;
+            continue;
+        };
+        let Ok(task_id) = uuid::Uuid::parse_str(task_id_str) else {
+            let _ = sink
+                .send(Message::Text(r#"{"error":"invalid task_id"}"#.into()))
+                .await;
+            continue;
+        };
+        let mut rx = state.a2a_hub.subscribe_task(&task_id);
+        if let Ok(wire) = state.a2a_hub.get_task_wire(task_id_str) {
+            let event = StreamResponseWire {
+                task: Some(wire),
+                status_update: None,
+                artifact_update: None,
+            };
+            if let Ok(data) = serde_json::to_string(&event) {
+                let _ = sink.send(Message::Text(data.into())).await;
+            }
+        }
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    if let Ok(data) = serde_json::to_string(&event) {
+                        if sink.send(Message::Text(data.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    if event
+                        .task
+                        .as_ref()
+                        .is_some_and(|t| terminal_task_state(&t.status.state))
+                    {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            }
+        }
+        break;
+    }
+}
+
 async fn websocket_loop(socket: WebSocket, state: NetworkState) {
     state.ws_clients.fetch_add(1, Ordering::SeqCst);
 
@@ -101,7 +193,11 @@ async fn websocket_loop(socket: WebSocket, state: NetworkState) {
             future::ready(text.map(|text| Message::Text(text.into())))
         });
 
-    let handler = CortexHandler::new_with_flags(state.config.clone(), state.feature_flags.clone());
+    let handler = CortexHandler::new_with_a2a(
+        state.config.clone(),
+        state.feature_flags.clone(),
+        Some(state.a2a_hub.clone()),
+    );
     let service = match handler.serve::<_, io::Error, _>((outgoing, incoming)).await {
         Ok(svc) => svc,
         Err(err) => {
@@ -116,13 +212,15 @@ async fn websocket_loop(socket: WebSocket, state: NetworkState) {
 }
 
 pub async fn start_network(config: CortexConfig, options: McpServeOptions) -> anyhow::Result<()> {
+    let a2a_hub = build_a2a_hub(&config).await;
     let state = NetworkState {
         config: config.clone(),
+        feature_flags: options.feature_flags.clone(),
         token: options.token.clone(),
         max_clients: options.max_clients,
         idle_timeout_secs: options.idle_timeout_secs,
         ws_clients: Arc::new(AtomicUsize::new(0)),
-        feature_flags: options.feature_flags.clone(),
+        a2a_hub: a2a_hub.clone(),
     };
 
     let mut app = Router::new();
@@ -133,12 +231,14 @@ pub async fn start_network(config: CortexConfig, options: McpServeOptions) -> an
     ) {
         let cfg_for_factory = config.clone();
         let flags_for_factory = options.feature_flags.clone();
+        let a2a_hub_http = a2a_hub.clone();
         let http_service: StreamableHttpService<CortexHandler, LocalSessionManager> =
             StreamableHttpService::new(
                 move || {
-                    Ok(CortexHandler::new_with_flags(
+                    Ok(CortexHandler::new_with_a2a(
                         cfg_for_factory.clone(),
                         flags_for_factory.clone(),
+                        Some(a2a_hub_http.clone()),
                     ))
                 },
                 Default::default(),
@@ -152,9 +252,24 @@ pub async fn start_network(config: CortexConfig, options: McpServeOptions) -> an
         McpTransport::WebSocket | McpTransport::Multi
     ) {
         app = app.route("/ws", get(ws_upgrade));
+        app = app.route("/a2a/v1/ws", get(ws_a2a_upgrade));
     }
 
-    app = app.layer(Extension(state)).layer(from_fn(auth_middleware));
+    app = merge_a2a_router(app, state.clone());
+    app = app
+        .layer(Extension(state.clone()))
+        .layer(from_fn(auth_middleware));
+
+    if config.a2a.enabled && config.a2a.server.grpc_enabled {
+        let grpc_listen = config.a2a.server.grpc_listen.parse()?;
+        let hub = a2a_hub.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::a2a_grpc::serve_grpc(grpc_listen, hub).await {
+                tracing::error!("a2a gRPC server failed: {e}");
+            }
+        });
+        tracing::info!("A2A gRPC listening on {}", config.a2a.server.grpc_listen);
+    }
 
     let listener = tokio::net::TcpListener::bind(options.listen).await?;
     tracing::info!(
@@ -189,6 +304,7 @@ mod tests {
             allow_remote: false,
             max_clients: 4,
             idle_timeout_secs: 60,
+            feature_flags: FeatureFlags::from_env(),
         };
 
         let handle = tokio::spawn(async move {
@@ -265,6 +381,7 @@ mod tests {
             allow_remote: false,
             max_clients: 8,
             idle_timeout_secs: 60,
+            feature_flags: FeatureFlags::from_env(),
         };
 
         let handle = tokio::spawn(async move {

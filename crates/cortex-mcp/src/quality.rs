@@ -66,8 +66,8 @@ pub struct QualityConfig {
 impl Default for QualityConfig {
     fn default() -> Self {
         Self {
-            target_error_rate: 0.01,     // 1% target
-            target_p95_latency_ms: 1000, // 1s target
+            target_error_rate: 0.01,
+            target_p95_latency_ms: 1000,
             reliability_weight: 0.6,
             performance_weight: 0.4,
             sample_window: 100,
@@ -185,17 +185,14 @@ impl ToolTracker {
             (0.0, 0, 0, 0)
         };
 
-        // Calculate reliability score (0-1, higher is better)
         let reliability_score = 1.0 - (error_rate / self.config.target_error_rate).min(1.0);
 
-        // Calculate performance score (0-1, higher is better)
         let performance_score = if p95 == 0 {
             1.0
         } else {
             1.0 - (p95 as f64 / self.config.target_p95_latency_ms as f64 / 2.0).min(1.0)
         };
 
-        // Combined quality score
         let quality_score = (reliability_score * self.config.reliability_weight
             + performance_score * self.config.performance_weight)
             .min(1.0);
@@ -309,7 +306,6 @@ impl QualityRegistry {
             return 1.0;
         }
 
-        // Weighted average by invocation count
         let weighted_score: f64 = metrics
             .iter()
             .map(|m| m.quality_score * m.total_invocations as f64)
@@ -541,7 +537,6 @@ mod tests {
     fn quality_metrics_scores() {
         let registry = QualityRegistry::with_defaults();
 
-        // All successes
         for _ in 0..10 {
             registry.record_success("good_tool", Duration::from_millis(50));
         }
@@ -555,10 +550,8 @@ mod tests {
     fn quality_health_status() {
         let registry = QualityRegistry::with_defaults();
 
-        // No data
         assert_eq!(registry.health_status(), QualityHealthStatus::Unknown);
 
-        // All successes
         for _ in 0..10 {
             registry.record_success("tool1", Duration::from_millis(10));
         }
@@ -613,12 +606,10 @@ mod tests {
     fn problematic_tools() {
         let registry = QualityRegistry::with_defaults();
 
-        // Good tool
         for _ in 0..10 {
             registry.record_success("good_tool", Duration::from_millis(10));
         }
 
-        // Problematic tool
         for _ in 0..5 {
             registry.record_failure("bad_tool", Duration::from_millis(10));
         }

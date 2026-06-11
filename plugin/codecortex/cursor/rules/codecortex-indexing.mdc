@@ -1,0 +1,24 @@
+---
+description: CodeCortex graph/vector indexing, watch, jobs, and freshness repair — use when index is stale or setup is needed
+alwaysApply: false
+---
+
+# CodeCortex indexing
+
+## When to use
+
+- Stale, partial, or unknown `freshness`
+- First-time setup, `cortex watch`, vector-index, background jobs
+
+## Workflow
+
+1. `check_health` → `index_status` (+ `vector_index_status` if semantic search needed)
+2. `explain_index_freshness` / `diagnose` when repairing
+3. Repair: `add_code_to_graph` (default `force: true`) or `cortex index <repo> --force`
+4. Poll `list_jobs` / `check_job_status` for background work
+
+## MUST NOT
+
+- Run expensive graph analysis while index is stale (repair first).
+
+**Sync:** skill [codecortex-indexing](../../skills/codecortex-indexing/SKILL.md) · subagent `codecortex-indexer` · [agents/README.md](../../agents/README.md)

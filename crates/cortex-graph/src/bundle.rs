@@ -29,7 +29,6 @@ impl BundleStore {
     }
 
     pub async fn export_from_graph(client: &GraphClient, repo_path: &str) -> Result<GraphBundle> {
-        // Use the unified query API
         let node_rows = client
             .query_with_param(
                 "MATCH (r:Repository {path: $path})
@@ -75,7 +74,7 @@ impl BundleStore {
                 edges.push(CodeEdge {
                     from,
                     to,
-                    kind: decode_edge_kind(rel_type),
+                    kind: decode_edge_kind(&rel_type),
                     properties,
                 });
             }
@@ -85,93 +84,36 @@ impl BundleStore {
     }
 }
 
-/// Decode a CodeNode from a JSON object (Memgraph or Neo4j format)
+/// Decode a CodeNode from a FalkorDB JSON row (`RETURN n` properties map).
 fn decode_node_from_json(node: &serde_json::Value) -> CodeNode {
-    // Handle both Neo4j format (node with id, labels, properties)
-    // and Memgraph format (direct properties)
-    let neo4j_wrapped = node.get("labels").is_some()
-        || node
-            .get("properties")
-            .and_then(|value| value.as_object())
-            .map(|props| props.contains_key("id") || props.contains_key("kind"))
-            .unwrap_or(false);
-
-    let (kind_str, name, id, path, line_number, lang, source, docstring, properties_value) =
-        if neo4j_wrapped {
-            let props = node.get("properties").unwrap_or(&serde_json::Value::Null);
-            // Neo4j-style: {labels: [...], properties: {kind, name, ...}}
-            let kind = props.get("kind").and_then(|v| v.as_str()).unwrap_or("File");
-            let name = props
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let id = props.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-            let path = props.get("path").and_then(|v| v.as_str());
-            let line_number = props
-                .get("line_number")
-                .and_then(|v| v.as_i64())
-                .map(|v| v as u32);
-            let lang = props.get("lang").and_then(|v| v.as_str());
-            let source = props.get("source").and_then(|v| v.as_str());
-            let docstring = props.get("docstring").and_then(|v| v.as_str());
-            let properties = props.get("properties");
-            (
-                kind,
-                name,
-                id,
-                path,
-                line_number,
-                lang,
-                source,
-                docstring,
-                properties,
-            )
-        } else {
-            // Direct format: {kind, name, id, path, ...}
-            let kind = node.get("kind").and_then(|v| v.as_str()).unwrap_or("File");
-            let name = node
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default();
-            let id = node.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-            let path = node.get("path").and_then(|v| v.as_str());
-            let line_number = node
-                .get("line_number")
-                .and_then(|v| v.as_i64())
-                .map(|v| v as u32);
-            let lang = node.get("lang").and_then(|v| v.as_str());
-            let source = node.get("source").and_then(|v| v.as_str());
-            let docstring = node.get("docstring").and_then(|v| v.as_str());
-            let properties = node.get("properties");
-            (
-                kind,
-                name,
-                id,
-                path,
-                line_number,
-                lang,
-                source,
-                docstring,
-                properties,
-            )
-        };
+    let kind_str = node.get("kind").and_then(|v| v.as_str()).unwrap_or("File");
+    let name = node
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    let id = node.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+    let path = node.get("path").and_then(|v| v.as_str());
+    let line_number = node
+        .get("line_number")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as u32);
+    let lang = node.get("lang").and_then(|v| v.as_str());
+    let source = node.get("source").and_then(|v| v.as_str());
+    let docstring = node.get("docstring").and_then(|v| v.as_str());
+    let properties_value = node.get("properties");
 
     let mut properties = properties_value.map(decode_properties).unwrap_or_default();
 
     // Restore top-level branch/repository_path written by upsert_node into
     // the properties map so round-tripped bundles preserve scoping metadata.
-    let src = if neo4j_wrapped {
-        node.get("properties").unwrap_or(node)
-    } else {
-        node
-    };
+    let src = node;
     for key in &["branch", "repository_path"] {
-        if let Some(val) = src.get(*key).and_then(|v| v.as_str())
-            && !val.is_empty()
-        {
-            properties
-                .entry(key.to_string())
-                .or_insert_with(|| val.to_string());
+        if let Some(val) = src.get(*key).and_then(|v| v.as_str()) {
+            if !val.is_empty() {
+                properties
+                    .entry(key.to_string())
+                    .or_insert_with(|| val.to_string());
+            }
         }
     }
 
@@ -316,7 +258,6 @@ mod tests {
         assert_eq!(decode_entity_kind("Module"), EntityKind::Module);
         assert_eq!(decode_entity_kind("Property"), EntityKind::Property);
         assert_eq!(decode_entity_kind("Field"), EntityKind::Field);
-        // Unknown values default to File
         assert_eq!(decode_entity_kind("Unknown"), EntityKind::File);
         assert_eq!(decode_entity_kind(""), EntityKind::File);
     }
@@ -339,7 +280,6 @@ mod tests {
         assert_eq!(decode_edge_kind("HAS_PROPERTY"), EdgeKind::HasProperty);
         assert_eq!(decode_edge_kind("DOCUMENTS"), EdgeKind::Documents);
         assert_eq!(decode_edge_kind("ANNOTATES"), EdgeKind::Annotates);
-        // Unknown values default to Contains
         assert_eq!(decode_edge_kind("Unknown"), EdgeKind::Contains);
         assert_eq!(decode_edge_kind(""), EdgeKind::Contains);
     }
@@ -356,7 +296,6 @@ mod tests {
         assert_eq!(decode_lang("java"), Some(Language::Java));
         assert_eq!(decode_lang("php"), Some(Language::Php));
         assert_eq!(decode_lang("ruby"), Some(Language::Ruby));
-        // Unknown values return None
         assert_eq!(decode_lang(""), None);
         assert_eq!(decode_lang("kotlin"), None);
     }

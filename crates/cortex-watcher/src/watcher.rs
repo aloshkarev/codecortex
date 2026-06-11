@@ -2,7 +2,7 @@ use crate::debounce::{DebounceConfig, FileEventKind, SmartDebouncer};
 use crate::filter::{EventFilter, EventFilterBuilder, WatchEventKind};
 use crate::perf::{PerfConfig, PerformanceManager};
 use cortex_core::{CortexConfig, CortexError, GitOperations, Result};
-use cortex_indexer::Indexer;
+use cortex_indexer::{IndexChangePlan, Indexer};
 use notify::RecursiveMode;
 use notify_debouncer_mini::{DebounceEventResult, new_debouncer};
 use std::collections::{HashMap, HashSet};
@@ -68,12 +68,7 @@ impl WatchSession {
     pub async fn run(self, indexer: Indexer) -> Result<()> {
         info!("Starting file watcher");
         let (tx, mut rx) = mpsc::channel::<PathBuf>(128);
-        let watched_paths = self.list();
-        let watched_roots: Vec<PathBuf> = watched_paths
-            .iter()
-            .cloned()
-            .map(canonicalize_lossy)
-            .collect();
+        let watched_roots: Vec<PathBuf> = self.list().into_iter().map(canonicalize_lossy).collect();
         let mut branch_state: HashMap<PathBuf, (String, String)> = HashMap::new();
 
         let mut debouncer = new_debouncer(
@@ -91,7 +86,7 @@ impl WatchSession {
             CortexError::Io(e.to_string())
         })?;
 
-        for path in watched_paths {
+        for path in self.list() {
             debouncer
                 .watcher()
                 .watch(path.as_path(), RecursiveMode::Recursive)
@@ -251,6 +246,14 @@ pub struct SmartWatchConfig {
     pub include_extensions: Vec<String>,
     /// Directories to exclude
     pub exclude_dirs: Vec<String>,
+    /// Repository root for `.cortexignore` / `.gitignore` filtering (usually git root).
+    pub repo_root: Option<PathBuf>,
+    /// Filesystem scope for watch filtering; defaults to `repo_root`.
+    pub scan_root: Option<PathBuf>,
+    /// Project policy excludes merged into cortex ignore filtering.
+    pub policy_excludes: Vec<String>,
+    /// When true and `repo_root` is set, apply cortex ignore rules before legacy filters
+    pub use_cortexignore: bool,
 }
 
 impl Default for SmartWatchConfig {
@@ -280,6 +283,25 @@ impl Default for SmartWatchConfig {
                 "build".into(),
                 "dist".into(),
             ],
+            repo_root: None,
+            scan_root: None,
+            policy_excludes: Vec::new(),
+            use_cortexignore: true,
+        }
+    }
+}
+
+impl SmartWatchConfig {
+    /// Build watch config with git-aware ignore roots for a project folder.
+    pub fn for_project_path(path: &Path) -> Self {
+        let scan_root = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let repo_root =
+            cortex_core::find_git_repository_root(&scan_root).unwrap_or_else(|| scan_root.clone());
+        Self {
+            repo_root: Some(repo_root),
+            scan_root: Some(scan_root),
+            use_cortexignore: true,
+            ..Self::default()
         }
     }
 }
@@ -324,7 +346,18 @@ impl SmartWatchSession {
             filter_builder = filter_builder.exclude_dir(dir);
         }
 
-        let filter = filter_builder.build();
+        let mut filter = filter_builder.build();
+        if config.use_cortexignore {
+            if let Some(ref repo) = config.repo_root {
+                let cortex_config = CortexConfig::load().unwrap_or_default();
+                filter = filter.with_cortex_ignore_scoped(
+                    repo,
+                    config.scan_root.as_deref(),
+                    &cortex_config,
+                    &config.policy_excludes,
+                );
+            }
+        }
 
         Self {
             inner,
@@ -456,12 +489,7 @@ impl SmartWatchSession {
     pub async fn run(self, indexer: Indexer) -> Result<()> {
         info!("Starting smart file watcher");
         let (tx, mut rx) = mpsc::channel::<PathBuf>(128);
-        let watched_paths = self.list();
-        let watched_roots: Vec<PathBuf> = watched_paths
-            .iter()
-            .cloned()
-            .map(canonicalize_lossy)
-            .collect();
+        let watched_roots: Vec<PathBuf> = self.list().into_iter().map(canonicalize_lossy).collect();
         let mut branch_state: HashMap<PathBuf, (String, String)> = HashMap::new();
 
         let mut debouncer = new_debouncer(
@@ -479,7 +507,7 @@ impl SmartWatchSession {
             CortexError::Io(e.to_string())
         })?;
 
-        for path in watched_paths {
+        for path in self.list() {
             debouncer
                 .watcher()
                 .watch(path.as_path(), RecursiveMode::Recursive)
@@ -624,10 +652,39 @@ async fn index_changed_path(
         changed_path
     };
 
-    match indexer
-        .index_path_with_branch_context(target_path, &branch, &commit, &repo_root, false, false)
-        .await
-    {
+    let result = if branch_changed {
+        indexer
+            .index_path_with_branch_context(target_path, &branch, &commit, &repo_root, false, false)
+            .await
+    } else if changed_path.exists() {
+        let mut plan = IndexChangePlan::incremental("watch event");
+        plan.changed_files.push(changed_path.to_path_buf());
+        indexer
+            .index_path_with_branch_change_plan(
+                target_path,
+                &branch,
+                &commit,
+                &repo_root,
+                plan,
+                false,
+            )
+            .await
+    } else {
+        let mut plan = IndexChangePlan::incremental("watch delete event");
+        plan.deleted_files.push(changed_path.to_path_buf());
+        indexer
+            .index_path_with_branch_change_plan(
+                repo_root.as_path(),
+                &branch,
+                &commit,
+                &repo_root,
+                plan,
+                false,
+            )
+            .await
+    };
+
+    match result {
         Ok(_) => {
             branch_state.insert(repo_root, (branch, commit));
         }

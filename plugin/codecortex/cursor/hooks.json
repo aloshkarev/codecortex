@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": ".cursor/hooks/session-codecortex-context.sh"
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": ".cursor/hooks/subagent-codecortex-inject.sh",
+        "matcher": "codecortex-indexer|codecortex-analyzer|codecortex-pr-reviewer|codecortex-patch-planner"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": ".cursor/hooks/preflight-before-edit.sh",
+        "matcher": "Write|StrReplace"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": ".cursor/hooks/after-task-codecortex.sh",
+        "matcher": "Task"
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": ".cursor/hooks/subagent-codecortex-followup.sh",
+        "matcher": "codecortex-indexer|codecortex-analyzer|codecortex-pr-reviewer|codecortex-patch-planner"
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": ".cursor/hooks/mcp-codecortex-reminder.sh"
+      }
+    ]
+  }
+}

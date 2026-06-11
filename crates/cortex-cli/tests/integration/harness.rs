@@ -126,13 +126,11 @@ fn write_default_config(home_dir: &Path) -> Result<(), String> {
         }
     }
 
-    let bolt_uri = std::env::var("CORTEX_TEST_BOLT_URI")
-        .unwrap_or_else(|_| "bolt://127.0.0.1:7687".to_string());
-    let user = std::env::var("CORTEX_TEST_BOLT_USER").unwrap_or_default();
-    let password = std::env::var("CORTEX_TEST_BOLT_PASSWORD").unwrap_or_default();
-    let backend = std::env::var("CORTEX_TEST_BACKEND").unwrap_or_else(|_| "memgraph".to_string());
+    let password = std::env::var("CORTEX_TEST_GRAPH_PASSWORD").unwrap_or_default();
+    let graph_uri = std::env::var("CORTEX_TEST_GRAPH_URI")
+        .unwrap_or_else(|_| "falkor://127.0.0.1:6379".to_string());
     let cfg = format!(
-        "memgraph_uri = \"{bolt_uri}\"\nmemgraph_user = \"{user}\"\nmemgraph_password = \"{password}\"\nbackend_type = \"{backend}\"\n"
+        "falkordb_uri = \"{graph_uri}\"\nfalkordb_password = \"{password}\"\nfalkordb_graph = \"codecortex\"\n"
     );
     fs::write(config_path, cfg).map_err(|e| e.to_string())
 }

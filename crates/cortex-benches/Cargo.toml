@@ -8,9 +8,15 @@ publish = false
 
 [dependencies]
 cortex-mcp = { path = "../cortex-mcp" }
-cortex-indexer = { path = "../cortex-indexer" }
+cortex-parser = { path = "../cortex-parser" }
+cortex-pipeline = { path = "../cortex-pipeline" }
+cortex-watcher = { path = "../cortex-watcher" }
+cortex-vector = { path = "../cortex-vector" }
 cortex-core = { path = "../cortex-core" }
 criterion = { version = "0.8", features = ["html_reports"] }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tempfile = "3"
 
 [[bench]]
 name = "capsule_benchmark"
@@ -26,4 +32,32 @@ harness = false
 
 [[bench]]
 name = "tfidf_benchmark"
+harness = false
+
+[[bench]]
+name = "parse_batch_benchmark"
+harness = false
+
+[[bench]]
+name = "pipeline_stage_benchmark"
+harness = false
+
+[[bench]]
+name = "watcher_perf_benchmark"
+harness = false
+
+[[bench]]
+name = "vector_smoke_benchmark"
+harness = false
+
+[[bench]]
+name = "graph_bulk_benchmark"
+harness = false
+
+[[bench]]
+name = "hybrid_search_benchmark"
+harness = false
+
+[[bench]]
+name = "performance_scenarios"
 harness = false

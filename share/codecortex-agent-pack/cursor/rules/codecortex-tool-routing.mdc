@@ -1,0 +1,23 @@
+---
+description: Compact CodeCortex MCP tool routing by category and minimum index tier
+alwaysApply: false
+---
+
+# CodeCortex tool routing
+
+| Category | Start here | Min index |
+| --- | --- | --- |
+| Preflight | `check_health` → `index_status` | none |
+| Routing | `recommend_tools` | none |
+| Indexing | `add_code_to_graph` | writes |
+| Search | `find_code` | graph |
+| Impact | `get_impact_graph` | graph |
+| Navigation | `go_to_definition` | graph |
+| Quality | `find_dead_code` | graph |
+| Hybrid NL | `vector_search_hybrid` | graph_and_vector |
+| Context | `get_patch_context` | graph+ |
+| Project | `list_projects` | project |
+
+Cost: cheap < bounded < expensive < background.
+
+**Sync:** [mcp-tool-matrix.md](../../skills/codecortex/references/mcp-tool-matrix.md) · live: `codecortex://tools/catalog`

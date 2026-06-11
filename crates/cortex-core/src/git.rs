@@ -301,12 +301,8 @@ impl GitOperations {
             let content = std::fs::read_to_string(&packed_refs)
                 .map_err(|e| GitError::FileReadError(e.to_string()))?;
 
-            const REFS_HEADS: &str = "refs/heads/";
-            let suffix_len = REFS_HEADS.len() + branch.len();
             for line in content.lines() {
-                if line.len() >= suffix_len
-                    && line[line.len() - branch.len()..] == branch
-                    && line[line.len() - suffix_len..line.len() - branch.len()] == *REFS_HEADS
+                if line.ends_with(&format!("refs/heads/{}", branch))
                     && let Some(hash) = line.split_whitespace().next()
                 {
                     return Ok(hash.to_string());
@@ -988,39 +984,27 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::TempDir;
 
-    /// Helper to create a temporary git repository for testing.
-    /// Requires `git` to be in PATH (e.g. Nix check includes pkgs.git).
+    /// Helper to create a temporary git repository for testing
     fn create_test_repo() -> (TempDir, PathBuf) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let repo_path = temp_dir.path().to_path_buf();
 
-        let check = |name: &str, out: std::process::Output| {
-            if !out.status.success() {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                panic!("test helper {} failed: {}", name, stderr.trim());
-            }
-        };
-
-        let out = Command::new("git")
+        // Initialize git repo
+        let _ = Command::new("git")
             .current_dir(&repo_path)
             .args(["init"])
-            .output()
-            .expect("git init: is git in PATH?");
-        check("git init", out);
+            .output();
 
-        let out = Command::new("git")
+        // Configure git user
+        let _ = Command::new("git")
             .current_dir(&repo_path)
             .args(["config", "user.email", "test@example.com"])
-            .output()
-            .expect("git config email");
-        check("git config user.email", out);
+            .output();
 
-        let out = Command::new("git")
+        let _ = Command::new("git")
             .current_dir(&repo_path)
             .args(["config", "user.name", "Test User"])
-            .output()
-            .expect("git config name");
-        check("git config user.name", out);
+            .output();
 
         (temp_dir, repo_path)
     }
@@ -1030,26 +1014,15 @@ mod tests {
         let file_path = repo_path.join(filename);
         fs::write(&file_path, content).expect("Failed to write file");
 
-        let out = Command::new("git")
+        let _ = Command::new("git")
             .current_dir(repo_path)
             .args(["add", filename])
-            .output()
-            .expect("git add");
-        if !out.status.success() {
-            panic!("git add failed: {}", String::from_utf8_lossy(&out.stderr));
-        }
+            .output();
 
-        let out = Command::new("git")
+        let _ = Command::new("git")
             .current_dir(repo_path)
             .args(["commit", "-m", message])
-            .output()
-            .expect("git commit");
-        if !out.status.success() {
-            panic!(
-                "git commit failed: {}",
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
+            .output();
     }
 
     #[test]

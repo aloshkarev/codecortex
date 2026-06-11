@@ -78,79 +78,79 @@ fn fixtures_are_complete_and_pinned() {
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_rust() {
     run_language_test("serde-rs/serde");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_python() {
     run_language_test("pallets/click");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_go() {
     run_language_test("spf13/cobra");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_typescript() {
     run_language_test("axios/axios");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_javascript() {
     run_language_test("expressjs/express");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_c() {
     run_language_test("libcheck/check");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_cpp() {
     run_language_test("fmtlib/fmt");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_java() {
     run_language_test("google/gson");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_php() {
     run_language_test("Seldaek/monolog");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_ruby() {
     run_language_test("sinatra/sinatra");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_kotlin() {
     run_language_test("InsertKoinIO/koin");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_swift() {
     run_language_test("apple/swift-argument-parser");
 }
 
 #[test]
-#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running Memgraph"]
+#[ignore = "requires CORTEX_INTEGRATION_ENABLE=1, CORTEX_REAL_INTEGRATION=1 and running FalkorDB"]
 fn integration_all_languages_ordered_one_by_one() {
     let _guard = real_test_guard();
     if ensure_runtime_prerequisites().is_none() || !require_real_mode() {

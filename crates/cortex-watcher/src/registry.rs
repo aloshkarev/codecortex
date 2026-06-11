@@ -81,9 +81,8 @@ impl ProjectRegistry {
 
     /// Get the default state file path
     pub fn default_state_path() -> PathBuf {
-        std::env::var("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("."))
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home)
             .join(".cortex")
             .join("project_registry.json")
     }
@@ -659,5 +658,44 @@ mod tests {
 
         let result = registry.refresh_git_info("/nonexistent");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn registry_current_branch_not_stale_when_commit_matches() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let project = temp_dir.path().join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let registry = ProjectRegistry::new();
+        registry.add_project(&project, None).unwrap();
+        registry
+            .record_branch_index(
+                &project,
+                "main".to_string(),
+                "abc123".to_string(),
+                10,
+                50,
+                1000,
+            )
+            .unwrap();
+        registry
+            .update_project(&project, |state| {
+                if let Some(git) = state.git_info.as_mut() {
+                    git.current_branch = "main".to_string();
+                    git.current_commit = "abc123".to_string();
+                } else {
+                    state.git_info = Some(GitInfo {
+                        current_branch: "main".to_string(),
+                        current_commit: "abc123".to_string(),
+                        short_commit: "abc".to_string(),
+                        branches: vec![],
+                        remote_url: None,
+                        is_git_repo: true,
+                        uncommitted_changes: 0,
+                    });
+                }
+            })
+            .unwrap();
+        let state = registry.get_project(&project).unwrap();
+        assert!(!state.is_current_index_stale());
     }
 }

@@ -41,14 +41,15 @@ Defined in `crates/cortex-cli/tests/integration/projects.rs` as `PROJECT_FIXTURE
 
 Requires:
 
-- reachable graph backend (Memgraph/Neo4j-compatible Bolt endpoint)
+- reachable FalkorDB graph backend (Docker or remote Redis RESP endpoint)
 - network access to clone fixture repositories
 
 Environment:
 
 - `CORTEX_INTEGRATION_ENABLE=1`
 - `CORTEX_REAL_INTEGRATION=1`
-- `CORTEX_TEST_BOLT_URI=bolt://127.0.0.1:7687` (or your backend URI)
+- `CORTEX_TEST_GRAPH_URI=falkor://127.0.0.1:6379` (or your FalkorDB URI)
+- `CORTEX_TEST_GRAPH=1` when tests require an explicit graph gate
 
 Run all languages in strict one-by-one order:
 

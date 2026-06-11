@@ -1,6 +1,6 @@
 use crate::registry::ProjectRegistry;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use cortex_core::{CortexError, GitOperations, Result};
+use cortex_core::{CortexConfig, CortexError, GitOperations, Result};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -755,6 +755,21 @@ fn update_branch_health_observation(
     Ok(())
 }
 
+/// Record that a branch/commit was indexed (registry + daemon health table).
+pub fn record_branch_health_indexed<P: AsRef<Path>>(
+    paths: &DaemonPaths,
+    project_path: P,
+    branch: &str,
+    commit_hash: &str,
+) -> Result<()> {
+    let conn = open_db(paths)?;
+    let canonical = project_path
+        .as_ref()
+        .canonicalize()
+        .unwrap_or_else(|_| project_path.as_ref().to_path_buf());
+    update_branch_health_indexed(&conn, &canonical.display().to_string(), branch, commit_hash)
+}
+
 fn update_branch_health_indexed(
     conn: &Connection,
     project_path: &str,
@@ -921,6 +936,56 @@ fn trim_error_text(stdout: &[u8], stderr: &[u8]) -> String {
     }
 }
 
+/// Run up to `max_jobs` index subprocesses per tick (separate DB connections; cross-repo parallelism).
+pub fn process_pending_jobs(
+    paths: &DaemonPaths,
+    executable: &Path,
+    max_jobs: usize,
+) -> Result<usize> {
+    let max_jobs = max_jobs.max(1);
+    let mut started = 0usize;
+    for _ in 0..max_jobs {
+        let mut conn = open_db(paths)?;
+        if process_next_pending_job(&mut conn, executable)?.is_some() {
+            started += 1;
+        } else {
+            break;
+        }
+    }
+    Ok(started)
+}
+
+async fn process_pending_jobs_async(
+    paths: &DaemonPaths,
+    executable: &Path,
+    max_jobs: usize,
+) -> Result<usize> {
+    let max_jobs = max_jobs.max(1);
+    let paths = paths.clone();
+    let executable = executable.to_path_buf();
+    let mut join = tokio::task::JoinSet::new();
+    for _ in 0..max_jobs {
+        let paths = paths.clone();
+        let executable = executable.clone();
+        join.spawn(async move {
+            tokio::task::spawn_blocking(move || {
+                let mut conn = open_db(&paths)?;
+                process_next_pending_job(&mut conn, &executable)
+            })
+            .await
+            .map_err(|e| CortexError::Io(format!("daemon worker join: {e}")))?
+        });
+    }
+    let mut started = 0usize;
+    while let Some(res) = join.join_next().await {
+        match res.map_err(|e| CortexError::Io(format!("daemon worker task: {e}")))?? {
+            Some(_) => started += 1,
+            None => {}
+        }
+    }
+    Ok(started)
+}
+
 fn process_next_pending_job(conn: &mut Connection, executable: &Path) -> Result<Option<IndexJob>> {
     let worker_id = format!("pid:{}", std::process::id());
     let Some(job) = claim_next_pending_job(conn, &worker_id)? else {
@@ -993,10 +1058,9 @@ fn process_next_pending_job(conn: &mut Connection, executable: &Path) -> Result<
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if !policy.exclude_patterns.is_empty() {
-        command.env(
-            "CORTEX_INDEX_EXCLUDE_PATTERNS",
-            policy.exclude_patterns.join("\n"),
-        );
+        for pat in &policy.exclude_patterns {
+            command.arg("--exclude-pattern").arg(pat);
+        }
     }
     if matches!(job.mode, JobMode::Full) {
         command.arg("--force");
@@ -1121,7 +1185,7 @@ pub fn stop_daemon(paths: &DaemonPaths) -> Result<DaemonStatus> {
 }
 
 pub async fn run_daemon(paths: &DaemonPaths) -> Result<()> {
-    let mut conn = open_db(paths)?;
+    let conn = open_db(paths)?;
     write_pid(paths, std::process::id())?;
     upsert_heartbeat(&conn)?;
     let recovered = recover_stale_running_jobs(&conn)?;
@@ -1130,6 +1194,9 @@ pub async fn run_daemon(paths: &DaemonPaths) -> Result<()> {
     }
 
     let executable = std::env::current_exe().map_err(io_err)?;
+    let daemon_workers = CortexConfig::load()
+        .map(|c| c.daemon_index_workers)
+        .unwrap_or(1);
 
     let mut ticker = interval(Duration::from_secs(2));
     #[cfg(unix)]
@@ -1150,7 +1217,11 @@ pub async fn run_daemon(paths: &DaemonPaths) -> Result<()> {
                 increment_metric(&conn, "watch_poll_ms_total", poll_started.elapsed().as_millis() as i64)?;
 
                 let process_started = Instant::now();
-                let _ = process_next_pending_job(&mut conn, &executable)?;
+                let started =
+                    process_pending_jobs_async(&paths, &executable, daemon_workers).await?;
+                if started > 0 {
+                    increment_metric(&conn, "jobs_started", started as i64)?;
+                }
                 increment_metric(&conn, "process_tick_ms_total", process_started.elapsed().as_millis() as i64)?;
             }
             _ = sigterm.recv() => {
@@ -1173,7 +1244,11 @@ pub async fn run_daemon(paths: &DaemonPaths) -> Result<()> {
                 increment_metric(&conn, "watch_poll_ms_total", poll_started.elapsed().as_millis() as i64)?;
 
                 let process_started = Instant::now();
-                let _ = process_next_pending_job(&mut conn, &executable)?;
+                let started =
+                    process_pending_jobs_async(&paths, &executable, daemon_workers).await?;
+                if started > 0 {
+                    increment_metric(&conn, "jobs_started", started as i64)?;
+                }
                 increment_metric(&conn, "process_tick_ms_total", process_started.elapsed().as_millis() as i64)?;
             }
             _ = tokio::signal::ctrl_c() => {
@@ -1189,6 +1264,18 @@ pub async fn run_daemon(paths: &DaemonPaths) -> Result<()> {
 pub fn enqueue_index_job(paths: &DaemonPaths, request: &IndexJobRequest) -> Result<EnqueueResult> {
     let conn = open_db(paths)?;
     enqueue_index_job_conn(&conn, request)
+}
+
+/// Remove all pending index jobs (e.g. after daemon was stopped with a stale queue).
+pub fn clear_pending_index_jobs(paths: &DaemonPaths) -> Result<usize> {
+    let conn = open_db(paths)?;
+    let removed = conn
+        .execute(
+            "DELETE FROM index_jobs WHERE status = ?1",
+            params![JOB_PENDING],
+        )
+        .map_err(db_err)?;
+    Ok(removed)
 }
 
 pub fn list_index_jobs(paths: &DaemonPaths, limit: usize) -> Result<Vec<IndexJob>> {
@@ -1213,6 +1300,14 @@ pub fn list_index_jobs(paths: &DaemonPaths, limit: usize) -> Result<Vec<IndexJob
         jobs.push(row.map_err(db_err)?);
     }
     Ok(jobs)
+}
+
+/// Smart-watch configuration for a registered project path (git root + policy excludes).
+pub fn smart_watch_config_for_project(project_path: &Path) -> crate::SmartWatchConfig {
+    let mut config = crate::SmartWatchConfig::for_project_path(project_path);
+    let policy = project_policy_for_path(&project_path.display().to_string());
+    config.policy_excludes = policy.exclude_patterns;
+    config
 }
 
 pub fn register_watch<P: AsRef<Path>>(
@@ -1363,6 +1458,41 @@ mod tests {
         let paths = DaemonPaths::from_root("/tmp/cortex-daemon-test");
         assert!(paths.db_path.ends_with("daemon.db"));
         assert!(paths.pid_path.ends_with("daemon.pid"));
+    }
+
+    #[test]
+    fn clear_pending_index_jobs_removes_queue() {
+        let dir = tempdir().unwrap();
+        let paths = DaemonPaths::from_root(dir.path());
+        enqueue_index_job(
+            &paths,
+            &IndexJobRequest {
+                repository_path: "/repo".to_string(),
+                branch: "main".to_string(),
+                commit_hash: "abc123".to_string(),
+                mode: JobMode::Full,
+            },
+        )
+        .unwrap();
+        let removed = clear_pending_index_jobs(&paths).unwrap();
+        assert_eq!(removed, 1);
+        assert!(list_index_jobs(&paths, 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn record_branch_health_indexed_marks_fresh() {
+        let dir = tempdir().unwrap();
+        let paths = DaemonPaths::from_root(dir.path());
+        let project = dir.path().join("proj");
+        std::fs::create_dir_all(&project).unwrap();
+        let project_s = project.display().to_string();
+        update_branch_health_observation(&open_db(&paths).unwrap(), &project_s, "main", "commit_a")
+            .unwrap();
+        record_branch_health_indexed(&paths, &project, "main", "commit_a").unwrap();
+        let health = project_branch_health(&paths, &project).unwrap();
+        assert_eq!(health.len(), 1);
+        assert!(!health[0].is_stale);
+        assert_eq!(health[0].indexed_commit_hash.as_deref(), Some("commit_a"));
     }
 
     #[test]

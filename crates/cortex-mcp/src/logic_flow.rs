@@ -161,20 +161,17 @@ impl LogicFlowSearcher {
         to_symbol: &str,
         edges: Vec<RawEdge>,
     ) -> LogicFlowResult {
-        // Build adjacency list
         let mut graph: HashMap<String, Vec<&RawEdge>> = HashMap::new();
         for edge in &edges {
             graph.entry(edge.from_id.clone()).or_default().push(edge);
         }
 
-        // Build reverse lookup for node info
         let mut node_info: HashMap<String, &RawEdge> = HashMap::new();
         for edge in &edges {
             node_info.entry(edge.from_id.clone()).or_insert(edge);
             node_info.entry(edge.to_id.clone()).or_insert(edge);
         }
 
-        // Find candidate start and end nodes
         let start_candidates: Vec<String> = edges
             .iter()
             .filter(|e| e.from_name == from_symbol)
@@ -195,7 +192,6 @@ impl LogicFlowSearcher {
             return self.no_result(from_symbol, to_symbol, &edges);
         }
 
-        // Find all paths using BFS
         let mut all_paths: Vec<Vec<String>> = Vec::new();
         let end_set: HashSet<_> = end_candidates.iter().cloned().collect();
 
@@ -208,20 +204,17 @@ impl LogicFlowSearcher {
             return self.handle_no_path(from_symbol, to_symbol, &edges);
         }
 
-        // Convert paths to scored paths
         let mut scored_paths: Vec<ScoredPath> = all_paths
             .into_iter()
             .filter_map(|path| self.build_scored_path(&path, &edges, &node_info))
             .collect();
 
-        // Sort by score (descending)
         scored_paths.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Truncate to max paths
         scored_paths.truncate(self.max_paths);
 
         LogicFlowResult {
@@ -255,7 +248,7 @@ impl LogicFlowSearcher {
             if end_set.contains(&current) && path.len() > 1 {
                 paths.push(path);
                 if paths.len() >= self.max_paths * 2 {
-                    break; // Found enough paths
+                    break;
                 }
                 continue;
             }
@@ -317,7 +310,6 @@ impl LogicFlowSearcher {
             path_nodes.push(node);
 
             if i < node_ids.len() - 1 {
-                // Find the edge between this node and the next
                 let edge = edges
                     .iter()
                     .find(|e| e.from_id == *node_id && e.to_id == node_ids[i + 1])?;
@@ -333,7 +325,6 @@ impl LogicFlowSearcher {
             }
         }
 
-        // Calculate scores
         let length = path_edges.len();
         let length_score = 1.0 / (1.0 + length as f64);
         let confidence_score = if path_edges.is_empty() {
@@ -341,7 +332,7 @@ impl LogicFlowSearcher {
         } else {
             total_confidence / path_edges.len() as f64
         };
-        let relevance_score = 0.5; // Placeholder for relevance scoring
+        let relevance_score = 0.5;
 
         let score = length_score * 0.4 + confidence_score * 0.4 + relevance_score * 0.2;
 
@@ -368,7 +359,6 @@ impl LogicFlowSearcher {
         let mut warnings = vec!["no_path_found".to_string()];
 
         let blockers = if self.allow_partial {
-            // Find potential blockers - nodes that are close to either end
             let from_nodes: Vec<_> = edges
                 .iter()
                 .filter(|e| e.from_name == from_symbol)
@@ -437,7 +427,6 @@ impl LogicFlowSearcher {
         let blockers = if self.allow_partial {
             let mut blockers = Vec::new();
 
-            // Add source blocker
             blockers.push(Blocker {
                 node: PathNode {
                     id: format!("source:{}", from_symbol),
@@ -450,7 +439,6 @@ impl LogicFlowSearcher {
                 suggestions: vec!["verify_symbol_exists".to_string()],
             });
 
-            // Add target blocker
             blockers.push(Blocker {
                 node: PathNode {
                     id: format!("target:{}", to_symbol),
@@ -545,7 +533,7 @@ mod tests {
 
         let edges = vec![
             make_edge("func:a", "func_a", "func:b", "func_b"),
-            make_edge("func:c", "func_c", "func:d", "func_d"), // Disconnected
+            make_edge("func:c", "func_c", "func:d", "func_d"),
         ];
 
         let result = searcher.search("func_a", "func_d", edges);
@@ -580,7 +568,6 @@ mod tests {
 
         let result = searcher.search("func_a", "func_d", edges);
 
-        // Path is longer than max_depth, should not be found
         assert!(result.paths.is_empty());
     }
 
@@ -588,7 +575,6 @@ mod tests {
     fn logic_flow_respects_max_paths() {
         let searcher = LogicFlowSearcher::new().with_max_paths(1);
 
-        // Create two paths: a->b->d and a->c->d
         let edges = vec![
             make_edge("func:a", "func_a", "func:b", "func_b"),
             make_edge("func:a", "func_a", "func:c", "func_c"),

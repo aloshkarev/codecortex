@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "description": "p95 nanosecond budgets for performance_scenarios CI gate (generous for shared runners)",
+  "budgets": {
+    "scenario_capsule_build_100": 50_000_000,
+    "scenario_impact_graph_50": 20_000_000,
+    "scenario_tfidf_score_200": 30_000_000,
+    "scenario_cache/l1_put_get_1000": 100_000_000,
+    "scenario_cache/hierarchy_put_get_500": 200_000_000
+  }
+}

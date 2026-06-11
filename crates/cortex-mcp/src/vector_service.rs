@@ -1,16 +1,16 @@
+use cortex_core::{
+    CortexConfig, CortexIgnoreOptions, CortexIgnoreWalker, Language, ProjectConfig,
+    default_global_cortexignore_path, ensure_cortexignore_template,
+};
 use cortex_vector::{
-    Embedder, HybridResult, HybridSearch, LanceStore, MetadataValue, OllamaEmbedder,
-    OpenAIEmbedder, SearchType, VectorDocument, VectorMetadata, VectorStore,
+    Embedder, FallbackEmbedder, HashEmbedder, HybridResult, HybridSearch, LanceStore,
+    MetadataValue, OllamaEmbedder, OpenAIEmbedder, SearchType, StaticEmbedder, VectorDocument,
+    VectorMetadata, VectorStore,
 };
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "rb", "c", "cpp", "h", "hpp", "cs", "php",
-    "swift", "kt", "kts", "json", "sh", "bash", "zsh",
-];
 
 pub struct VectorService {
     store: Arc<LanceStore>,
@@ -41,33 +41,110 @@ pub struct VectorIndexResult {
 }
 
 impl VectorService {
-    pub async fn from_env() -> Result<Self, String> {
-        let store_path = vector_store_path();
-        let store = Arc::new(
-            LanceStore::open(&store_path)
-                .await
-                .map_err(|e| format!("open vector store failed: {e}"))?,
-        );
+    /// Build an embedder from `~/.cortex/config.toml` (and env overrides).
+    ///
+    /// Respects `[llm] provider`: when set to `"ollama"`, uses Ollama even if `OPENAI_API_KEY`
+    /// is set in the environment (previously the env key always forced OpenAI).
+    pub fn apply_vector_runtime_config(config: &CortexConfig) {
+        // SAFETY: single-threaded MCP startup; env is process-local config for hybrid search.
+        unsafe {
+            std::env::set_var("CORTEX_HYBRID_FUSION", &config.vector.hybrid_fusion);
+            let rerank = if config.vector.rerank_enabled {
+                "1"
+            } else {
+                "0"
+            };
+            std::env::set_var("CORTEX_RERANK_ENABLED", rerank);
+        }
+    }
 
-        let embedder: Arc<dyn Embedder> = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-            let mut openai = OpenAIEmbedder::new(api_key);
+    pub fn build_embedder(config: &CortexConfig) -> Result<Arc<dyn Embedder>, String> {
+        Self::apply_vector_runtime_config(config);
+
+        if std::env::var("CORTEX_TEST_EMBEDDER").ok().as_deref() == Some("1") {
+            return Ok(Arc::new(HashEmbedder::new()));
+        }
+
+        let provider = config.llm.provider.trim().to_ascii_lowercase();
+
+        if provider == "test" {
+            return Ok(Arc::new(HashEmbedder::new()));
+        }
+
+        let use_openai = match provider.as_str() {
+            "openai" => true,
+            "ollama" | "local" => false,
+            // "none" or unknown: preserve legacy behavior (OpenAI if key exists)
+            _ => std::env::var("OPENAI_API_KEY").is_ok(),
+        };
+
+        let primary: Arc<dyn Embedder> = if use_openai {
+            let api_key = config
+                .llm
+                .openai_api_key
+                .clone()
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                .ok_or_else(|| {
+                    "OpenAI embeddings selected but no API key (set llm.openai_api_key or OPENAI_API_KEY)"
+                        .to_string()
+                })?;
+            let model = config.llm.openai_embedding_model.clone();
+            let mut openai = OpenAIEmbedder::with_model(api_key, model);
             if let Ok(base_url) = std::env::var("OPENAI_BASE_URL") {
                 openai = openai.with_base_url(base_url);
             }
             Arc::new(openai)
         } else {
-            let mut ollama = if let Ok(model) = std::env::var("CORTEX_OLLAMA_EMBED_MODEL") {
-                OllamaEmbedder::with_model(model)
-            } else {
-                OllamaEmbedder::new()
-            };
-            if let Ok(base_url) = std::env::var("CORTEX_OLLAMA_BASE_URL") {
-                ollama = ollama.with_base_url(base_url);
+            let model = std::env::var("CORTEX_OLLAMA_EMBED_MODEL")
+                .unwrap_or_else(|_| config.llm.ollama_embedding_model.clone().trim().to_string());
+            if model.is_empty() {
+                return Err(
+                    "Ollama embedding model is empty (set llm.ollama_embedding_model or CORTEX_OLLAMA_EMBED_MODEL)"
+                        .to_string(),
+                );
+            }
+            let mut ollama = OllamaEmbedder::with_model(model);
+            let base = std::env::var("CORTEX_OLLAMA_BASE_URL")
+                .unwrap_or_else(|_| config.llm.ollama_base_url.trim().to_string());
+            if !base.is_empty() {
+                ollama = ollama.with_base_url(base);
             }
             Arc::new(ollama)
         };
 
+        if config.vector.embedding_fallback == "static" {
+            Ok(Arc::new(FallbackEmbedder::new(
+                primary,
+                StaticEmbedder::new(),
+            )))
+        } else {
+            Ok(primary)
+        }
+    }
+
+    pub fn embedder_label(embedder: &Arc<dyn Embedder>) -> String {
+        embedder.model().to_string()
+    }
+
+    pub async fn from_config(config: &CortexConfig) -> Result<Self, String> {
+        let store_path = vector_store_path(config);
+        let store = Arc::new(
+            LanceStore::open(&store_path)
+                .await
+                .map_err(|e| format!("open vector store failed: {e}"))?,
+        );
+        let embedder = Self::build_embedder(config)?;
         Ok(Self { store, embedder })
+    }
+
+    /// Same as [`Self::from_config`] using `CortexConfig::load()` (or defaults if load fails).
+    pub async fn from_env() -> Result<Self, String> {
+        let config = CortexConfig::load().unwrap_or_default();
+        Self::from_config(&config).await
+    }
+
+    pub fn embedder(&self) -> &Arc<dyn Embedder> {
+        &self.embedder
     }
 
     pub async fn health_check(&self) -> Result<bool, String> {
@@ -82,6 +159,25 @@ impl VectorService {
             .count()
             .await
             .map_err(|e| format!("vector count failed: {e}"))
+    }
+
+    pub async fn count_documents(&self, repository: Option<&str>) -> Result<usize, String> {
+        let filter = repository.map(|repo| {
+            let mut filter = HashMap::new();
+            filter.insert(
+                "repository".to_string(),
+                MetadataValue::String(repo.to_string()),
+            );
+            filter
+        });
+        match filter {
+            Some(f) => self
+                .store
+                .count_by_filter(f)
+                .await
+                .map_err(|e| format!("vector count by repository failed: {e}")),
+            None => self.total_documents().await,
+        }
     }
 
     pub async fn search(
@@ -158,27 +254,70 @@ impl VectorService {
         repository: &str,
         branch: &str,
         revision: &str,
+        include_paths: Option<&[String]>,
+        max_files: Option<usize>,
+        cortex_config: &CortexConfig,
     ) -> Result<VectorIndexResult, String> {
-        let mut files = Vec::new();
-        collect_code_files(root_path, &mut files).map_err(|e| format!("walk repo failed: {e}"))?;
+        let files = collect_indexable_code_files(root_path, cortex_config, &[])
+            .map_err(|e| format!("walk repo failed: {e}"))?;
 
         let mut scanned_files = 0usize;
         let mut skipped_files = 0usize;
-        let mut documents = Vec::new();
+        let mut pending = Vec::new();
+        let mut indexed_documents = 0usize;
+        const INDEX_CHUNK: usize = 8;
+
+        let hybrid = HybridSearch::new(self.store.clone(), self.embedder.clone());
+
         for file in files {
+            if let Some(paths) = include_paths {
+                let rel = file
+                    .strip_prefix(root_path)
+                    .unwrap_or(&file)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let included = paths.iter().any(|p| {
+                    let p = p.trim().trim_start_matches('/').replace('\\', "/");
+                    rel == p || rel.starts_with(&format!("{p}/"))
+                });
+                if !included {
+                    continue;
+                }
+            }
+            if let Some(max) = max_files {
+                if scanned_files >= max {
+                    break;
+                }
+            }
             scanned_files += 1;
             match build_file_document(&file, repository, branch, revision) {
-                Ok(Some(doc)) => documents.push(doc),
+                Ok(Some(doc)) => {
+                    pending.push(doc);
+                    if pending.len() >= INDEX_CHUNK {
+                        indexed_documents += hybrid
+                            .index_documents(std::mem::take(&mut pending))
+                            .await
+                            .map_err(|e| format!("vector index repository failed: {e}"))?;
+                        tracing::info!(
+                            indexed_documents,
+                            scanned_files,
+                            root = %root_path.display(),
+                            "vector index progress"
+                        );
+                    }
+                }
                 Ok(None) => skipped_files += 1,
                 Err(_) => skipped_files += 1,
             }
         }
 
-        let hybrid = HybridSearch::new(self.store.clone(), self.embedder.clone());
-        let indexed_documents = hybrid
-            .index_documents(documents)
-            .await
-            .map_err(|e| format!("vector index repository failed: {e}"))?;
+        if !pending.is_empty() {
+            indexed_documents += hybrid
+                .index_documents(pending)
+                .await
+                .map_err(|e| format!("vector index repository failed: {e}"))?;
+        }
+
         Ok(VectorIndexResult {
             indexed_documents,
             scanned_files,
@@ -200,7 +339,7 @@ fn build_file_document(
     branch: &str,
     revision: &str,
 ) -> Result<Option<VectorDocument>, String> {
-    if !file_path.is_file() || !is_code_file(file_path) {
+    if !file_path.is_file() || Language::from_path(file_path).is_none() {
         return Ok(None);
     }
     let content = fs::read_to_string(file_path)
@@ -257,35 +396,50 @@ fn metadata_matches_filter(
     })
 }
 
-fn collect_code_files(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default();
-            if name == ".git" || name == "node_modules" || name == "target" {
-                continue;
-            }
-            collect_code_files(&path, out)?;
-        } else if path.is_file() && is_code_file(&path) {
-            out.push(path);
-        }
-    }
-    Ok(())
+/// Collect code files under `root` using the same ignore rules as graph indexing.
+pub fn collect_indexable_code_files(
+    root: &Path,
+    config: &CortexConfig,
+    extra_excludes: &[String],
+) -> cortex_core::Result<Vec<PathBuf>> {
+    Ok(collect_indexable_code_files_with_stats(root, config, extra_excludes)?.files)
+}
+
+/// Like [`collect_indexable_code_files`] but returns ignore skip statistics.
+pub fn collect_indexable_code_files_with_stats(
+    root: &Path,
+    config: &CortexConfig,
+    extra_excludes: &[String],
+) -> cortex_core::Result<cortex_core::CollectFilesResult> {
+    let scan_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let repo_root = cortex_core::find_git_repository_root(&scan_root)
+        .map(|p| p.canonicalize().unwrap_or(p))
+        .unwrap_or_else(|| scan_root.clone());
+
+    let _ = ensure_cortexignore_template(&repo_root, &ProjectConfig::default().ignore_patterns);
+
+    let mut policy = config.index_exclude_patterns.clone();
+    policy.extend_from_slice(extra_excludes);
+
+    let walker = CortexIgnoreWalker::new(CortexIgnoreOptions {
+        repo_root,
+        scan_root: Some(scan_root.clone()),
+        global_ignore_path: config
+            .global_cortexignore_path
+            .clone()
+            .or_else(default_global_cortexignore_path),
+        respect_gitignore: true,
+        respect_cortexignore: true,
+        include_hidden: false,
+        policy_excludes: policy,
+        count_ignored_skips: true,
+    });
+
+    walker.collect_files_with_stats(&scan_root, None, |p| Language::from_path(p).is_some())
 }
 
 fn is_code_file(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or_default();
-    CODE_EXTENSIONS.contains(&ext)
+    Language::from_path(path).is_some()
 }
 
 fn language_from_path(path: &Path) -> &'static str {
@@ -319,18 +473,49 @@ fn language_from_path(path: &Path) -> &'static str {
     }
 }
 
-fn vector_store_path() -> PathBuf {
+/// Resolve LanceDB path (`CORTEX_VECTOR_STORE_PATH` env overrides `config.vector.store_path`).
+pub fn vector_store_path(config: &CortexConfig) -> PathBuf {
     if let Ok(path) = std::env::var("CORTEX_VECTOR_STORE_PATH") {
         return PathBuf::from(path);
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".cortex/vectors")
+    config.vector.store_path.clone()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_code_file, language_from_path};
+    use super::{VectorService, collect_indexable_code_files, is_code_file, language_from_path};
+    use cortex_core::CortexConfig;
+    use cortex_vector::{EmbeddingProvider, HashEmbedder};
     use std::path::Path;
+
+    #[test]
+    fn build_embedder_uses_ollama_when_config_provider_is_ollama() {
+        let mut config = CortexConfig::default();
+        config.llm.provider = "ollama".to_string();
+        config.llm.ollama_embedding_model = "nomic-embed-text".to_string();
+        let embedder = VectorService::build_embedder(&config).expect("embedder");
+        assert_eq!(embedder.provider(), EmbeddingProvider::Ollama);
+        assert_eq!(embedder.model(), "nomic-embed-text");
+    }
+
+    #[test]
+    fn build_embedder_uses_hash_when_test_provider_or_env() {
+        let mut config = CortexConfig::default();
+        config.llm.provider = "test".to_string();
+        let embedder = VectorService::build_embedder(&config).expect("embedder");
+        assert_eq!(embedder.provider(), EmbeddingProvider::Test);
+        assert_eq!(embedder.model(), HashEmbedder::MODEL);
+
+        unsafe {
+            std::env::set_var("CORTEX_TEST_EMBEDDER", "1");
+        }
+        let embedder_env =
+            VectorService::build_embedder(&CortexConfig::default()).expect("embedder");
+        assert_eq!(embedder_env.provider(), EmbeddingProvider::Test);
+        unsafe {
+            std::env::remove_var("CORTEX_TEST_EMBEDDER");
+        }
+    }
 
     #[test]
     fn recognizes_code_files() {
@@ -340,6 +525,18 @@ mod tests {
         assert!(is_code_file(Path::new("build.gradle.kts")));
         assert!(is_code_file(Path::new("package.json")));
         assert!(!is_code_file(Path::new("README.md")));
+    }
+
+    #[test]
+    fn collect_indexable_code_files_honors_cortexignore() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join(".cortexignore"), "skip.rs\n").unwrap();
+        std::fs::write(root.join("skip.rs"), "fn s() {}").unwrap();
+        std::fs::write(root.join("keep.rs"), "fn k() {}").unwrap();
+        let files = collect_indexable_code_files(root, &CortexConfig::default(), &[]).unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("keep.rs"));
     }
 
     #[test]

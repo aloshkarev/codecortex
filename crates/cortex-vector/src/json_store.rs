@@ -22,7 +22,7 @@ use crate::{
     MetadataValue, SearchResult, VectorDocument, VectorError, VectorMetadata, VectorStore,
 };
 use async_trait::async_trait;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -96,18 +96,9 @@ impl JsonStore {
             return 0.0;
         }
 
-        let mut dot = 0.0f32;
-        let mut mag_a = 0.0f32;
-        let mut mag_b = 0.0f32;
-        for i in 0..a.len() {
-            let x = a[i];
-            let y = b[i];
-            dot += x * y;
-            mag_a += x * x;
-            mag_b += y * y;
-        }
-        let mag_a = mag_a.sqrt();
-        let mag_b = mag_b.sqrt();
+        let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+        let mag_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let mag_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
 
         if mag_a == 0.0 || mag_b == 0.0 {
             return 0.0;
@@ -232,8 +223,8 @@ impl VectorStore for JsonStore {
         let mut data = self.data.write().await;
 
         // Remove existing documents with same IDs
-        let ids: HashSet<&str> = documents.iter().map(|d| d.id.as_str()).collect();
-        data.retain(|d| !ids.contains(d.id.as_str()));
+        let ids: Vec<&str> = documents.iter().map(|d| d.id.as_str()).collect();
+        data.retain(|d| !ids.contains(&d.id.as_str()));
 
         // Add new documents
         let count = documents.len();
@@ -369,8 +360,21 @@ impl VectorStore for JsonStore {
     }
 
     async fn count(&self) -> Result<usize, VectorError> {
+        self.count_by_filter(HashMap::new()).await
+    }
+
+    async fn count_by_filter(
+        &self,
+        filter: HashMap<String, MetadataValue>,
+    ) -> Result<usize, VectorError> {
         let data = self.data.read().await;
-        Ok(data.len())
+        if filter.is_empty() {
+            return Ok(data.len());
+        }
+        Ok(data
+            .iter()
+            .filter(|d| Self::matches_filter(d, &filter))
+            .count())
     }
 
     async fn health_check(&self) -> Result<bool, VectorError> {

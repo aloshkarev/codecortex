@@ -1,12 +1,14 @@
 research
 build
 target
+target-agent
 .ai-sync
 .cursor
 .rules
 CLAUDE.md
 GEMINI.md
 AGENTS.md
+reference/
 .vscode
 .idea
 .env

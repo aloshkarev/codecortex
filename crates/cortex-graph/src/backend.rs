@@ -1,97 +1,27 @@
-//! Multiple Graph Backend Support
-//!
-//! This module provides an abstraction layer for different graph database backends.
-//! Currently supports Neo4j and Memgraph with the same interface.
+//! FalkorDB graph backend configuration.
 
 use cortex_core::{CortexConfig, Result};
 use serde_json::Value;
 use std::fmt;
 use std::time::Duration;
 
-/// Supported graph database backends
+/// Graph database backend (FalkorDB-only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BackendKind {
-    /// Neo4j database
-    Neo4j,
-    /// Memgraph database
-    Memgraph,
-    /// Amazon Neptune
-    Neptune,
-    /// Custom/other backend
-    Other,
+    /// FalkorDB (Redis protocol)
+    FalkorDB,
+}
+
+/// Resolve backend from [`CortexConfig`]. Phase 1 always returns FalkorDB.
+pub fn detect_backend_from_config(_config: &CortexConfig) -> BackendKind {
+    BackendKind::FalkorDB
 }
 
 impl BackendKind {
-    /// Detect backend type from URI
-    pub fn from_uri(uri: &str) -> Self {
-        let uri = uri.trim();
-        let uri_lower = uri.to_lowercase();
-
-        // Check for specific backends by name first (higher priority)
-        if uri_lower.contains("memgraph") {
-            return BackendKind::Memgraph;
-        }
-
-        if uri_lower.contains("neo4j") {
-            return BackendKind::Neo4j;
-        }
-
-        if uri_lower.contains("neptune") {
-            return BackendKind::Neptune;
-        }
-
-        // Scheme-based fallback: bolt/memgraph default to Memgraph unless explicitly overridden
-        if uri_lower.starts_with("memgraph://")
-            || uri_lower.starts_with("bolt://")
-            || uri_lower.starts_with("bolt+s://")
-            || uri_lower.starts_with("bolt+ssc://")
-        {
-            BackendKind::Memgraph
-        } else if uri_lower.starts_with("neo4j://")
-            || uri_lower.starts_with("neo4j+s://")
-            || uri_lower.starts_with("neo4j+ssc://")
-        {
-            BackendKind::Neo4j
-        } else if uri.contains(":8182") {
-            BackendKind::Neptune
-        } else {
-            BackendKind::Other
-        }
-    }
-
-    /// Get the default port for this backend
+    /// Default Redis port for FalkorDB.
     pub fn default_port(&self) -> u16 {
         match self {
-            BackendKind::Neo4j => 7687,
-            BackendKind::Memgraph => 7687,
-            BackendKind::Neptune => 8182,
-            BackendKind::Other => 7687,
-        }
-    }
-
-    /// Check if this backend supports a specific feature
-    pub fn supports_feature(&self, feature: BackendFeature) -> bool {
-        match self {
-            BackendKind::Neo4j => matches!(
-                feature,
-                BackendFeature::Transactions
-                    | BackendFeature::Constraints
-                    | BackendFeature::Indexes
-                    | BackendFeature::StoredProcedures
-                    | BackendFeature::APOC
-            ),
-            BackendKind::Memgraph => matches!(
-                feature,
-                BackendFeature::Transactions
-                    | BackendFeature::Constraints
-                    | BackendFeature::Indexes
-                    | BackendFeature::QueryModules
-            ),
-            BackendKind::Neptune => matches!(
-                feature,
-                BackendFeature::Transactions | BackendFeature::Indexes | BackendFeature::Gremlin
-            ),
-            BackendKind::Other => true,
+            BackendKind::FalkorDB => 6379,
         }
     }
 }
@@ -99,45 +29,23 @@ impl BackendKind {
 impl fmt::Display for BackendKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BackendKind::Neo4j => write!(f, "Neo4j"),
-            BackendKind::Memgraph => write!(f, "Memgraph"),
-            BackendKind::Neptune => write!(f, "Neptune"),
-            BackendKind::Other => write!(f, "Other"),
+            BackendKind::FalkorDB => write!(f, "FalkorDB"),
         }
     }
 }
 
-/// Features that may be supported by different backends
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BackendFeature {
-    /// ACID transactions
-    Transactions,
-    /// Unique constraints
-    Constraints,
-    /// Indexes
-    Indexes,
-    /// Stored procedures (Neo4j)
-    StoredProcedures,
-    /// APOC library (Neo4j)
-    APOC,
-    /// Query modules (Memgraph)
-    QueryModules,
-    /// Gremlin queries (Neptune)
-    Gremlin,
-}
-
-/// Configuration for a specific backend
+/// Configuration for FalkorDB.
 #[derive(Debug, Clone)]
 pub struct BackendConfig {
     /// Backend type
     pub kind: BackendKind,
-    /// Connection URI
+    /// Connection URI (from `CortexConfig::falkordb_uri`)
     pub uri: String,
-    /// Username
+    /// Username (unused for FalkorDB; kept for adapter compatibility)
     pub username: String,
     /// Password
     pub password: String,
-    /// Database name (for multi-database support)
+    /// FalkorDB graph name
     pub database: Option<String>,
     /// Connection timeout
     pub connection_timeout: Duration,
@@ -147,61 +55,60 @@ pub struct BackendConfig {
     pub max_pool_size: usize,
     /// Enable SSL/TLS
     pub use_tls: bool,
-    /// Custom headers (for HTTP-based backends)
+    /// Custom headers (reserved for HTTP-based backends)
     pub headers: std::collections::HashMap<String, String>,
 }
 
 impl BackendConfig {
-    /// Create a new backend configuration from cortex config
+    /// Create backend configuration from cortex config.
     pub fn from_cortex_config(config: &CortexConfig) -> Self {
-        let kind = BackendKind::from_uri(&config.memgraph_uri);
         Self {
-            kind,
-            uri: config.memgraph_uri.clone(),
-            username: config.memgraph_user.clone(),
-            password: config.memgraph_password.clone(),
-            database: None,
+            kind: BackendKind::FalkorDB,
+            uri: config.falkordb_uri.clone(),
+            username: String::new(),
+            password: config.falkordb_password.clone(),
+            database: Some(config.falkordb_graph.clone()),
             connection_timeout: Duration::from_secs(30),
             query_timeout: Duration::from_secs(60),
             max_pool_size: 10,
-            use_tls: config.memgraph_uri.starts_with("bolt+s")
-                || config.memgraph_uri.starts_with("neo4j+s"),
+            use_tls: config.falkordb_uri.starts_with("rediss://")
+                || config.falkordb_uri.starts_with("falkors://"),
             headers: std::collections::HashMap::new(),
         }
     }
 
-    /// Set the database name
+    /// Set the graph name.
     pub fn with_database(mut self, database: impl Into<String>) -> Self {
         self.database = Some(database.into());
         self
     }
 
-    /// Set the connection timeout
+    /// Set the connection timeout.
     pub fn with_connection_timeout(mut self, timeout: Duration) -> Self {
         self.connection_timeout = timeout;
         self
     }
 
-    /// Set the query timeout
+    /// Set the query timeout.
     pub fn with_query_timeout(mut self, timeout: Duration) -> Self {
         self.query_timeout = timeout;
         self
     }
 
-    /// Set the max pool size
+    /// Set the max pool size.
     pub fn with_max_pool_size(mut self, size: usize) -> Self {
         self.max_pool_size = size;
         self
     }
 
-    /// Enable or disable TLS
+    /// Enable or disable TLS.
     pub fn with_tls(mut self, use_tls: bool) -> Self {
         self.use_tls = use_tls;
         self
     }
 }
 
-/// Query options for backend-specific tuning
+/// Query options for backend-specific tuning.
 #[derive(Debug, Clone, Default)]
 pub struct QueryOptions {
     /// Query timeout override
@@ -217,43 +124,43 @@ pub struct QueryOptions {
 }
 
 impl QueryOptions {
-    /// Create default query options
+    /// Create default query options.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Set the query timeout
+    /// Set the query timeout.
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = Some(timeout);
         self
     }
 
-    /// Use read replica
+    /// Use read replica.
     pub fn use_read_replica(mut self) -> Self {
         self.use_read_replica = true;
         self
     }
 
-    /// Set query hint
+    /// Set query hint.
     pub fn with_hint(mut self, hint: impl Into<String>) -> Self {
         self.hint = Some(hint.into());
         self
     }
 
-    /// Set batch size
+    /// Set batch size.
     pub fn with_batch_size(mut self, size: usize) -> Self {
         self.batch_size = Some(size);
         self
     }
 
-    /// Enable profiling
+    /// Enable profiling.
     pub fn with_profile(mut self) -> Self {
         self.profile = true;
         self
     }
 }
 
-/// Query result with metadata
+/// Query result with metadata.
 #[derive(Debug, Clone)]
 pub struct QueryResult {
     /// Result rows
@@ -269,7 +176,7 @@ pub struct QueryResult {
 }
 
 impl QueryResult {
-    /// Create a new query result
+    /// Create a new query result.
     pub fn new(rows: Vec<Value>, backend: BackendKind) -> Self {
         Self {
             rows,
@@ -280,65 +187,25 @@ impl QueryResult {
         }
     }
 
-    /// Set the execution time
+    /// Set the execution time.
     pub fn with_execution_time(mut self, ms: u64) -> Self {
         self.execution_time_ms = ms;
         self
     }
 
-    /// Mark as from cache
+    /// Mark as from cache.
     pub fn from_cache(mut self) -> Self {
         self.from_cache = true;
         self
     }
 
-    /// Add a warning
+    /// Add a warning.
     pub fn add_warning(&mut self, warning: impl Into<String>) {
         self.warnings.push(warning.into());
     }
 }
 
-/// Backend adapter trait for different graph databases
-#[async_trait::async_trait]
-pub trait BackendAdapter: Send + Sync {
-    /// Get the backend type
-    fn backend_kind(&self) -> BackendKind;
-
-    /// Execute a query
-    async fn execute(&self, query: &str, options: QueryOptions) -> Result<QueryResult>;
-
-    /// Execute a query with parameters
-    async fn execute_with_params(
-        &self,
-        query: &str,
-        params: Value,
-        options: QueryOptions,
-    ) -> Result<QueryResult>;
-
-    /// Begin a transaction
-    async fn begin_transaction(&self) -> Result<Box<dyn Transaction>>;
-
-    /// Health check
-    async fn health_check(&self) -> Result<bool>;
-
-    /// Get backend statistics
-    async fn stats(&self) -> Result<BackendStats>;
-}
-
-/// Transaction trait for backend transactions
-#[async_trait::async_trait]
-pub trait Transaction: Send {
-    /// Execute a query in the transaction
-    async fn execute(&mut self, query: &str) -> Result<QueryResult>;
-
-    /// Commit the transaction
-    async fn commit(self: Box<Self>) -> Result<()>;
-
-    /// Rollback the transaction
-    async fn rollback(self: Box<Self>) -> Result<()>;
-}
-
-/// Backend statistics
+/// Backend statistics.
 #[derive(Debug, Clone, Default)]
 pub struct BackendStats {
     /// Number of nodes
@@ -357,74 +224,32 @@ pub struct BackendStats {
     pub constraint_count: u64,
 }
 
+/// Placeholder for future health-check adapters.
+pub async fn health_check_placeholder() -> Result<bool> {
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn backend_kind_from_uri_neo4j() {
-        assert_eq!(
-            BackendKind::from_uri("bolt://neo4j.example.com:7687"),
-            BackendKind::Neo4j
-        );
-        assert_eq!(
-            BackendKind::from_uri("neo4j://localhost:7687"),
-            BackendKind::Neo4j
-        );
-        // bolt://127.0.0.1:7687 defaults to Memgraph
-        assert_eq!(
-            BackendKind::from_uri("bolt://127.0.0.1:7687"),
-            BackendKind::Memgraph
-        );
-        assert_eq!(
-            BackendKind::from_uri("bolt://127.0.0.1:17687"),
-            BackendKind::Memgraph
-        );
+    fn detect_backend_from_config_falkordb() {
+        let config = CortexConfig {
+            falkordb_uri: "falkor://127.0.0.1:6379".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(detect_backend_from_config(&config), BackendKind::FalkorDB);
     }
 
     #[test]
-    fn backend_kind_from_uri_memgraph() {
-        assert_eq!(
-            BackendKind::from_uri("bolt://memgraph.example.com:7687"),
-            BackendKind::Memgraph
-        );
-    }
-
-    #[test]
-    fn backend_kind_from_uri_neptune() {
-        assert_eq!(
-            BackendKind::from_uri("https://neptune.cluster.amazonaws.com:8182"),
-            BackendKind::Neptune
-        );
-    }
-
-    #[test]
-    fn backend_kind_default_ports() {
-        assert_eq!(BackendKind::Neo4j.default_port(), 7687);
-        assert_eq!(BackendKind::Memgraph.default_port(), 7687);
-        assert_eq!(BackendKind::Neptune.default_port(), 8182);
+    fn backend_kind_default_port() {
+        assert_eq!(BackendKind::FalkorDB.default_port(), 6379);
     }
 
     #[test]
     fn backend_kind_display() {
-        assert_eq!(format!("{}", BackendKind::Neo4j), "Neo4j");
-        assert_eq!(format!("{}", BackendKind::Memgraph), "Memgraph");
-        assert_eq!(format!("{}", BackendKind::Neptune), "Neptune");
-    }
-
-    #[test]
-    fn backend_features_neo4j() {
-        assert!(BackendKind::Neo4j.supports_feature(BackendFeature::Transactions));
-        assert!(BackendKind::Neo4j.supports_feature(BackendFeature::Constraints));
-        assert!(BackendKind::Neo4j.supports_feature(BackendFeature::APOC));
-        assert!(!BackendKind::Neo4j.supports_feature(BackendFeature::QueryModules));
-    }
-
-    #[test]
-    fn backend_features_memgraph() {
-        assert!(BackendKind::Memgraph.supports_feature(BackendFeature::Transactions));
-        assert!(BackendKind::Memgraph.supports_feature(BackendFeature::QueryModules));
-        assert!(!BackendKind::Memgraph.supports_feature(BackendFeature::APOC));
+        assert_eq!(format!("{}", BackendKind::FalkorDB), "FalkorDB");
     }
 
     #[test]
@@ -441,19 +266,19 @@ mod tests {
 
     #[test]
     fn query_result_builder() {
-        let result = QueryResult::new(vec![], BackendKind::Neo4j)
+        let result = QueryResult::new(vec![], BackendKind::FalkorDB)
             .with_execution_time(50)
             .from_cache();
 
         assert_eq!(result.execution_time_ms, 50);
         assert!(result.from_cache);
-        assert_eq!(result.backend, BackendKind::Neo4j);
+        assert_eq!(result.backend, BackendKind::FalkorDB);
     }
 
     #[test]
     fn backend_config_tls_detection() {
         let config = CortexConfig {
-            memgraph_uri: "bolt+s://localhost:7687".to_string(),
+            falkordb_uri: "rediss://localhost:6379".to_string(),
             ..Default::default()
         };
 

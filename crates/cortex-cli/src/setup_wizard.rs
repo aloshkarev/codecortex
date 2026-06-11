@@ -3,7 +3,7 @@
 //! This module provides an interactive setup wizard that guides users through:
 //! - Dependency checking (Docker, Rust)
 //! - Port conflict detection and resolution
-//! - Memgraph setup (Docker or native)
+//! - FalkorDB setup (Docker or existing URI)
 //! - Vector store configuration
 //! - LLM provider configuration
 //! - Verification and testing
@@ -30,7 +30,12 @@ fn is_port_available(host: &str, port: u16) -> bool {
 
 /// Find an available port starting from the given port
 fn find_available_port(host: &str, start_port: u16, max_attempts: u16) -> Option<u16> {
-    (start_port..start_port + max_attempts).find(|&port| is_port_available(host, port))
+    for port in start_port..start_port + max_attempts {
+        if is_port_available(host, port) {
+            return Some(port);
+        }
+    }
+    None
 }
 
 /// Check if a command exists
@@ -51,13 +56,12 @@ fn docker_is_running() -> bool {
         .unwrap_or(false)
 }
 
-/// Start Memgraph Docker container
-fn start_memgraph_docker(port: u16) -> Result<()> {
-    println!("{}", "Starting Memgraph container...".cyan());
+/// Start FalkorDB Docker container (Redis protocol on port 6379).
+fn start_falkordb_docker(port: u16) -> Result<()> {
+    println!("{}", "Starting FalkorDB container...".cyan());
 
-    // Check if container already exists
     let exists = Command::new("docker")
-        .args(["ps", "-a", "-q", "-f", "name=codecortex-memgraph"])
+        .args(["ps", "-a", "-q", "-f", "name=codecortex-falkordb"])
         .output()
         .map(|o| !String::from_utf8_lossy(&o.stdout).trim().is_empty())
         .unwrap_or(false);
@@ -65,51 +69,45 @@ fn start_memgraph_docker(port: u16) -> Result<()> {
     if exists {
         println!("{}", "Found existing container, starting it...".yellow());
         Command::new("docker")
-            .args(["start", "codecortex-memgraph"])
+            .args(["start", "codecortex-falkordb"])
             .status()
-            .context("Failed to start existing Memgraph container")?;
+            .context("Failed to start existing FalkorDB container")?;
     } else {
         Command::new("docker")
             .args([
                 "run",
                 "-d",
                 "--name",
-                "codecortex-memgraph",
+                "codecortex-falkordb",
                 "-p",
-                &format!("{}:7687", port),
-                "-v",
-                "codecortex-memgraph:/var/lib/memgraph",
-                "memgraph/memgraph-mage:3.8.1",
-                "--also-log-to-stderr=true",
+                &format!("{}:6379", port),
+                "falkordb/falkordb:latest",
             ])
             .status()
-            .context("Failed to start Memgraph container")?;
+            .context("Failed to start FalkorDB container")?;
     }
 
-    println!("{} Memgraph started on port {}", "✓".green(), port);
+    println!("{} FalkorDB started on port {}", "✓".green(), port);
     Ok(())
 }
 
-fn ollama_resolve_target(base_url: &str) -> &str {
-    base_url
+fn ollama_socket_addrs(base_url: &str) -> Option<Vec<std::net::SocketAddr>> {
+    let target = base_url
         .trim()
         .strip_prefix("http://")
         .or_else(|| base_url.trim().strip_prefix("https://"))
         .unwrap_or(base_url.trim())
-        .trim_end_matches('/')
-}
+        .trim_end_matches('/');
 
-fn ollama_socket_addrs(base_url: &str) -> Option<Vec<std::net::SocketAddr>> {
-    let target = ollama_resolve_target(base_url);
     target.to_socket_addrs().ok().map(|addrs| addrs.collect())
 }
 
 /// Check if Ollama is running by checking the configured base URL
 fn ollama_is_running(base_url: &str) -> bool {
     ollama_socket_addrs(base_url).is_some_and(|addrs| {
-        addrs
-            .iter()
-            .any(|addr| TcpStream::connect_timeout(addr, std::time::Duration::from_secs(2)).is_ok())
+        addrs.into_iter().any(|addr| {
+            TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok()
+        })
     })
 }
 
@@ -131,17 +129,30 @@ fn pull_ollama_model(model: &str) -> Result<()> {
     }
 }
 
-/// Test Memgraph connection
-fn test_memgraph_connection(uri: &str) -> Result<bool> {
-    println!("{} Testing Memgraph connection...", "→".cyan());
+/// Test FalkorDB TCP reachability from URI host:port.
+fn test_falkordb_connection(uri: &str) -> Result<bool> {
+    println!("{} Testing FalkorDB connection...", "→".cyan());
 
-    // Parse URI to get host:port
-    let addr = uri
-        .replace("bolt://", "")
-        .replace("neo4j://", "")
-        .replace("memgraph://", "");
+    let authority = uri
+        .trim()
+        .strip_prefix("falkor://")
+        .or_else(|| uri.trim().strip_prefix("redis://"))
+        .or_else(|| uri.trim().strip_prefix("rediss://"))
+        .unwrap_or(uri.trim())
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("")
+        .rsplit('@')
+        .next()
+        .unwrap_or("");
 
-    if let Ok(addrs) = addr.to_socket_addrs() {
+    let host_port = if authority.contains(':') {
+        authority.to_string()
+    } else {
+        format!("{authority}:6379")
+    };
+
+    if let Ok(addrs) = host_port.to_socket_addrs() {
         for addr in addrs {
             if TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5)).is_ok() {
                 println!("{} Port is reachable", "✓".green());
@@ -150,7 +161,7 @@ fn test_memgraph_connection(uri: &str) -> Result<bool> {
         }
     }
 
-    println!("{} Could not connect to Memgraph", "✗".red());
+    println!("{} Could not connect to FalkorDB", "✗".red());
     Ok(false)
 }
 
@@ -203,97 +214,68 @@ pub fn run_setup_wizard(config: &mut CortexConfig) -> Result<()> {
 
     println!();
 
-    // Step 2: Configure Memgraph
+    // Step 2: Configure graph backend
     println!("{}", "Step 2: Configure Graph Database".cyan().bold());
     println!();
 
-    let memgraph_options = if docker_running {
+    let graph_options = if docker_running {
         vec![
-            "Use Docker (recommended)",
-            "Connect to existing Memgraph",
-            "Connect to Neo4j",
+            "FalkorDB via Docker (recommended)",
+            "Connect to existing FalkorDB URI",
+            "Skip (configure manually later)",
         ]
     } else {
         vec![
-            "Connect to existing Memgraph",
-            "Connect to Neo4j",
+            "Connect to existing FalkorDB URI",
             "Skip (configure manually later)",
         ]
     };
 
-    let memgraph_choice = Select::new()
-        .with_prompt("How do you want to run Memgraph?")
-        .items(&memgraph_options)
+    let graph_choice = Select::new()
+        .with_prompt("How do you want to run the graph database?")
+        .items(&graph_options)
         .default(0)
         .interact()?;
 
-    match memgraph_choice {
-        0 if docker_running => {
-            // Docker setup
-            let default_port = 7687;
+    let choice_label = graph_options[graph_choice];
+    match choice_label {
+        "FalkorDB via Docker (recommended)" => {
+            let default_port = 6379u16;
             let port = if !is_port_available("127.0.0.1", default_port) {
-                println!("  {} Port 7687 is in use", "⚠".yellow());
-                if let Some(available) = find_available_port("127.0.0.1", 7688, 10) {
-                    let use_alt = Confirm::new()
-                        .with_prompt(format!("Use port {} instead?", available))
-                        .default(true)
-                        .interact()?;
-                    if use_alt { available } else { default_port }
-                } else {
-                    default_port
-                }
+                println!("  {} Port 6379 is in use", "⚠".yellow());
+                find_available_port("127.0.0.1", 6380, 10).unwrap_or(default_port)
             } else {
                 default_port
             };
-
-            start_memgraph_docker(port)?;
-            config.memgraph_uri = format!("bolt://127.0.0.1:{}", port);
-            config.memgraph_user = "memgraph".to_string();
-            config.memgraph_password = "memgraph".to_string();
+            start_falkordb_docker(port)?;
+            config.falkordb_uri = format!("falkor://127.0.0.1:{}", port);
+            config.falkordb_password.clear();
+            config.falkordb_graph = "codecortex".to_string();
         }
-        1 | 0 if !docker_running => {
-            // Existing Memgraph
+        "Connect to existing FalkorDB URI" => {
             let uri: String = Input::new()
-                .with_prompt("Memgraph URI")
-                .default(config.memgraph_uri.clone())
-                .interact_text()?;
-            let user: String = Input::new()
-                .with_prompt("Username")
-                .default(config.memgraph_user.clone())
+                .with_prompt("FalkorDB URI (falkor://, redis://, or rediss://)")
+                .default("falkor://127.0.0.1:6379".to_string())
                 .interact_text()?;
             let password: String = Input::new()
-                .with_prompt("Password")
-                .default(config.memgraph_password.clone())
+                .with_prompt("Redis password (empty if none)")
+                .allow_empty(true)
                 .interact_text()?;
-
-            config.memgraph_uri = uri;
-            config.memgraph_user = user;
-            config.memgraph_password = password;
-        }
-        2 if docker_running => {
-            // Neo4j
-            let uri: String = Input::new()
-                .with_prompt("Neo4j URI (e.g., bolt://localhost:7687)")
-                .default("bolt://localhost:7687".to_string())
+            let graph: String = Input::new()
+                .with_prompt("Graph name")
+                .default(config.falkordb_graph.clone())
                 .interact_text()?;
-            let user: String = Input::new()
-                .with_prompt("Username")
-                .default("neo4j".to_string())
-                .interact_text()?;
-            let password: String = Input::new().with_prompt("Password").interact_text()?;
-
-            config.memgraph_uri = uri;
-            config.memgraph_user = user;
-            config.memgraph_password = password;
+            config.falkordb_uri = uri;
+            config.falkordb_password = password;
+            config.falkordb_graph = graph;
         }
         _ => {
             println!("  Skipping database configuration");
         }
     }
 
-    // Test connection
-    if !config.memgraph_uri.is_empty() {
-        let _ = test_memgraph_connection(&config.memgraph_uri);
+    if !config.falkordb_uri.is_empty() {
+        let _ = test_falkordb_connection(&config.falkordb_uri);
     }
 
     println!();
@@ -421,7 +403,7 @@ pub fn run_setup_wizard(config: &mut CortexConfig) -> Result<()> {
 
                 // Offer to pull the model
                 let pull_model = Confirm::new()
-                    .with_prompt(format!("Pull model '{}' if not present?", model))
+                    .with_prompt(&format!("Pull model '{}' if not present?", model))
                     .default(true)
                     .interact()?;
 
@@ -488,26 +470,20 @@ pub fn run_setup_wizard(config: &mut CortexConfig) -> Result<()> {
             .interact()?
     {
         let port: u16 = config
-            .memgraph_uri
+            .falkordb_uri
             .rsplit(':')
             .next()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(7687);
+            .unwrap_or(6379);
 
         let compose = format!(
             r#"services:
-  memgraph:
-    image: memgraph/memgraph-mage:3.8.1
-    container_name: codecortex-memgraph
+  falkordb:
+    image: falkordb/falkordb:latest
+    container_name: codecortex-falkordb
     ports:
-      - "{}:7687"
-    volumes:
-      - codecortex-memgraph:/var/lib/memgraph
-    command:
-      - "--also-log-to-stderr=true"
+      - "{}:6379"
 
-volumes:
-  codecortex-memgraph:
 "#,
             port
         );
@@ -555,14 +531,13 @@ volumes:
             r#"# CodeCortex Configuration
 # Generated by setup wizard
 
-# Graph Database
-CORTEX_MEMGRAPH_URI={}
-CORTEX_MEMGRAPH_USER={}
-CORTEX_MEMGRAPH_PASSWORD={}
+# Graph Database (FalkorDB)
+CORTEX_FALKORDB_URI={}
+CORTEX_FALKORDB_PASSWORD={}
 
 # Vector Store
 "#,
-            config.memgraph_uri, config.memgraph_user, config.memgraph_password
+            config.falkordb_uri, config.falkordb_password
         );
 
         if config.vector.store_type == "lancedb" || config.vector.store_type == "json" {
@@ -574,10 +549,10 @@ CORTEX_MEMGRAPH_PASSWORD={}
             env_content.push_str(&format!("# Qdrant URI: {}\n", config.vector.qdrant_uri));
         }
 
-        if config.llm.provider == "openai"
-            && let Some(ref key) = config.llm.openai_api_key
-        {
-            env_content.push_str(&format!("\n# OpenAI\nOPENAI_API_KEY={}\n", key));
+        if config.llm.provider == "openai" {
+            if let Some(ref key) = config.llm.openai_api_key {
+                env_content.push_str(&format!("\n# OpenAI\nOPENAI_API_KEY={}\n", key));
+            }
         }
 
         std::fs::write(".env.cortex", env_content)?;
@@ -598,7 +573,7 @@ CORTEX_MEMGRAPH_PASSWORD={}
     );
     println!();
     println!("Configuration Summary:");
-    println!("  Database:     {}", config.memgraph_uri);
+    println!("  Database:     {}", config.falkordb_uri);
     println!("  Vector Store: {}", config.vector.store_type);
     println!("  LLM Provider: {}", config.llm.provider);
     println!();

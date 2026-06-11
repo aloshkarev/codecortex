@@ -12,6 +12,204 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+/// Production indexing mode used by reports and MCP/CLI contracts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexRunMode {
+    Full,
+    Incremental,
+    Skipped,
+}
+
+impl Default for IndexRunMode {
+    fn default() -> Self {
+        Self::Full
+    }
+}
+
+impl IndexRunMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Incremental => "incremental",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+/// Lifecycle status for a file in the unified incremental index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileIndexStatus {
+    Indexed,
+    Deleted,
+}
+
+impl Default for FileIndexStatus {
+    fn default() -> Self {
+        Self::Indexed
+    }
+}
+
+/// Unified file-level index state. This is the canonical data model for
+/// incremental decisions; legacy JSON APIs wrap this shape for compatibility.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileIndexState {
+    pub path: String,
+    pub repository_path: String,
+    pub branch: Option<String>,
+    pub content_hash: String,
+    pub file_size: u64,
+    pub modified_time: u64,
+    #[serde(default)]
+    pub modified_time_nanos: u32,
+    pub indexed_at: u64,
+    pub revision: String,
+    #[serde(default)]
+    pub status: FileIndexStatus,
+}
+
+impl FileIndexState {
+    pub fn from_content(
+        path: &Path,
+        content: &str,
+        repository_path: &str,
+        branch: Option<&str>,
+        revision: &str,
+    ) -> Self {
+        let modified_time = std::fs::metadata(path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok());
+        let indexed_at = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        Self {
+            path: path.display().to_string(),
+            repository_path: repository_path.to_string(),
+            branch: branch.map(str::to_string),
+            content_hash: IncrementalIndexer::hash_content(content),
+            file_size: content.len() as u64,
+            modified_time: modified_time.map(|d| d.as_secs()).unwrap_or(0),
+            modified_time_nanos: modified_time.map(|d| d.subsec_nanos()).unwrap_or(0),
+            indexed_at,
+            revision: revision.to_string(),
+            status: FileIndexStatus::Indexed,
+        }
+    }
+
+    pub fn tombstone(
+        path: &Path,
+        repository_path: &str,
+        branch: Option<&str>,
+        revision: &str,
+    ) -> Self {
+        let indexed_at = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Self {
+            path: path.display().to_string(),
+            repository_path: repository_path.to_string(),
+            branch: branch.map(str::to_string),
+            content_hash: String::new(),
+            file_size: 0,
+            modified_time: 0,
+            modified_time_nanos: 0,
+            indexed_at,
+            revision: revision.to_string(),
+            status: FileIndexStatus::Deleted,
+        }
+    }
+
+    pub fn matches_content(&self, path: &Path, content: &str, revision: &str) -> bool {
+        if self.status != FileIndexStatus::Indexed {
+            return false;
+        }
+        if !revision.is_empty() && self.revision != revision {
+            return false;
+        }
+        if self.file_size != content.len() as u64 {
+            return false;
+        }
+        if let Ok(metadata) = std::fs::metadata(path)
+            && let Ok(modified) = metadata.modified()
+            && let Ok(ts) = modified.duration_since(SystemTime::UNIX_EPOCH)
+            && ts.as_secs() == self.modified_time
+            && ts.subsec_nanos() == self.modified_time_nanos
+        {
+            return true;
+        }
+        IncrementalIndexer::hash_content(content) == self.content_hash
+    }
+
+    /// True when a JSON cache entry matches current disk metadata and revision without reading file bytes.
+    ///
+    /// Used for fast incremental skips; falls back to [`Self::matches_content`] when this returns false.
+    pub fn unchanged_from_disk_metadata(&self, path: &Path, revision: &str) -> bool {
+        if self.status != FileIndexStatus::Indexed {
+            return false;
+        }
+        if !revision.is_empty() && self.revision != revision {
+            return false;
+        }
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return false;
+        };
+        if metadata.len() != self.file_size {
+            return false;
+        }
+        let Ok(modified) = metadata.modified() else {
+            return false;
+        };
+        let Ok(ts) = modified.duration_since(SystemTime::UNIX_EPOCH) else {
+            return false;
+        };
+        ts.as_secs() == self.modified_time && ts.subsec_nanos() == self.modified_time_nanos
+    }
+}
+
+/// A planned graph update for a single file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlannedFileChange {
+    pub path: PathBuf,
+    pub reason: ChangeStatus,
+}
+
+/// Explicit change plan consumed by the main indexer.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IndexChangePlan {
+    pub mode: IndexRunMode,
+    pub changed_files: Vec<PathBuf>,
+    pub deleted_files: Vec<PathBuf>,
+    pub skipped_files: Vec<PathBuf>,
+    pub reason: Option<String>,
+    pub truncated: bool,
+    pub max_files_cap: Option<usize>,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+}
+
+impl IndexChangePlan {
+    pub fn full(reason: impl Into<String>) -> Self {
+        Self {
+            mode: IndexRunMode::Full,
+            reason: Some(reason.into()),
+            ..Default::default()
+        }
+    }
+
+    pub fn incremental(reason: impl Into<String>) -> Self {
+        Self {
+            mode: IndexRunMode::Incremental,
+            reason: Some(reason.into()),
+            ..Default::default()
+        }
+    }
+}
+
 /// Hash cache entry for tracking file changes
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HashEntry {
@@ -28,6 +226,9 @@ pub struct HashEntry {
     pub cached_at: u64,
     /// Repository revision when indexed
     pub repo_revision: String,
+    /// Unified file lifecycle status.
+    #[serde(default)]
+    pub status: FileIndexStatus,
 }
 
 /// Incremental indexing manager
@@ -86,9 +287,8 @@ impl IncrementalIndexer {
     pub fn has_file_changed(&self, path: &Path, content: &str) -> bool {
         let path_key = path.to_string_lossy().to_string();
 
-        // Check if we have a cached entry
         let Some(entry) = self.hash_cache.get(&path_key) else {
-            return true; // No cache entry, file is "changed"
+            return true;
         };
 
         // Check revision - if repo changed, force reindex
@@ -102,7 +302,6 @@ impl IncrementalIndexer {
             return true;
         }
 
-        // Content hash comparison
         let current_hash = Self::hash_content(content);
         current_hash != entry.content_hash
     }
@@ -115,12 +314,10 @@ impl IncrementalIndexer {
 
         let path_key = path.to_string_lossy().to_string();
 
-        // Check if we have a cached entry
         let Some(entry) = self.hash_cache.get(&path_key) else {
             return true;
         };
 
-        // Check revision
         if entry.repo_revision != self.current_revision && !self.current_revision.is_empty() {
             return true;
         }
@@ -171,6 +368,7 @@ impl IncrementalIndexer {
                 modified_time_nanos: modified_time.map(|d| d.subsec_nanos()).unwrap_or(0),
                 cached_at: now,
                 repo_revision: self.current_revision.clone(),
+                status: FileIndexStatus::Indexed,
             },
         );
     }
@@ -281,7 +479,8 @@ pub struct IncrementalStats {
 }
 
 /// Change detection result
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ChangeStatus {
     /// File is new (not in cache)
     New,
@@ -304,7 +503,6 @@ impl GitAwareIncremental {
     pub fn new(repo_path: &Path) -> Self {
         let mut inner = IncrementalIndexer::new();
 
-        // Try to get current git revision
         if let Ok(output) = std::process::Command::new("git")
             .args(["rev-parse", "HEAD"])
             .current_dir(repo_path)
@@ -354,7 +552,6 @@ impl GitAwareIncremental {
     pub fn get_uncommitted_changes(&self, repo_path: &Path) -> Vec<PathBuf> {
         let mut changed = Vec::new();
 
-        // Get unstaged changes
         if let Ok(output) = std::process::Command::new(&self.git_command)
             .args(["diff", "--name-only"])
             .current_dir(repo_path)
@@ -369,7 +566,6 @@ impl GitAwareIncremental {
             }
         }
 
-        // Get staged changes
         if let Ok(output) = std::process::Command::new(&self.git_command)
             .args(["diff", "--cached", "--name-only"])
             .current_dir(repo_path)
@@ -434,14 +630,10 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("test.txt");
 
-        // Create and record file
         std::fs::write(&file_path, "test content").unwrap();
         indexer.record_file(&file_path, "test content");
 
-        // Should not be changed with same content
         assert!(!indexer.has_file_changed(&file_path, "test content"));
-
-        // Should be changed with different content
         assert!(indexer.has_file_changed(&file_path, "different content"));
     }
 
@@ -482,13 +674,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("cache.json");
 
-        // Create and populate indexer
         let mut indexer = IncrementalIndexer::with_cache_path(cache_path.clone());
         indexer.set_revision("abc123");
         indexer.record_file(Path::new("/test/file.txt"), "content");
         indexer.save().unwrap();
 
-        // Load into new indexer
         let mut indexer2 = IncrementalIndexer::with_cache_path(cache_path);
         indexer2.load().unwrap();
 
@@ -514,13 +704,10 @@ mod tests {
         indexer.set_revision("rev1");
         indexer.record_file(Path::new("/file.txt"), "content");
 
-        // Should be unchanged with same revision
         assert!(!indexer.has_file_changed(Path::new("/file.txt"), "content"));
 
-        // Change revision
         indexer.set_revision("rev2");
 
-        // Now should be considered changed
         assert!(indexer.has_file_changed(Path::new("/file.txt"), "content"));
     }
 
@@ -535,7 +722,6 @@ mod tests {
 
         indexer.record_file(&file_path, "content");
 
-        // Should use fast path and not detect change
         assert!(!indexer.has_file_changed_fast(&file_path, "content"));
     }
 

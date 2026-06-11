@@ -6,12 +6,17 @@
 //! - Batch processing with adaptive sizing
 //! - Progress tracking and cancellation
 
-use rayon::prelude::*;
-use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
+
+#[cfg(test)]
+use rayon::prelude::*;
+#[cfg(test)]
+use rayon::{ThreadPool, ThreadPoolBuilder};
+#[cfg(test)]
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// Configuration for parallel indexing
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,7 +69,8 @@ pub struct ParallelStats {
     pub work_steals: usize,
 }
 
-/// Manages parallel indexing operations
+/// Legacy parallel batch helper (unit tests only; main indexer uses Rayon).
+#[cfg(test)]
 pub struct ParallelProcessor {
     config: ParallelConfig,
     pool: ThreadPool,
@@ -76,6 +82,7 @@ pub struct ParallelProcessor {
     batches_processed: Arc<AtomicUsize>,
 }
 
+#[cfg(test)]
 impl ParallelProcessor {
     /// Create a new parallel processor with default configuration
     pub fn new() -> Self {
@@ -148,7 +155,6 @@ impl ParallelProcessor {
         // Aim for at least 4 batches per thread for better work distribution
         let optimal_batch = items_per_thread / 4;
 
-        // Clamp to configured range
         optimal_batch
             .max(self.config.min_batch_size)
             .min(self.config.max_batch_size)
@@ -165,7 +171,6 @@ impl ParallelProcessor {
             return Vec::new();
         }
 
-        // Reset counters
         self.files_processed.store(0, Ordering::Relaxed);
         self.batches_processed.store(0, Ordering::Relaxed);
         self.reset_cancel();
@@ -173,10 +178,8 @@ impl ParallelProcessor {
         let batch_size = self.calculate_batch_size(items.len());
 
         if items.len() < self.config.min_batch_size {
-            // Process sequentially for small batches
             items.iter().map(&processor).collect()
         } else {
-            // Process in parallel
             let processor_arc = Arc::new(processor);
             let cancelled = Arc::clone(&self.cancelled);
             let files_processed = Arc::clone(&self.files_processed);
@@ -215,7 +218,6 @@ impl ParallelProcessor {
             return Vec::new();
         }
 
-        // Reset counters
         self.files_processed.store(0, Ordering::Relaxed);
         self.batches_processed.store(0, Ordering::Relaxed);
         self.reset_cancel();
@@ -272,6 +274,7 @@ impl ParallelProcessor {
     }
 }
 
+#[cfg(test)]
 impl Default for ParallelProcessor {
     fn default() -> Self {
         Self::new()
@@ -320,19 +323,14 @@ impl AdaptiveBatcher {
             return;
         }
 
-        // Calculate average processing time
         let avg_nanos: u128 = self.recent_times.iter().map(|d| d.as_nanos()).sum::<u128>()
             / self.recent_times.len() as u128;
 
-        // If processing is fast, increase batch size
-        // If processing is slow, decrease batch size
         let target_time_ns = 10_000_000; // 10ms target per batch
 
         if avg_nanos < target_time_ns / 2 {
-            // Processing is fast, increase batch size
             self.current_size = (self.current_size * 2).min(self.max_size);
         } else if avg_nanos > target_time_ns * 2 {
-            // Processing is slow, decrease batch size
             self.current_size = (self.current_size / 2).max(self.min_size);
         }
     }
@@ -415,11 +413,9 @@ mod tests {
     fn calculate_batch_size() {
         let processor = ParallelProcessor::new();
 
-        // Small batch
         let batch = processor.calculate_batch_size(5);
         assert!(batch >= 5 || batch == 5);
 
-        // Large batch
         let batch = processor.calculate_batch_size(10000);
         assert!(batch >= processor.config.min_batch_size);
         assert!(batch <= processor.config.max_batch_size);
@@ -442,12 +438,10 @@ mod tests {
     fn adaptive_batcher_adaptation() {
         let mut batcher = AdaptiveBatcher::new(10, 100);
 
-        // Record fast times - should increase batch size
         for _ in 0..5 {
             batcher.record_time(Duration::from_micros(100));
         }
 
-        // Batch size should have increased
         assert!(batcher.current_size() > 10);
     }
 

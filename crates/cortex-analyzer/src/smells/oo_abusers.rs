@@ -26,21 +26,17 @@ pub fn detect_alternative_classes(
     let lines: Vec<&str> = source.lines().collect();
     let lang = SourceLanguage::from_file_path(file_path);
 
-    // Extract all classes and their method signatures
     let classes = extract_class_signatures(&lines, lang);
 
-    // Compare each pair of classes for similarity
     let class_names: Vec<&String> = classes.keys().collect();
     for i in 0..class_names.len() {
         for j in (i + 1)..class_names.len() {
             let class1 = &classes[class_names[i]];
             let class2 = &classes[class_names[j]];
 
-            // Calculate method signature similarity
             let similarity = calculate_signature_similarity(&class1.methods, &class2.methods);
 
             if similarity >= config.min_class_similarity && similarity < 1.0 {
-                // High similarity but different classes = alternative classes
                 let common_methods: Vec<_> = class1.methods.intersection(&class2.methods).collect();
 
                 if common_methods.len() >= 3 {
@@ -81,11 +77,9 @@ pub fn detect_refused_bequest(
     let lines: Vec<&str> = source.lines().collect();
     let lang = SourceLanguage::from_file_path(file_path);
 
-    // Find inheritance relationships
     let inheritances = find_inheritance_relationships(&lines, lang);
 
     for inheritance in inheritances {
-        // Check if subclass overrides most parent methods
         let subclass_methods = extract_class_methods(&lines, &inheritance.subclass, lang);
         let parent_methods = extract_class_methods(&lines, &inheritance.parent, lang);
 
@@ -99,7 +93,6 @@ pub fn detect_refused_bequest(
             .collect();
         let override_ratio = overridden.len() as f64 / parent_methods.len() as f64;
 
-        // If most methods are overridden or ignored, it's refused bequest
         if override_ratio < config.min_bequest_usage {
             let unused_count = parent_methods.len() - overridden.len();
 
@@ -142,15 +135,12 @@ pub fn detect_temporary_fields(
     let lines: Vec<&str> = source.lines().collect();
     let lang = SourceLanguage::from_file_path(file_path);
 
-    // Find all classes and their fields
     let classes = extract_class_signatures(&lines, lang);
 
     for (class_name, class_info) in &classes {
-        // Find field usages across methods
         for field in &class_info.fields {
             let usage_count = count_field_usages(&lines, field, class_name);
 
-            // If a field is rarely used, it's a temporary field
             let total_methods = class_info.methods.len().max(1);
             let usage_ratio = usage_count as f64 / total_methods as f64;
 
@@ -199,10 +189,8 @@ pub fn detect_divergent_change(
     let classes = extract_class_signatures(&lines, lang);
 
     for (class_name, class_info) in &classes {
-        // Analyze method cohesion
         let cohesion = calculate_method_cohesion(&class_info.method_groups);
 
-        // Low cohesion = high divergent change potential
         if cohesion < config.min_method_cohesion && class_info.methods.len() > 5 {
             smells.push(CodeSmell {
                 smell_type: SmellType::DivergentChange,
@@ -232,7 +220,6 @@ pub fn detect_divergent_change(
     smells
 }
 
-// Data structures and helper functions
 
 struct ClassInfo {
     line_number: u32,
@@ -275,7 +262,6 @@ fn extract_class_signatures(lines: &[&str], lang: SourceLanguage) -> HashMap<Str
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Detect class/struct start
         if trimmed.starts_with("class ")
             || trimmed.starts_with("struct ")
             || trimmed.starts_with("impl ")
@@ -304,21 +290,17 @@ fn extract_class_signatures(lines: &[&str], lang: SourceLanguage) -> HashMap<Str
 
             let info = classes.get_mut(class_name).unwrap();
 
-            // Extract method names
             if is_method_line(trimmed, lang) {
                 let method_name = extract_method_name(trimmed);
                 info.methods.insert(method_name);
             }
 
-            // Extract field names
             if is_field_line(trimmed) {
                 let field_name = extract_field_name(trimmed);
                 info.fields.insert(field_name);
             }
 
-            // Check for class end
             if brace_count == 0 && i > class_start {
-                // Compute method groups from collected methods
                 let groups = group_methods_by_prefix(&info.methods);
                 info.method_groups = groups;
                 current_class = None;
@@ -332,8 +314,8 @@ fn extract_class_signatures(lines: &[&str], lang: SourceLanguage) -> HashMap<Str
 fn extract_class_name_from_line(line: &str) -> String {
     let line = line.trim();
 
-    // Handle impl blocks
-    if let Some(rest) = line.strip_prefix("impl ") {
+    if line.starts_with("impl ") {
+        let rest = &line[5..];
         return rest
             .split(|c: char| c.is_whitespace() || c == '{' || c == '<' || c == '>')
             .find(|s| !s.is_empty())
@@ -341,7 +323,6 @@ fn extract_class_name_from_line(line: &str) -> String {
             .to_string();
     }
 
-    // Handle struct/class definitions
     let keywords = ["struct ", "class "];
     for keyword in keywords {
         let full_keyword = if line.starts_with("pub ") {
@@ -376,12 +357,12 @@ fn extract_class_methods(
     for line in lines {
         let trimmed = line.trim();
 
-        if (trimmed.contains("class ") || trimmed.contains("struct ") || trimmed.contains("impl "))
-            && trimmed.contains(class_name)
-        {
-            in_class = true;
-            _target_class = class_name.to_string();
-            brace_count = 0;
+        if trimmed.contains("class ") || trimmed.contains("struct ") || trimmed.contains("impl ") {
+            if trimmed.contains(class_name) {
+                in_class = true;
+                _target_class = class_name.to_string();
+                brace_count = 0;
+            }
         }
 
         if in_class {
@@ -414,41 +395,34 @@ fn find_inheritance_relationships(
         // Java/C#: class Child extends Parent, class Child : Parent
         // Python: class Child(Parent):
 
-        // Handle various inheritance patterns
-        if trimmed.contains("extends ")
-            && let Some((child, parent)) = extract_extends_relation(trimmed)
-        {
-            relations.push(InheritanceRelation {
-                subclass: child,
-                parent,
-                line_number: (i + 1) as u32,
-            });
+        if trimmed.contains("extends ") {
+            if let Some((child, parent)) = extract_extends_relation(trimmed) {
+                relations.push(InheritanceRelation {
+                    subclass: child,
+                    parent,
+                    line_number: (i + 1) as u32,
+                });
+            }
         }
 
-        // Python style
-        if trimmed.starts_with("class ")
-            && trimmed.contains('(')
-            && !trimmed.contains("():")
-            && let Some((child, parent)) = extract_python_inheritance(trimmed)
-        {
-            relations.push(InheritanceRelation {
-                subclass: child,
-                parent,
-                line_number: (i + 1) as u32,
-            });
+        if trimmed.starts_with("class ") && trimmed.contains('(') && !trimmed.contains("():") {
+            if let Some((child, parent)) = extract_python_inheritance(trimmed) {
+                relations.push(InheritanceRelation {
+                    subclass: child,
+                    parent,
+                    line_number: (i + 1) as u32,
+                });
+            }
         }
 
-        // C# style with colon
-        if trimmed.starts_with("class ")
-            && trimmed.contains(':')
-            && !trimmed.contains("::")
-            && let Some((child, parent)) = extract_csharp_inheritance(trimmed)
-        {
-            relations.push(InheritanceRelation {
-                subclass: child,
-                parent,
-                line_number: (i + 1) as u32,
-            });
+        if trimmed.starts_with("class ") && trimmed.contains(':') && !trimmed.contains("::") {
+            if let Some((child, parent)) = extract_csharp_inheritance(trimmed) {
+                relations.push(InheritanceRelation {
+                    subclass: child,
+                    parent,
+                    line_number: (i + 1) as u32,
+                });
+            }
         }
     }
 
@@ -505,7 +479,11 @@ fn extract_csharp_inheritance(line: &str) -> Option<(String, String)> {
     let colon_pos = line.find(':')?;
 
     let child = line[..colon_pos].trim().to_string();
-    let parent = line[colon_pos + 1..].split_whitespace().next()?.to_string();
+    let parent = line[colon_pos + 1..]
+        .trim()
+        .split_whitespace()
+        .next()?
+        .to_string();
 
     if child.is_empty() || parent.is_empty() {
         return None;
@@ -572,12 +550,10 @@ fn count_field_usages(lines: &[&str], field: &str, _class_name: &str) -> usize {
     for line in lines {
         let trimmed = line.trim();
 
-        // Skip field definition itself
         if is_field_line(trimmed) && trimmed.contains(field) {
             continue;
         }
 
-        // Count usages of self.field or this.field or just field
         let patterns = [
             format!("self.{}", field),
             format!("this.{}", field),
@@ -588,7 +564,6 @@ fn count_field_usages(lines: &[&str], field: &str, _class_name: &str) -> usize {
         if patterns.iter().any(|p| line.contains(p)) {
             count += 1;
         } else if !trimmed.starts_with("//") && line.contains(&format!(" {}", field)) {
-            // Simple field access without self/this
             count += 1;
         }
     }
@@ -602,13 +577,11 @@ fn calculate_method_cohesion(method_groups: &[HashSet<String>]) -> f64 {
         return 1.0;
     }
 
-    // Simplified LCOM calculation
     // In a cohesive class, all methods should share some commonality
     if method_groups.len() == 1 {
         return 1.0;
     }
 
-    // Check overlap between method groups
     let mut total_overlap = 0;
     let mut comparisons = 0;
 
@@ -652,7 +625,6 @@ struct AdminService {
 "#;
 
         let smells = detect_alternative_classes(source, "test.rs", &config);
-        // May or may not detect depending on similarity threshold
         assert!(smells.len() <= 2);
     }
 
@@ -697,8 +669,6 @@ struct AdminService {
     #[test]
     fn test_detect_divergent_change_with_mixed_responsibilities() {
         let config = SmellConfig::default();
-        // Class with 6+ methods across different prefixes (get, set, save, load) - each prefix
-        // has 2+ methods so they form groups; multiple groups = low cohesion
         let source = r#"
 struct BadClass {
     fn get_user() {}

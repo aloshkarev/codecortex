@@ -9,8 +9,7 @@
 #![allow(clippy::needless_borrows_for_generic_args)]
 
 use cortex_mcp::{Document, TfIdfScorer};
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use std::hint::black_box;
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 fn generate_documents(count: usize) -> Vec<Document> {
     (0..count)
@@ -123,7 +122,7 @@ fn bench_tfidf_scoring(c: &mut Criterion) {
 
     for (i, query) in queries.iter().enumerate() {
         group.bench_with_input(
-            BenchmarkId::new("query", format!("{}_terms", query.len())),
+            BenchmarkId::new("query", format!("q{i}_{}_terms", query.len())),
             &i,
             |b, _| {
                 let doc = &docs[0];

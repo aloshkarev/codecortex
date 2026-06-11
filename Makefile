@@ -1,4 +1,4 @@
-.PHONY: all build install clean test release run-mcp run-memgraph status help mcp-bootstrap mcp-smoke measure-init measure-session-start measure-session-end measure-report measure-mcp-capture measure-bootstrap fmt lint check nix-build nix-check
+.PHONY: all build install clean test release run-mcp run-falkordb stop-falkordb status help mcp-bootstrap mcp-smoke mcp-semantic-audit mcp-semantic-pr mcp-vector-semantic-pr retrieval-eval retrieval-eval-strict mcp-audit-all cortexignore-git-oracle measure-init measure-session-start measure-session-end measure-report measure-mcp-capture measure-bootstrap fmt lint check nix-build nix-check
 
 # Directories
 BIN_DIR := $(HOME)/.local/bin
@@ -60,12 +60,88 @@ run-mcp:
 	cargo run -p cortex-cli -- mcp start
 
 # Bootstrap index + vector + MCP server for a repo
+agent-pack:
+	@./plugin/codecortex/scripts/sync-from-docs.sh
+
 mcp-bootstrap:
 	@if [ -z "$(REPO)" ]; then \
 		echo "Usage: make mcp-bootstrap REPO=/path/to/repo"; \
 		exit 1; \
 	fi
 	@./scripts/bootstrap-codecortex-mcp.sh "$(REPO)"
+
+# Live MCP tool audit (77 tools); requires graph + Ollama; skips destructive tools by default
+CORTEX_AUDIT_BIN ?= $(CURDIR)/target/release/cortex-cli
+mcp-tool-audit:
+	@if [ -z "$(REPO)" ]; then \
+		echo "Usage: make mcp-tool-audit REPO=/path/to/repo"; \
+		exit 1; \
+	fi
+	@CORTEX_TEST_EMBEDDER=1 CORTEX_TEST_GRAPH=1 CORTEX_AUDIT_REPO="$(REPO)" CORTEX_BIN="$(CORTEX_AUDIT_BIN)" python3 scripts/mcp_tool_audit.py
+
+# Optional A2A chain audit (spawn + task-dependent tools)
+mcp-tool-audit-a2a:
+	@if [ -z "$(REPO)" ]; then \
+		echo "Usage: make mcp-tool-audit-a2a REPO=/path/to/repo"; \
+		exit 1; \
+	fi
+	@CORTEX_AUDIT_REPO="$(REPO)" CORTEX_BIN="$(CORTEX_AUDIT_BIN)" python3 scripts/mcp_tool_audit.py --a2a-chain
+
+# Semantic MCP audit (oracles.json); PROFILE=pr (~21 tools) or nightly (77)
+CORTEX_SEMANTIC_PROFILE ?= pr
+mcp-semantic-audit:
+	@if [ -z "$(REPO)" ]; then \
+		echo "Usage: make mcp-semantic-audit REPO=/path/to/repo [PROFILE=pr|nightly]"; \
+		exit 1; \
+	fi
+	@CORTEX_SEMANTIC_REPO="$(REPO)" CORTEX_SEMANTIC_PROFILE="$(CORTEX_SEMANTIC_PROFILE)" CORTEX_BIN="$(CORTEX_AUDIT_BIN)" python3 scripts/mcp_semantic_audit.py --profile "$(CORTEX_SEMANTIC_PROFILE)" --repo "$(REPO)"
+
+mcp-semantic-pr:
+	@$(MAKE) mcp-semantic-audit REPO="$(REPO)" PROFILE=pr CORTEX_AUDIT_BIN="$(CORTEX_AUDIT_BIN)"
+
+# Vector semantic PR gate (fixture + HashEmbedder)
+CORTEX_SEMANTIC_FIXTURE ?= $(CURDIR)/tests/fixtures/vector_semantic
+mcp-vector-semantic-pr:
+	@CORTEX_TEST_EMBEDDER=1 CORTEX_TEST_GRAPH=1 \
+		CORTEX_SEMANTIC_FIXTURE="$(CORTEX_SEMANTIC_FIXTURE)" \
+		CORTEX_BIN="$(CORTEX_AUDIT_BIN)" \
+		python3 scripts/mcp_semantic_audit.py \
+		--profile vector_pr \
+		--fixture "$(CORTEX_SEMANTIC_FIXTURE)" \
+		--bootstrap-fixture
+
+# Retrieval-quality eval (curated cases in tests/retrieval/retrieval.yaml)
+CORTEX_RETRIEVAL_REPO ?= $(CURDIR)
+retrieval-eval:
+	@CORTEX_RETRIEVAL_REPO="$(CORTEX_RETRIEVAL_REPO)" CORTEX_BIN="$(CORTEX_AUDIT_BIN)" \
+		python3 scripts/retrieval_eval.py --repo "$(CORTEX_RETRIEVAL_REPO)" --token-efficiency
+
+retrieval-eval-strict:
+	@CORTEX_TEST_GRAPH=1 CORTEX_TEST_EMBEDDER=1 \
+		CORTEX_RETRIEVAL_REPO="$(CORTEX_RETRIEVAL_REPO)" CORTEX_BIN="$(CORTEX_AUDIT_BIN)" \
+		python3 scripts/retrieval_eval.py \
+		--repo "$(CORTEX_RETRIEVAL_REPO)" \
+		--token-efficiency \
+		--strict
+
+# Full PR audit gate: smoke + graph semantic + vector semantic
+mcp-audit-all:
+	@if [ -z "$(REPO)" ]; then \
+		echo "Usage: make mcp-audit-all REPO=/path/to/repo"; \
+		exit 1; \
+	fi
+	@$(MAKE) mcp-tool-audit REPO="$(REPO)" CORTEX_AUDIT_BIN="$(CORTEX_AUDIT_BIN)"
+	@$(MAKE) mcp-semantic-pr REPO="$(REPO)" CORTEX_AUDIT_BIN="$(CORTEX_AUDIT_BIN)"
+	@CORTEX_TEST_EMBEDDER=1 $(MAKE) mcp-vector-semantic-pr CORTEX_AUDIT_BIN="$(CORTEX_AUDIT_BIN)"
+
+# Local/CI: git check-ignore oracle for cortexignore hierarchical tests
+cortexignore-git-oracle:
+	cargo test -p cortex-core gitignore_oracle -- --ignored
+
+# Nightly: 77/77 on disposable fixture (long + destructive dry-run + A2A chain)
+mcp-nightly-audit:
+	@chmod +x scripts/nightly-mcp-audit.sh
+	@CORTEX_BIN="$(CORTEX_AUDIT_BIN)" ./scripts/nightly-mcp-audit.sh
 
 # Quick local MCP readiness check
 mcp-smoke:
@@ -130,14 +206,14 @@ measure-bootstrap:
 	echo "  make measure-session-end SESSION=$$SESSION_ID$(if $(DB), DB=$(DB),)"; \
 	echo "  make measure-report$(if $(DB), DB=$(DB),)"
 
-# Start Memgraph with Docker
-run-memgraph:
-	@docker ps --format '{{.Names}}' | grep -q '^memgraph$$' && echo "Memgraph already running" || \
-		docker run -d --name memgraph -p 7687:7687 -p 7444:7444 memgraph/memgraph-mage:3.8.1 --also-log-to-stderr=true
+# Start FalkorDB with Docker
+run-falkordb:
+	@docker ps --format '{{.Names}}' | grep -q '^codecortex-falkordb$$' && echo "FalkorDB already running" || \
+		docker run -d --name codecortex-falkordb -p 6379:6379 falkordb/falkordb:latest
 
-# Stop Memgraph
-stop-memgraph:
-	@docker stop memgraph 2>/dev/null || echo "Memgraph not running"
+# Stop FalkorDB
+stop-falkordb:
+	@docker stop codecortex-falkordb 2>/dev/null || echo "FalkorDB not running"
 
 # Show status
 status:
@@ -149,8 +225,8 @@ status:
 	@echo "Configuration:"
 	@$(CORTEX_BIN) config show 2>/dev/null || echo "  Not configured"
 	@echo ""
-	@echo "Memgraph (Docker):"
-	@docker ps --filter name=memgraph --format '  Status: {{.Status}}' 2>/dev/null || echo "  Not running"
+	@echo "FalkorDB (Docker):"
+	@docker ps --filter name=codecortex-falkordb --format '  Status: {{.Status}}' 2>/dev/null || echo "  Not running"
 	@echo ""
 	@echo "MCP Tools: $$( $(CORTEX_BIN) mcp tools 2>/dev/null | wc -l | tr -d ' ' ) available"
 
@@ -181,11 +257,17 @@ nix-check:
 	nix flake check --print-build-logs
 
 # Development setup
-setup: install run-memgraph
+setup: install run-falkordb
 	@mkdir -p $(CONFIG_DIR)
-	@if [ ! -f $(CONFIG_DIR)/config.json ]; then \
-		echo '{"memgraph_uri":"bolt://localhost:7687","memgraph_user":"","memgraph_password":"","max_batch_size":1000}' > $(CONFIG_DIR)/config.json; \
-		echo "Created $(CONFIG_DIR)/config.json"; \
+	@if [ ! -f $(CONFIG_DIR)/config.toml ]; then \
+		printf '%s\n' \
+			'backend_type = "falkordb"' \
+			'falkordb_uri = "falkor://127.0.0.1:6379"' \
+			'falkordb_graph = "codecortex"' \
+			'falkordb_password = ""' \
+			'max_batch_size = 4096' \
+			> $(CONFIG_DIR)/config.toml; \
+		echo "Created $(CONFIG_DIR)/config.toml"; \
 	fi
 	@echo ""
 	@echo "Setup complete! Run 'cortex doctor' to verify."
@@ -212,8 +294,8 @@ help:
 	@echo "  measure-mcp-capture Start MCP with log capture (SESSION=<id>)"
 	@echo "  measure-report Show token/time/quality KPI report"
 	@echo "  measure-bootstrap One-shot measurement session bootstrap"
-	@echo "  run-memgraph Start Memgraph with Docker"
-	@echo "  stop-memgraph Stop Memgraph container"
+	@echo "  run-falkordb   Start FalkorDB with Docker"
+	@echo "  stop-falkordb  Stop FalkorDB container"
 	@echo "  status       Show installation status"
 	@echo "  fmt          Format code"
 	@echo "  lint         Run clippy linter"

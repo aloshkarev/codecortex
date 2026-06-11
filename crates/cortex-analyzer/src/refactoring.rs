@@ -10,17 +10,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[repr(u8)]
-#[derive(Default)]
 pub enum Priority {
     /// Low priority - cosmetic or minor improvement
     Low = 1,
     /// Medium priority - should be addressed soon
-    #[default]
     Medium = 2,
     /// High priority - important for maintainability
     High = 3,
     /// Critical - blocking or severe issues
     Critical = 4,
+}
+
+impl Default for Priority {
+    fn default() -> Self {
+        Self::Medium
+    }
 }
 
 impl std::fmt::Display for Priority {
@@ -38,7 +42,6 @@ impl std::fmt::Display for Priority {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefactoringTechnique {
-    // === Composing Methods ===
     /// Turn a code fragment into a method whose name explains its purpose
     ExtractMethod,
     /// Replace method calls with the method's body
@@ -58,7 +61,6 @@ pub enum RefactoringTechnique {
     /// Substitute algorithm with clearer one
     SubstituteAlgorithm,
 
-    // === Moving Features Between Objects ===
     /// Move method to another class
     MoveMethod,
     /// Move field to another class
@@ -76,7 +78,6 @@ pub enum RefactoringTechnique {
     /// Add extension methods to a class
     IntroduceLocalExtension,
 
-    // === Organizing Data ===
     /// Replace magic literal with constant
     ReplaceMagicLiteral,
     /// Convert value to reference object
@@ -94,7 +95,6 @@ pub enum RefactoringTechnique {
     /// Replace subclass with fields
     ReplaceSubclassWithFields,
 
-    // === Simplifying Conditional Expressions ===
     /// Break complex conditional into smaller pieces
     DecomposeConditional,
     /// Combine multiple conditionals with same result
@@ -108,7 +108,6 @@ pub enum RefactoringTechnique {
     /// Introduce assertion
     IntroduceAssertion,
 
-    // === Simplifying Method Calls ===
     /// Rename method to better reflect purpose
     RenameMethod,
     /// Add parameter for new functionality
@@ -130,7 +129,6 @@ pub enum RefactoringTechnique {
     /// Replace exception with test
     ReplaceExceptionWithTest,
 
-    // === Dealing with Generalization ===
     /// Move field to superclass
     PullUpField,
     /// Move method to superclass
@@ -152,7 +150,6 @@ pub enum RefactoringTechnique {
     /// Replace delegation with inheritance
     ReplaceDelegationWithInheritance,
 
-    // === Large-Scale Refactorings ===
     /// Encapsulate field with getter/setter
     EncapsulateField,
     /// Unify interfaces
@@ -163,7 +160,6 @@ pub enum RefactoringTechnique {
 
 impl std::fmt::Display for RefactoringTechnique {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Convert CamelCase to snake_case
         let name = match self {
             Self::ExtractMethod => "Extract Method",
             Self::InlineMethod => "Inline Method",
@@ -265,7 +261,6 @@ impl RefactoringRecommendation {
             return None;
         }
 
-        // Use the first (primary) recommendation
         let technique = techniques[0].clone();
         let priority = Self::severity_to_priority(&smell.severity);
 
@@ -376,7 +371,6 @@ impl SmellType {
     /// Get recommended refactoring techniques for this smell type
     pub fn recommended_refactorings(&self) -> Vec<RefactoringTechnique> {
         match self {
-            // Bloaters
             Self::LongFunction => vec![
                 RefactoringTechnique::ExtractMethod,
                 RefactoringTechnique::ReplaceMethodWithMethodObject,
@@ -406,7 +400,6 @@ impl SmellType {
                 RefactoringTechnique::ReplaceTypeCodeWithStrategy,
             ],
 
-            // OO Abusers
             Self::AlternativeClasses => vec![
                 RefactoringTechnique::ExtractInterface,
                 RefactoringTechnique::RenameMethod,
@@ -425,7 +418,6 @@ impl SmellType {
                 RefactoringTechnique::EncapsulateField,
             ],
 
-            // Change Preventers
             Self::ParallelInheritance => vec![
                 RefactoringTechnique::MoveMethod,
                 RefactoringTechnique::MoveField,
@@ -436,7 +428,6 @@ impl SmellType {
                 RefactoringTechnique::MoveMethod,
             ],
 
-            // Dispensables
             Self::Comments => vec![
                 RefactoringTechnique::ExtractMethod,
                 RefactoringTechnique::RenameMethod,
@@ -463,7 +454,6 @@ impl SmellType {
                 RefactoringTechnique::RemoveParameter,
             ],
 
-            // Couplers
             Self::FeatureEnvy => vec![
                 RefactoringTechnique::MoveMethod,
                 RefactoringTechnique::ExtractMethod,
@@ -484,7 +474,6 @@ impl SmellType {
                 RefactoringTechnique::ReplaceDelegationWithInheritance,
             ],
 
-            // Legacy compatibility
             Self::DeepNesting => vec![
                 RefactoringTechnique::ExtractMethod,
                 RefactoringTechnique::ReplaceNestedConditionalWithGuard,
@@ -589,7 +578,7 @@ impl RefactoringEngine {
 
         for rec in recommendations {
             *by_category.entry(rec.smell_type.category()).or_default() += 1;
-            *by_priority.entry(rec.priority).or_default() += 1;
+            *by_priority.entry(rec.priority.clone()).or_default() += 1;
             *by_technique.entry(rec.technique.clone()).or_default() += 1;
         }
 

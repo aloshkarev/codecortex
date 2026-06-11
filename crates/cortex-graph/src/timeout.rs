@@ -106,7 +106,6 @@ impl QueryType {
         let query_upper = query.to_uppercase();
         let trimmed = query_upper.trim();
 
-        // Check for schema operations first
         if trimmed.starts_with("CREATE CONSTRAINT")
             || trimmed.starts_with("DROP CONSTRAINT")
             || trimmed.starts_with("CREATE INDEX")
@@ -117,7 +116,6 @@ impl QueryType {
             return QueryType::Schema;
         }
 
-        // Check for read operations
         if trimmed.starts_with("MATCH")
             || trimmed.starts_with("RETURN")
             || trimmed.starts_with("PROFILE")
@@ -135,7 +133,6 @@ impl QueryType {
             return QueryType::Read;
         }
 
-        // Check for write operations
         if trimmed.starts_with("CREATE")
             || trimmed.starts_with("MERGE")
             || trimmed.starts_with("INSERT")
@@ -143,7 +140,6 @@ impl QueryType {
             return QueryType::Write;
         }
 
-        // Check for batch operations
         if query_upper.contains("UNWIND") || query_upper.contains("FOREACH") {
             return QueryType::Batch;
         }
@@ -380,8 +376,6 @@ mod tests {
         let mut timing = QueryTiming::new("MATCH (n) RETURN n", Duration::from_secs(30));
         timing.complete();
         assert!(!timing.timed_out);
-        // Execution time is set by complete() - may be zero on very fast systems
-        // The important thing is that complete() was called successfully
         let _ = timing.execution_time;
     }
 

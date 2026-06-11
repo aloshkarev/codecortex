@@ -1,0 +1,45 @@
+[package]
+name = "cortex-a2a"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Agent-to-agent protocol layer for CodeCortex hybrid orchestration"
+
+[build-dependencies]
+pbjson-build = "0.7"
+prost-build = "0.14"
+
+[dependencies]
+pbjson = "0.7"
+pbjson-types = "0.7"
+prost = "0.14"
+prost-types = "0.14"
+anyhow.workspace = true
+async-trait.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+cortex-core = { path = "../cortex-core" }
+cortex-graph = { path = "../cortex-graph" }
+dashmap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sled.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync", "rt", "macros", "time"] }
+tracing.workspace = true
+uuid = { version = "1", features = ["v4", "serde"] }
+hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[[bin]]
+name = "a2a-role-client"
+path = "src/bin/a2a-role-client.rs"
+
+[dev-dependencies]
+async-trait.workspace = true
+futures-util = "0.3"
+httpmock = "0.7"
+tempfile.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

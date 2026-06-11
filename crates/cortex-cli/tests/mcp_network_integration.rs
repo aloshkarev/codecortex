@@ -1,5 +1,5 @@
 use cortex_core::CortexConfig;
-use cortex_mcp::{McpServeOptions, McpTransport, start_with_options};
+use cortex_mcp::{FeatureFlags, McpServeOptions, McpTransport, start_with_options};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::time::Duration;
@@ -39,6 +39,7 @@ async fn mcp_websocket_accepts_multiple_clients_and_lists_tools() {
         allow_remote: false,
         max_clients: 4,
         idle_timeout_secs: 60,
+        feature_flags: FeatureFlags::from_env(),
     };
     let server_task = tokio::spawn(async move {
         let _ = start_with_options(CortexConfig::default(), options).await;

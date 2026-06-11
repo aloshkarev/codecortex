@@ -42,6 +42,7 @@
 //! This crate has no feature flags - all languages are always available.
 
 pub mod languages;
+mod parse_pool;
 mod parser_impl;
 mod registry;
 pub mod signature;

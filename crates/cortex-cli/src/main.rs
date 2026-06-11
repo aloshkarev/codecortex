@@ -57,6 +57,8 @@
 //! cortex completion bash > /etc/bash_completion.d/cortex
 //! ```
 
+mod cli_indexing;
+mod commands;
 mod setup_wizard;
 
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
@@ -72,18 +74,20 @@ use cortex_analyzer::{
     detect_inappropriate_intimacy_with_context, detect_shotgun_surgery,
     detect_shotgun_surgery_with_context,
 };
-use cortex_core::{CortexConfig, FileChangeType, GitOperations, SearchKind};
+use cortex_core::{CortexConfig, FileChangeType, FileDiff, GitOperations, SearchKind};
 use cortex_graph::{BundleStore, CrossProjectQueryBuilder, GraphClient, is_branch_index_current};
-use cortex_indexer::Indexer;
-use cortex_mcp::tool_names;
-use cortex_vector::{JsonStore, LanceStore, VectorStore};
+use cortex_indexer::{IndexChangePlan, Indexer};
+use cortex_mcp::{
+    AgentPackInstallOptions, install_agent_pack, load_savings_report, reset_savings,
+    resolve_agent_pack, tool_cards, tool_names,
+};
 use cortex_watcher::WatchSession;
 use indicatif::{ProgressBar, ProgressStyle};
 use owo_colors::OwoColorize;
 use reqwest::header::{ACCEPT, AUTHORIZATION, HeaderMap, HeaderValue};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -107,57 +111,47 @@ enum OutputFormat {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum IndexModeArg {
-    /// Re-index all files regardless of cache state
     Full,
-    /// Only index files changed since the last indexed branch commit
     IncrementalDiff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum McpTransportArg {
-    /// Standard I/O (default; used by most MCP clients)
     Stdio,
-    /// HTTP + Server-Sent Events transport
     HttpSse,
-    /// WebSocket transport
     Websocket,
-    /// Run all transports simultaneously
     Multi,
 }
 
-/// Optional MCP tools that are disabled by default and can be activated with `--enable`.
+/// Optional MCP tool groups that can be enabled without environment variables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum McpEnableFlag {
-    /// get_context_capsule — hybrid graph+vector context retrieval
     #[value(name = "context-capsule")]
     ContextCapsule,
-    /// get_impact_graph — blast-radius analysis for a symbol
     #[value(name = "impact-graph")]
     ImpactGraph,
-    /// search_logic_flow — logic path search between symbols
     #[value(name = "logic-flow")]
     LogicFlow,
-    /// index_status — current indexing state for a repository
     #[value(name = "index-status")]
     IndexStatus,
-    /// get_skeleton, get_signature, find_tests, explain_result, find_patterns
     #[value(name = "skeleton")]
     Skeleton,
-    /// workspace_setup — one-time workspace bootstrap tool
     #[value(name = "workspace-setup")]
     WorkspaceSetup,
-    /// submit_lsp_edges — ingest LSP-derived edges into the graph
+    #[value(name = "manage-codecortex")]
+    ManageCodecortex,
     #[value(name = "lsp-ingest")]
     LspIngest,
-    /// save_observation + get_session_context + search_memory (all memory tools)
     #[value(name = "memory")]
     Memory,
-    /// save_observation only (write side of memory)
-    #[value(name = "memory-write")]
-    MemoryWrite,
-    /// get_session_context + search_memory only (read side of memory)
     #[value(name = "memory-read")]
     MemoryRead,
+    #[value(name = "memory-write")]
+    MemoryWrite,
+    #[value(name = "vector-read")]
+    VectorRead,
+    #[value(name = "vector-write")]
+    VectorWrite,
 }
 
 impl McpEnableFlag {
@@ -169,10 +163,13 @@ impl McpEnableFlag {
             Self::IndexStatus => "index_status",
             Self::Skeleton => "skeleton",
             Self::WorkspaceSetup => "workspace_setup",
+            Self::ManageCodecortex => "manage_codecortex",
             Self::LspIngest => "lsp_ingest",
             Self::Memory => "memory",
-            Self::MemoryWrite => "memory_write",
             Self::MemoryRead => "memory_read",
+            Self::MemoryWrite => "memory_write",
+            Self::VectorRead => "vector_read",
+            Self::VectorWrite => "vector_write",
         }
     }
 }
@@ -183,7 +180,6 @@ struct Cli {
     /// Output format (format, json-pretty, yaml, table)
     #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Json)]
     format: OutputFormat,
-    /// Increase log verbosity (repeat for more detail: -v, -vv, -vvv)
     #[arg(short, long, global = true, action = clap::ArgAction::Count)]
     verbose: u8,
     /// Search/analyze across all indexed projects (overrides project detection)
@@ -197,27 +193,24 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
-#[allow(clippy::large_enum_variant)]
 enum Commands {
-    /// Interactive first-run setup wizard (configure graph backend, LLM provider, MCP client)
+    /// Run the interactive setup wizard
     Setup,
-    /// Verify connectivity to the graph backend and validate configuration
+    /// Check system configuration and dependencies
     Doctor,
-    /// Manage the background indexing daemon
+    /// Manage the background daemon
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
     },
-    /// MCP server commands (start server or list available tools)
+    /// Manage the Model Context Protocol (MCP) server
     Mcp {
         #[command(subcommand)]
         command: McpCommand,
     },
-    /// Parse and index a repository into the graph database
+    /// Index source code in a directory
     Index {
-        /// Path to the repository or file to index
         path: String,
-        /// Force a full re-index even if the branch is already current
         #[arg(long)]
         force: bool,
         /// Indexing mode
@@ -226,66 +219,67 @@ enum Commands {
         /// Base branch to use for incremental-diff mode
         #[arg(long)]
         base_branch: Option<String>,
-        /// Skip auto-registering this repository in the project registry
+        /// Restrict indexing to these files (repeatable); merges with `index_include_files` in config.
+        #[arg(long = "include-file")]
+        include_file: Vec<PathBuf>,
+        /// Extra exclude pattern (repeatable); merges with `index_exclude_patterns` in config and project policy.
+        #[arg(long = "exclude-pattern")]
+        exclude_pattern: Vec<String>,
+        /// Override the graph `repository_path` scope string (git-aware runs). Use a distinct value per shard so branch deletes and sled cache keys stay isolated.
+        #[arg(long = "graph-repository-path")]
+        graph_repository_path: Option<String>,
+        /// Indexing throughput profile for this run (`highspeed` default, `conservative` for low-RAM hosts).
         #[arg(long)]
-        no_register: bool,
-        /// Also run vector indexing after graph indexing (keeps graph and vector
-        /// store in sync using the same repository path and branch)
+        profile: Option<String>,
+        /// With `--force` on a git branch: delete branch graph before parse and write nodes inline (skips deferred replay).
         #[arg(long)]
-        vector: bool,
+        wipe_branch_first: bool,
     },
-    /// Watch a path for file changes and trigger automatic re-indexing
-    Watch {
-        /// Directory to watch for changes
-        path: String,
-    },
-    /// Stop watching a previously watched path
-    Unwatch {
-        /// Directory to stop watching
-        path: String,
-    },
-    /// Search for code entities (name, pattern, type, content, decorator, argument)
+    /// Watch a directory for changes and update index
+    Watch { path: String },
+    /// Stop watching a directory
+    Unwatch { path: String },
+    /// Find specific types of code elements
     Find {
         #[command(subcommand)]
         command: FindCommand,
     },
-    /// Run structural analysis (callers, callees, deps, complexity, smells, and more)
+    /// Analyze code structure and relationships
     Analyze {
         #[command(subcommand)]
-        command: AnalyzeCommand,
+        command: Box<AnalyzeCommand>,
     },
-    /// Export or import graph data as a portable bundle (.ccx)
+    /// Create context bundles for LLMs
     Bundle {
         #[command(subcommand)]
         command: BundleCommand,
     },
-    /// Show or modify the CodeCortex configuration
+    /// Manage CodeCortex configuration
     Config {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// Remove stale and orphaned graph data from the database
+    /// Clean caches and temporary files
     Clean,
-    /// List all indexed repositories
+    /// List indexed repositories or other resources
     List,
-    /// Remove a repository from the graph index
-    Delete {
-        /// Repository path to remove from the graph
-        path: String,
-    },
-    /// Show indexed file and node counts for repositories
+    /// Delete a repository from the index
+    Delete { path: String },
+    /// Show indexing and graph statistics
     Stats,
-    /// Execute a raw Cypher query against the graph database
-    Query {
-        /// Cypher query string to execute
-        cypher: String,
+    /// Analyze index run performance reports (phase timings, KPIs)
+    IndexReport {
+        #[command(subcommand)]
+        command: IndexReportCommand,
     },
-    /// Inspect background job queue (list or show status of indexing jobs)
+    /// Execute a raw Cypher query against the graph
+    Query { cypher: String },
+    /// Manage background jobs
     Jobs {
         #[command(subcommand)]
         command: JobsCommand,
     },
-    /// Debug internals (capsule, cache, trace, validate)
+    /// Internal debugging commands
     Debug {
         #[command(subcommand)]
         command: DebugCommand,
@@ -422,11 +416,46 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// Show token savings from bounded MCP tools
+    Savings {
+        /// Emit JSON report
+        #[arg(long)]
+        json: bool,
+        /// Show per-tool event details when available
+        #[arg(long)]
+        verbose: bool,
+        /// Reset persisted savings ledger
+        #[arg(long)]
+        reset: bool,
+    },
+    /// Install agent pack (skills, subagents, hooks, rules, MCP config)
+    Workspace {
+        #[command(subcommand)]
+        command: Box<WorkspaceCommand>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum WorkspaceCommand {
+    /// Install CodeCortex Cursor agent pack into a project directory
+    Bootstrap {
+        /// Project root (default: current directory)
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Agent pack root (default: CORTEX_AGENT_PACK or plugin/codecortex)
+        #[arg(long)]
+        pack: Option<PathBuf>,
+        /// Overwrite existing files (requires non-interactive semantics)
+        #[arg(long)]
+        overwrite: bool,
+        /// Start directory watch after install
+        #[arg(long)]
+        watch: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 enum McpCommand {
-    /// Start the MCP server (defaults to stdio transport)
     Start {
         /// MCP transport mode.
         #[arg(long, value_enum, default_value_t = McpTransportArg::Stdio)]
@@ -449,15 +478,15 @@ enum McpCommand {
         /// Idle timeout for websocket clients.
         #[arg(long = "idle-timeout-secs", default_value_t = 600)]
         idle_timeout_secs: u64,
-        /// Enable optional tools that are off by default.
-        /// Repeat to enable multiple: --enable memory --enable context-capsule
-        /// Environment variables (CORTEX_FLAG_MCP_*_ENABLED) are still respected and
-        /// combined with these flags (either source can enable a tool).
+        /// Enable optional MCP tools or tool groups. Repeat to enable multiple.
         #[arg(long = "enable", value_enum, value_name = "TOOL")]
         enable: Vec<McpEnableFlag>,
     },
-    /// List all tools exposed by the MCP server
-    Tools,
+    Tools {
+        /// Include cost, timeout, token, index, and privacy metadata.
+        #[arg(long)]
+        metadata: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -468,6 +497,8 @@ enum DaemonCommand {
     Stop,
     /// Show daemon runtime status
     Status,
+    /// Remove all pending index jobs from the daemon queue
+    ClearQueue,
     /// Run daemon foreground loop (internal)
     #[command(hide = true)]
     Run,
@@ -475,86 +506,47 @@ enum DaemonCommand {
 
 #[derive(Debug, Subcommand)]
 enum FindCommand {
-    /// Find code entities by exact or prefix name match
-    Name {
-        /// Name to search for (exact or prefix)
-        name: String,
-    },
-    /// Find code entities whose name matches a regex pattern
-    Pattern {
-        /// Regular expression to match against entity names
-        pattern: String,
-    },
-    /// Find code entities of a specific kind (function, class, struct, …)
-    Type {
-        /// Entity kind to search for (e.g. function, class, struct, enum)
-        kind: String,
-    },
-    /// Search for entities whose source contains the given text
-    Content {
-        /// Text to search for within entity source code
-        query: String,
-    },
-    /// Find entities annotated with a specific decorator or attribute
-    Decorator {
-        /// Decorator or attribute name to search for
-        name: String,
-    },
-    /// Find functions that declare a parameter with the given name
-    Argument {
-        /// Parameter name to search for
-        name: String,
-    },
+    Name { name: String },
+    Pattern { pattern: String },
+    Type { kind: String },
+    Content { query: String },
+    Decorator { name: String },
+    Argument { name: String },
 }
 
 #[derive(Debug, Subcommand)]
 enum AnalyzeCommand {
-    /// List all callers of a function or method
     Callers(TargetArg),
-    /// List all callees (functions called by) a function or method
     Callees(TargetArg),
-    /// Find call-chain paths between two symbols
     Chain {
-        /// Starting symbol (caller side)
         from: String,
-        /// Ending symbol (callee side)
         to: String,
-        /// Maximum traversal depth
         #[arg(long)]
         depth: Option<usize>,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
-    /// Show inheritance / implementation hierarchy for a class or interface
     Hierarchy {
-        /// Class or interface name
         class: String,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
-    /// Show import/dependency graph for a module or file
     Deps {
-        /// Module or file path
         module: String,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
-    /// Detect unreachable / uncalled code in the repository
     DeadCode {
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
-    /// Rank functions by cyclomatic complexity
     Complexity {
-        /// Number of top-ranked functions to return
         #[arg(long, default_value_t = 20)]
         top: usize,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
     },
-    /// Find all overrides of a virtual/abstract method
     Overrides {
-        /// Method name to find overrides for
         method: String,
         #[command(flatten)]
         filters: AnalyzeFilterArgs,
@@ -674,44 +666,41 @@ enum AnalyzeCommand {
 
 #[derive(Debug, Subcommand)]
 enum BundleCommand {
-    /// Export graph data for one or all repositories to a portable .ccx bundle
     Export {
-        /// Output file path for the bundle (e.g. my-repo.ccx)
         output: PathBuf,
-        /// Repository to export (exports all repositories if omitted)
         #[arg(long)]
         repo: Option<PathBuf>,
     },
-    /// Import graph data from a previously exported .ccx bundle
     Import {
-        /// Path to the .ccx bundle file to import
         path: PathBuf,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
-    /// Display the current CodeCortex configuration
     Show,
-    /// Set a configuration key to a new value
-    Set {
-        /// Configuration key to update (e.g. memgraph_uri)
-        key: String,
-        /// New value for the key
-        value: String,
-    },
-    /// Reset all configuration to defaults
+    Set { key: String, value: String },
+    /// Rewrite legacy Memgraph/Grafeo keys to FalkorDB names in ~/.cortex/config.toml
+    Migrate,
     Reset,
 }
 
 #[derive(Debug, Subcommand)]
 enum JobsCommand {
-    /// List all background indexing jobs and their current status
     List,
-    /// Show detailed status for a specific job
-    Status {
-        /// Job identifier returned by a previous index or sync command
-        id: String,
+    Status { id: String },
+}
+
+#[derive(Debug, Subcommand)]
+enum IndexReportCommand {
+    /// Load an index JSON report and print phase breakdown + derived KPIs
+    Analyze {
+        /// Path to JSON from `cortex index` (same shape as IndexReport)
+        #[arg(long)]
+        file: PathBuf,
+        /// Batch size used for bolt_multiplier KPI (match config max_batch_size)
+        #[arg(long, default_value_t = 2048)]
+        max_batch_size: usize,
     },
 }
 
@@ -755,7 +744,6 @@ enum DebugCommand {
 
 #[derive(Debug, Args)]
 struct TargetArg {
-    /// Symbol name (function, method, or class) to analyze
     target: String,
     #[command(flatten)]
     filters: AnalyzeFilterArgs,
@@ -978,37 +966,48 @@ async fn main() -> anyhow::Result<()> {
         Commands::Setup => run_setup(&mut config)?,
         Commands::Doctor => run_doctor(&config).await?,
         Commands::Daemon { command } => run_daemon_command(command, format).await?,
-        Commands::Mcp { command } => run_mcp(&config, command).await?,
+        Commands::Mcp { command } => run_mcp(&config, command, format).await?,
         Commands::Index {
             path,
             force,
             mode,
             base_branch,
-            no_register,
-            vector,
+            include_file,
+            exclude_pattern,
+            graph_repository_path,
+            profile,
+            wipe_branch_first,
         } => {
+            if let Some(p) = profile.as_deref() {
+                config.apply_indexing_profile(cortex_core::IndexingProfile::from_str_lossy(p));
+            }
+            if wipe_branch_first {
+                config.index_force_delete_branch_before_parse = true;
+            }
             run_index(
                 &config,
                 &path,
                 force,
                 mode,
                 base_branch.as_deref(),
+                &include_file,
+                &exclude_pattern,
+                graph_repository_path.as_deref(),
                 format,
-                no_register,
-                vector,
             )
             .await?
         }
         Commands::Watch { path } => run_watch(&config, &path).await?,
         Commands::Unwatch { path } => run_unwatch(&config, &path)?,
         Commands::Find { command } => run_find(&config, command, format, &scope).await?,
-        Commands::Analyze { command } => run_analyze(&config, command, format, &scope).await?,
+        Commands::Analyze { command } => run_analyze(&config, *command, format, &scope).await?,
         Commands::Bundle { command } => run_bundle(&config, command, format).await?,
         Commands::Config { command } => run_config(&mut config, command, format)?,
         Commands::Clean => run_clean(&config, format).await?,
         Commands::List => run_list(&config, format).await?,
         Commands::Delete { path } => run_delete(&config, &path).await?,
         Commands::Stats => run_stats(&config, format).await?,
+        Commands::IndexReport { command } => run_index_report(command, format)?,
         Commands::Query { cypher } => run_query(&config, &cypher, format).await?,
         Commands::Jobs { command } => run_jobs(command, format)?,
         Commands::Debug { command } => run_debug(&config, command, format).await?,
@@ -1079,7 +1078,74 @@ async fn main() -> anyhow::Result<()> {
         Commands::VectorIndex { path, repo, force } => {
             run_vector_index(&config, &path, repo.as_deref(), force, format).await?
         }
+        Commands::Savings { json, verbose, reset } => run_savings(json, verbose, reset, format)?,
+        Commands::Workspace { command } => run_workspace_command(*command, format)?,
     }
+    Ok(())
+}
+
+fn run_workspace_command(command: WorkspaceCommand, format: OutputFormat) -> anyhow::Result<()> {
+    match command {
+        WorkspaceCommand::Bootstrap {
+            path,
+            pack,
+            overwrite,
+            watch,
+        } => run_workspace_bootstrap(path, pack, overwrite, watch, format),
+    }
+}
+
+fn run_workspace_bootstrap(
+    path: Option<PathBuf>,
+    pack: Option<PathBuf>,
+    overwrite: bool,
+    watch: bool,
+    format: OutputFormat,
+) -> anyhow::Result<()> {
+    let repo_path =
+        path.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let pack_root = match pack {
+        Some(p) => p,
+        None => resolve_agent_pack(&repo_path, None).ok_or_else(|| {
+            anyhow::anyhow!(
+                "agent pack not found: set CORTEX_AGENT_PACK or run from a repo containing plugin/codecortex"
+            )
+        })?,
+    };
+
+    let mut opts = AgentPackInstallOptions::for_repo(&repo_path, &pack_root);
+    opts.overwrite = overwrite;
+    opts.non_interactive = overwrite;
+    let result = install_agent_pack(opts).map_err(|e| anyhow::anyhow!(e))?;
+
+    let mut out = serde_json::json!({
+        "agent_pack": result,
+        "watch": null
+    });
+
+    if watch {
+        let watch_path = repo_path.display().to_string();
+        let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("cortex"));
+        let mut child = Command::new(exe);
+        child.args(["watch", &watch_path]);
+        match child.spawn() {
+            Ok(_) => {
+                out["watch"] = serde_json::json!({
+                    "started": true,
+                    "path": watch_path,
+                    "note": "watch runs in background; use cortex unwatch to stop"
+                });
+            }
+            Err(e) => {
+                out["watch"] = serde_json::json!({
+                    "started": false,
+                    "error": e.to_string()
+                });
+            }
+        }
+    }
+
+    print_formatted(format, &out)?;
     Ok(())
 }
 
@@ -1102,6 +1168,17 @@ async fn run_daemon_command(command: DaemonCommand, format: OutputFormat) -> any
                 .map_err(|e| anyhow::anyhow!(e.to_string()))?;
             print_formatted(format, &serde_json::to_value(status)?)?;
         }
+        DaemonCommand::ClearQueue => {
+            let removed = cortex_watcher::clear_pending_index_jobs(&paths)
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            print_formatted(
+                format,
+                &serde_json::json!({
+                    "status": "ok",
+                    "removed_pending_jobs": removed,
+                }),
+            )?;
+        }
         DaemonCommand::Run => {
             cortex_watcher::run_daemon(&paths)
                 .await
@@ -1123,438 +1200,14 @@ fn run_setup(config: &mut CortexConfig) -> anyhow::Result<()> {
 }
 
 async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
-    println!(
-        "{}",
-        "╔═══════════════════════════════════════════════════════════════╗".cyan()
-    );
-    println!(
-        "{}",
-        "║              CodeCortex System Health Check                   ║".cyan()
-    );
-    println!(
-        "{}",
-        "╚═══════════════════════════════════════════════════════════════╝".cyan()
-    );
-    println!();
-
-    let mut all_healthy = true;
-    let mut warnings: Vec<String> = Vec::new();
-
-    // Helper function to check if a port is reachable
-    fn check_port_reachable(host: &str, port: u16) -> bool {
-        use std::net::{TcpStream, ToSocketAddrs};
-        let addr = format!("{}:{}", host, port);
-        addr.to_socket_addrs()
-            .ok()
-            .and_then(|mut addrs| addrs.next())
-            .map(|addr| {
-                TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2)).is_ok()
-            })
-            .unwrap_or(false)
-    }
-
-    // Helper to extract host and port from URI
-    fn parse_uri(uri: &str) -> Option<(&str, u16)> {
-        let authority = uri
-            .trim()
-            .strip_prefix("bolt://")
-            .or_else(|| uri.trim().strip_prefix("bolt+s://"))
-            .or_else(|| uri.trim().strip_prefix("bolt+ssc://"))
-            .or_else(|| uri.trim().strip_prefix("memgraph://"))
-            .or_else(|| uri.trim().strip_prefix("neo4j://"))
-            .or_else(|| uri.trim().strip_prefix("neo4j+s://"))
-            .or_else(|| uri.trim().strip_prefix("neo4j+ssc://"))
-            .unwrap_or(uri.trim())
-            .split(['/', '?', '#'])
-            .next()?
-            .rsplit('@')
-            .next()?;
-
-        if authority.is_empty() {
-            return None;
-        }
-
-        if let Some(rest) = authority.strip_prefix('[') {
-            let end = rest.find(']')?;
-            let host = &rest[..end];
-            let tail = &rest[end + 1..];
-            let port = tail
-                .strip_prefix(':')
-                .and_then(|p| p.parse::<u16>().ok())
-                .unwrap_or(7687);
-            return Some((host, port));
-        }
-
-        if let Some((host, port_str)) = authority.rsplit_once(':')
-            && !host.contains(':')
-            && let Ok(port) = port_str.parse::<u16>()
-        {
-            return Some((host, port));
-        }
-
-        Some((authority, 7687))
-    }
-
-    // 1. Check Configuration
-    println!("{}", "1. Configuration".cyan().bold());
-    println!("   Config file: {}", CortexConfig::config_path().display());
-
-    match config.validate() {
-        Ok(()) => {
-            println!("   {}", "✓ Configuration valid".green());
-        }
-        Err(e) => {
-            println!("   {} Configuration error: {}", "✗".red(), e);
-            all_healthy = false;
-        }
-    }
-
-    // Check critical settings
-    if config.memgraph_uri.is_empty() {
-        println!("   {} Memgraph URI not configured", "⚠".yellow());
-        warnings.push("Memgraph URI is empty".to_string());
-    } else {
-        println!("   Database URI: {}", config.memgraph_uri);
-    }
-
-    if config.llm.provider == "openai" && config.llm.openai_api_key.is_none() {
-        println!(
-            "   {} OpenAI provider selected but no API key configured",
-            "⚠".yellow()
-        );
-        warnings.push("OpenAI API key missing".to_string());
-    }
-
-    println!();
-
-    // 2. Check Graph Database (Memgraph/Neo4j)
-    println!("{}", "2. Graph Database".cyan().bold());
-    println!("   URI: {}", config.memgraph_uri);
-
-    // First, do a quick port check before attempting full connection
-    let (db_host, db_port) = parse_uri(&config.memgraph_uri).unwrap_or(("127.0.0.1", 7687));
-
-    if !check_port_reachable(db_host, db_port) {
-        println!(
-            "   {} Port {} is not reachable on {}",
-            "✗".red(),
-            db_port,
-            db_host
-        );
-        println!("   {} Database is not running", "✗".red());
-        println!("      Start with: docker start codecortex-memgraph");
-        println!(
-            "      Or run: docker run -d --name codecortex-memgraph -p 7687:7687 memgraph/memgraph-mage:3.8.1"
-        );
-        all_healthy = false;
-    } else {
-        println!("   {} Port {} is open on {}", "✓".green(), db_port, db_host);
-
-        // Now try the actual connection
-        match GraphClient::connect(config).await {
-            Ok(client) => {
-                println!("   {} Connection established", "✓".green());
-
-                // Check repositories
-                match client.list_repositories().await {
-                    Ok(repos) => {
-                        println!("   {} Indexed repositories: {}", "✓".green(), repos.len());
-                    }
-                    Err(e) => {
-                        println!("   {} Failed to list repositories: {}", "⚠".yellow(), e);
-                        warnings.push("Could not list repositories".to_string());
-                    }
-                }
-
-                // Check schema by querying node count
-                match client
-                    .raw_query("MATCH (n:CodeNode) RETURN count(n) AS count")
-                    .await
-                {
-                    Ok(rows) => {
-                        if let Some(row) = rows.first()
-                            && let Some(count) = row.get("count")
-                        {
-                            println!("   {} Total code nodes: {}", "✓".green(), count);
-                        }
-                    }
-                    Err(e) => {
-                        println!("   {} Schema query failed: {}", "⚠".yellow(), e);
-                        warnings.push("Schema verification failed".to_string());
-                    }
-                }
-            }
-            Err(e) => {
-                println!("   {} Connection failed: {}", "✗".red(), e);
-                println!("      Port is open but database protocol handshake failed");
-                all_healthy = false;
-            }
-        }
-    }
-
-    println!();
-
-    // 3. Check Vector Store
-    println!("{}", "3. Vector Store".cyan().bold());
-    println!("   Type: {}", config.vector.store_type);
-
-    match config.vector.store_type.as_str() {
-        "lancedb" => {
-            println!("   Path: {}", config.vector.store_path.display());
-
-            // Check if directory exists
-            if config.vector.store_path.exists() {
-                println!("   {} Storage directory exists", "✓".green());
-
-                // Try to open the store
-                match LanceStore::open(&config.vector.store_path).await {
-                    Ok(store) => match store.health_check().await {
-                        Ok(true) => {
-                            println!("   {} Vector store healthy", "✓".green());
-                            if let Ok(count) = store.count().await {
-                                println!("   {} Documents stored: {}", "✓".green(), count)
-                            }
-                        }
-                        Ok(false) => {
-                            println!("   {} Vector store unhealthy", "⚠".yellow());
-                            warnings.push("Vector store health check failed".to_string());
-                        }
-                        Err(e) => {
-                            println!("   {} Health check error: {}", "⚠".yellow(), e);
-                            warnings.push("Vector store error".to_string());
-                        }
-                    },
-                    Err(e) => {
-                        println!("   {} Failed to open vector store: {}", "⚠".yellow(), e);
-                        warnings.push("Could not open vector store".to_string());
-                    }
-                }
-            } else {
-                println!(
-                    "   {} Storage directory does not exist (will be created on first use)",
-                    "⚠".yellow()
-                );
-                warnings.push("Vector store path does not exist".to_string());
-
-                // Check if parent is writable
-                if let Some(parent) = config.vector.store_path.parent()
-                    && parent.exists()
-                    && parent
-                        .metadata()
-                        .map(|m| !m.permissions().readonly())
-                        .unwrap_or(false)
-                {
-                    println!("   {} Parent directory is writable", "✓".green());
-                }
-            }
-        }
-        "json" => {
-            println!("   Path: {}", config.vector.store_path.display());
-
-            // Check if directory exists
-            if config.vector.store_path.exists() {
-                println!("   {} Storage directory exists", "✓".green());
-
-                // Try to open the store
-                match JsonStore::open(&config.vector.store_path).await {
-                    Ok(store) => match store.health_check().await {
-                        Ok(true) => {
-                            println!("   {} Vector store healthy", "✓".green());
-                            if let Ok(count) = store.count().await {
-                                println!("   {} Documents stored: {}", "✓".green(), count)
-                            }
-                        }
-                        Ok(false) => {
-                            println!("   {} Vector store unhealthy", "⚠".yellow());
-                            warnings.push("Vector store health check failed".to_string());
-                        }
-                        Err(e) => {
-                            println!("   {} Health check error: {}", "⚠".yellow(), e);
-                            warnings.push("Vector store error".to_string());
-                        }
-                    },
-                    Err(e) => {
-                        println!("   {} Failed to open vector store: {}", "⚠".yellow(), e);
-                        warnings.push("Could not open vector store".to_string());
-                    }
-                }
-            } else {
-                println!(
-                    "   {} Storage directory does not exist (will be created on first use)",
-                    "⚠".yellow()
-                );
-                warnings.push("Vector store path does not exist".to_string());
-
-                // Check if parent is writable
-                if let Some(parent) = config.vector.store_path.parent()
-                    && parent.exists()
-                    && parent
-                        .metadata()
-                        .map(|m| !m.permissions().readonly())
-                        .unwrap_or(false)
-                {
-                    println!("   {} Parent directory is writable", "✓".green());
-                }
-            }
-        }
-        "qdrant" => {
-            println!("   URI: {}", config.vector.qdrant_uri);
-            println!("   {} Qdrant health check not implemented", "⚠".yellow());
-            warnings.push("Qdrant health check not available".to_string());
-        }
-        "none" => {
-            println!("   {}", "⚠ Vector search disabled".yellow());
-            warnings.push("Vector search is disabled".to_string());
-        }
-        _ => {
-            println!("   {} Unknown vector store type", "⚠".yellow());
-            warnings.push("Invalid vector store type".to_string());
-        }
-    }
-
-    println!("   Embedding dimension: {}", config.vector.embedding_dim);
-
-    println!();
-
-    // 4. Check LLM/Embedding Provider
-    println!("{}", "4. LLM/Embedding Provider".cyan().bold());
-    println!("   Provider: {}", config.llm.provider);
-
-    match config.llm.provider.as_str() {
-        "ollama" => {
-            println!("   Base URL: {}", config.llm.ollama_base_url);
-            println!("   Model: {}", config.llm.ollama_embedding_model);
-
-            // Try to connect to Ollama using TCP (use configured host:port)
-            let authority = config
-                .llm
-                .ollama_base_url
-                .replace("http://", "")
-                .replace("https://", "")
-                .trim_end_matches('/')
-                .to_string();
-            let (host, port) = authority
-                .rsplit_once(':')
-                .and_then(|(h, p)| p.parse::<u16>().ok().map(|port| (h.to_string(), port)))
-                .unwrap_or((authority, 11434));
-            let default_addr: std::net::SocketAddr = "127.0.0.1:11434"
-                .parse()
-                .expect("valid default Ollama address");
-            let addr: std::net::SocketAddr =
-                format!("{}:{}", host, port).parse().unwrap_or(default_addr);
-
-            match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(5)) {
-                Ok(_) => {
-                    println!("   {} Ollama server reachable", "✓".green());
-                    // Note: Cannot verify model availability without HTTP client
-                    println!(
-                        "   {} Model '{}' configured",
-                        "i".cyan(),
-                        config.llm.ollama_embedding_model
-                    );
-                }
-                Err(e) => {
-                    println!("   {} Cannot connect to Ollama: {}", "✗".red(), e);
-                    println!("      Start Ollama with: ollama serve");
-                    warnings.push("Ollama server not running".to_string());
-                }
-            }
-        }
-        "openai" => {
-            println!("   Model: {}", config.llm.openai_embedding_model);
-
-            match &config.llm.openai_api_key {
-                Some(key) if !key.is_empty() => {
-                    // Check if key looks valid (starts with sk-)
-                    if key.starts_with("sk-") {
-                        println!("   {} API key configured", "✓".green());
-                    } else {
-                        println!("   {} API key format may be invalid", "⚠".yellow());
-                        warnings.push("OpenAI API key format may be invalid".to_string());
-                    }
-                }
-                _ => {
-                    println!("   {} API key not configured", "✗".red());
-                    warnings.push("OpenAI API key missing".to_string());
-                }
-            }
-        }
-        "none" => {
-            println!("   {}", "⚠ LLM features disabled".yellow());
-            warnings.push("LLM provider not configured".to_string());
-        }
-        _ => {
-            println!("   {} Unknown provider", "⚠".yellow());
-            warnings.push("Invalid LLM provider".to_string());
-        }
-    }
-
-    println!();
-
-    // 5. Check MCP Tools
-    println!("{}", "5. MCP Tools".cyan().bold());
-    let tools = tool_names();
-    println!("   {} Available tools: {}", "✓".green(), tools.len());
-
-    // Categorize tools
-    let core_tools = tools
-        .iter()
-        .filter(|t| {
-            t.starts_with("find_") || t.starts_with("analyze_") || **t == "index_repository"
-        })
-        .count();
-    let vector_tools = tools
-        .iter()
-        .filter(|t| t.contains("semantic") || t.contains("vector"))
-        .count();
-    let health_tools = tools
-        .iter()
-        .filter(|t| t.contains("health") || t.contains("status") || t.contains("diagnose"))
-        .count();
-
-    println!(
-        "   Core tools: {}, Vector tools: {}, Health tools: {}",
-        core_tools, vector_tools, health_tools
-    );
-
-    println!();
-
-    // Summary
-    println!(
-        "{}",
-        "═══════════════════════════════════════════════════════════════".cyan()
-    );
-    println!();
-
-    if all_healthy && warnings.is_empty() {
-        println!("{}", "✓ All systems healthy!".green().bold());
-    } else if all_healthy {
-        println!(
-            "{} Systems operational with {} warning(s)",
-            "⚠".yellow(),
-            warnings.len()
-        );
-        println!();
-        println!("Warnings:");
-        for w in &warnings {
-            println!("  • {}", w);
-        }
-    } else {
-        println!("{} Some systems are not healthy", "✗".red());
-        println!();
-        println!("Please fix the issues above before using CodeCortex.");
-    }
-
-    println!();
-    println!("Next steps:");
-    println!("  • Index a repository: cortex index /path/to/code");
-    println!("  • Start MCP server: cortex mcp start");
-    println!("  • View config: cortex config show");
-
-    Ok(())
+    commands::doctor::run_doctor(config).await
 }
 
-async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
+async fn run_mcp(
+    config: &CortexConfig,
+    cmd: McpCommand,
+    format: OutputFormat,
+) -> anyhow::Result<()> {
     match cmd {
         McpCommand::Start {
             transport,
@@ -1573,7 +1226,7 @@ async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
                     .ok()
                     .filter(|v| !v.trim().is_empty())
             } else {
-                None
+                config.load_mcp_bearer_token().ok().flatten()
             };
 
             let transport = match transport {
@@ -1599,13 +1252,12 @@ async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
                 );
             }
 
-            // Build feature flags: start from env vars, then layer CLI --enable args on top.
-            let enable_names: Vec<String> = enable
+            let enabled_names = enable
                 .iter()
-                .map(|f| f.as_flag_name().to_string())
-                .collect();
-            let feature_flags = cortex_mcp::FeatureFlags::from_env_with_overrides(&enable_names);
-
+                .map(|flag| flag.as_flag_name().to_string())
+                .collect::<Vec<_>>();
+            let feature_flags =
+                cortex_mcp::FeatureFlags::from_config_with_overrides(config, &enabled_names);
             let options = cortex_mcp::McpServeOptions {
                 transport,
                 listen,
@@ -1617,9 +1269,18 @@ async fn run_mcp(config: &CortexConfig, cmd: McpCommand) -> anyhow::Result<()> {
             };
             cortex_mcp::start_with_options(config.clone(), options).await?;
         }
-        McpCommand::Tools => {
-            for tool in tool_names() {
-                println!("{tool}");
+        McpCommand::Tools { metadata } => {
+            if metadata {
+                let tools = tool_cards();
+                let value = serde_json::json!({
+                    "count": tools.len(),
+                    "tools": tools,
+                });
+                print_formatted(format, &value)?;
+            } else {
+                for tool in tool_names() {
+                    println!("{tool}");
+                }
             }
         }
     }
@@ -1649,6 +1310,7 @@ struct IncrementalDiffPlan {
     changed_files_total: usize,
     changed_files_indexable: usize,
     selected_files: Vec<String>,
+    deleted_files: Vec<String>,
     fallback_reason: Option<String>,
 }
 
@@ -1659,6 +1321,7 @@ fn incremental_diff_plan_to_value(plan: &IncrementalDiffPlan) -> serde_json::Val
         "changed_files_total": plan.changed_files_total,
         "changed_files_indexable": plan.changed_files_indexable,
         "selected_files": plan.selected_files,
+        "deleted_files": plan.deleted_files,
         "fallback_reason": plan.fallback_reason,
     })
 }
@@ -1680,12 +1343,6 @@ fn infer_base_branch(
         }
     }
     None
-}
-
-fn project_config_for_path(path: &Path) -> Option<cortex_core::ProjectConfig> {
-    let registry = cortex_watcher::ProjectRegistry::new();
-    let repo_root = find_git_repository_root(path).unwrap_or_else(|| path.to_path_buf());
-    registry.get_project(&repo_root).map(|p| p.config)
 }
 
 fn matches_exclude_pattern(path: &Path, pattern: &str) -> bool {
@@ -1729,6 +1386,7 @@ fn build_incremental_diff_plan(
             changed_files_total: 0,
             changed_files_indexable: 0,
             selected_files: Vec::new(),
+            deleted_files: Vec::new(),
             fallback_reason: Some(
                 "could not determine base branch for incremental diff; falling back to full"
                     .to_string(),
@@ -1745,6 +1403,7 @@ fn build_incremental_diff_plan(
                 changed_files_total: 0,
                 changed_files_indexable: 0,
                 selected_files: Vec::new(),
+                deleted_files: Vec::new(),
                 fallback_reason: Some(format!(
                     "failed to compute branch diff ({err}); falling back to full"
                 )),
@@ -1755,11 +1414,33 @@ fn build_incremental_diff_plan(
     let exclude_patterns = project_config
         .map(|c| c.exclude_patterns.clone())
         .unwrap_or_default();
+    let selection =
+        select_incremental_index_files(repo_root, &diff.changed_files, &exclude_patterns);
+    IncrementalDiffPlan {
+        mode: "incremental_diff".to_string(),
+        base_branch,
+        changed_files_total: diff.changed_files.len(),
+        changed_files_indexable: selection.selected_files.len(),
+        selected_files: selection.selected_files,
+        deleted_files: selection.deleted_files,
+        fallback_reason: None,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct IncrementalSelection {
+    selected_files: Vec<String>,
+    deleted_files: Vec<String>,
+}
+
+fn select_incremental_index_files(
+    repo_root: &Path,
+    changed_files: &[FileDiff],
+    exclude_patterns: &[String],
+) -> IncrementalSelection {
     let mut selected_files = Vec::new();
-    for file in &diff.changed_files {
-        if file.change_type == FileChangeType::Deleted {
-            continue;
-        }
+    let mut deleted_files = Vec::new();
+    for file in changed_files {
         let absolute = repo_root.join(&file.path);
         if cortex_core::Language::from_path(&absolute).is_none() {
             continue;
@@ -1770,18 +1451,29 @@ fn build_incremental_diff_plan(
         {
             continue;
         }
+        if file.change_type == FileChangeType::Deleted {
+            deleted_files.push(absolute.display().to_string());
+            continue;
+        }
         let path_text = absolute.display().to_string();
         selected_files.push(path_text);
     }
 
-    IncrementalDiffPlan {
-        mode: "incremental_diff".to_string(),
-        base_branch,
-        changed_files_total: diff.changed_files.len(),
-        changed_files_indexable: selected_files.len(),
+    IncrementalSelection {
         selected_files,
-        fallback_reason: None,
+        deleted_files,
     }
+}
+
+fn incremental_plan_to_index_change_plan(plan: &IncrementalDiffPlan) -> Option<IndexChangePlan> {
+    if plan.mode != "incremental_diff" || plan.fallback_reason.is_some() {
+        return None;
+    }
+    let mut change_plan =
+        IndexChangePlan::incremental(format!("git diff against {}", plan.base_branch));
+    change_plan.changed_files = plan.selected_files.iter().map(PathBuf::from).collect();
+    change_plan.deleted_files = plan.deleted_files.iter().map(PathBuf::from).collect();
+    Some(change_plan)
 }
 
 async fn run_index(
@@ -1790,16 +1482,17 @@ async fn run_index(
     force: bool,
     mode: IndexModeArg,
     base_branch: Option<&str>,
+    include_file: &[PathBuf],
+    exclude_pattern: &[String],
+    graph_repository_path: Option<&str>,
     format: OutputFormat,
-    no_register: bool,
-    also_vector: bool,
 ) -> anyhow::Result<()> {
     let job_id = format!("cli-index-{}", now_millis());
     upsert_job(&job_id, "running", format!("Indexing {}", path))?;
     let target_path = PathBuf::from(path);
-    let git_context = resolve_git_context(&target_path);
+    let git_context = cli_indexing::resolve_git_context(&target_path);
 
-    let project_config = project_config_for_path(&target_path);
+    let project_config = cli_indexing::project_config_for_path(&target_path);
     let mut effective_mode = if force { IndexModeArg::Full } else { mode };
     let planner = if effective_mode == IndexModeArg::IncrementalDiff {
         if let Some((repo_root, branch, _)) = &git_context {
@@ -1821,6 +1514,7 @@ async fn run_index(
                 changed_files_total: 0,
                 changed_files_indexable: 0,
                 selected_files: Vec::new(),
+                deleted_files: Vec::new(),
                 fallback_reason: Some(
                     "path is not a git repository; falling back to full index".to_string(),
                 ),
@@ -1836,7 +1530,7 @@ async fn run_index(
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
         if daemon_status.running
-            && let Some((repo_root, branch, commit_hash)) = &git_context
+            && let Some((_repo_root, branch, commit_hash)) = &git_context
         {
             if let Some(cfg) = project_config.as_ref()
                 && !cfg.index_only.is_empty()
@@ -1853,10 +1547,25 @@ async fn run_index(
                 )?;
                 return Ok(());
             }
+            if !cli_indexing::should_enqueue_index_for_project_async(config, &target_path, force)
+                .await
+            {
+                print_formatted(
+                    format,
+                    &serde_json::json!({
+                        "status": "skipped",
+                        "reason": "branch_index_already_current",
+                        "repository_path": cli_indexing::graph_repository_scope(&target_path),
+                        "branch": branch,
+                        "commit": commit_hash,
+                    }),
+                )?;
+                return Ok(());
+            }
             let enqueue = cortex_watcher::enqueue_index_job(
                 &daemon_paths,
                 &cortex_watcher::IndexJobRequest {
-                    repository_path: repo_root.display().to_string(),
+                    repository_path: cli_indexing::graph_repository_scope(&target_path),
                     branch: branch.clone(),
                     commit_hash: commit_hash.clone(),
                     mode: to_job_mode(effective_mode),
@@ -1890,115 +1599,40 @@ async fn run_index(
     pb.set_style(ProgressStyle::with_template("{spinner:.green} {msg}")?);
     pb.set_message("Indexing...");
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
-    let include_files_env = planner
+    let change_plan = planner
         .as_ref()
-        .filter(|p| p.mode == "incremental_diff" && p.fallback_reason.is_none())
-        .map(|p| p.selected_files.join("\n"));
-    let prev_include_files = std::env::var("CORTEX_INDEX_INCLUDE_FILES").ok();
-    let prev_excludes = std::env::var("CORTEX_INDEX_EXCLUDE_PATTERNS").ok();
-    if let Some(ref include_files) = include_files_env {
-        unsafe {
-            std::env::set_var("CORTEX_INDEX_INCLUDE_FILES", include_files);
-        }
-    } else {
-        unsafe {
-            std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
-        }
+        .and_then(incremental_plan_to_index_change_plan);
+    let mut extra_excludes: Vec<String> = Vec::new();
+    if let Some(pc) = project_config.as_ref() {
+        extra_excludes.extend(pc.exclude_patterns.iter().cloned());
     }
-    if let Some(cfg) = project_config.as_ref()
-        && !cfg.exclude_patterns.is_empty()
-    {
-        unsafe {
-            std::env::set_var(
-                "CORTEX_INDEX_EXCLUDE_PATTERNS",
-                cfg.exclude_patterns.join("\n"),
-            );
-        }
-    } else {
-        unsafe {
-            std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
-        }
-    }
+    extra_excludes.extend(exclude_pattern.iter().cloned());
 
-    let (report, repo_root) = match index_with_git_context(
+    let (report, repo_root) = match cli_indexing::index_with_git_context(
         config,
         &target_path,
         effective_mode == IndexModeArg::Full,
         effective_mode != IndexModeArg::Full,
+        change_plan,
+        include_file,
+        &extra_excludes,
+        graph_repository_path,
     )
     .await
     {
         Ok(report) => {
-            if let Some(prev) = prev_include_files.as_ref() {
-                unsafe {
-                    std::env::set_var("CORTEX_INDEX_INCLUDE_FILES", prev);
-                }
-            } else {
-                unsafe {
-                    std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
-                }
-            }
-            if let Some(prev) = prev_excludes.as_ref() {
-                unsafe {
-                    std::env::set_var("CORTEX_INDEX_EXCLUDE_PATTERNS", prev);
-                }
-            } else {
-                unsafe {
-                    std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
-                }
-            }
             upsert_job(&job_id, "completed", serde_json::to_string(&report.0)?)?;
             report
         }
         Err(err) => {
-            if let Some(prev) = prev_include_files.as_ref() {
-                unsafe {
-                    std::env::set_var("CORTEX_INDEX_INCLUDE_FILES", prev);
-                }
-            } else {
-                unsafe {
-                    std::env::remove_var("CORTEX_INDEX_INCLUDE_FILES");
-                }
-            }
-            if let Some(prev) = prev_excludes.as_ref() {
-                unsafe {
-                    std::env::set_var("CORTEX_INDEX_EXCLUDE_PATTERNS", prev);
-                }
-            } else {
-                unsafe {
-                    std::env::remove_var("CORTEX_INDEX_EXCLUDE_PATTERNS");
-                }
-            }
             upsert_job(&job_id, "failed", err.to_string())?;
-            return Err(err);
+            return Err(err.into());
         }
     };
     pb.finish_and_clear();
-    if let Some(root) = &repo_root {
-        if !no_register {
-            ensure_project_registered(root);
-        }
-        record_project_branch_index(root, &report);
+    if let Some(root) = repo_root {
+        cli_indexing::record_project_branch_index(&root, &report);
     }
-
-    // Optionally also run vector indexing so graph + vector store stay in sync.
-    if also_vector {
-        let repo_str = repo_root
-            .as_ref()
-            .map(|r| r.display().to_string())
-            .unwrap_or_else(|| path.to_string());
-        let pb2 = ProgressBar::new_spinner();
-        pb2.set_style(ProgressStyle::with_template("{spinner:.green} {msg}")?);
-        pb2.set_message("Building vector index...");
-        pb2.enable_steady_tick(std::time::Duration::from_millis(100));
-        let vec_result =
-            run_vector_index(config, path, Some(repo_str.as_str()), force, format).await;
-        pb2.finish_and_clear();
-        if let Err(e) = vec_result {
-            eprintln!("Warning: vector indexing failed: {}", e);
-        }
-    }
-
     if planner.is_some() {
         let planner_value = planner.as_ref().map(incremental_diff_plan_to_value);
         print_formatted(
@@ -2027,14 +1661,30 @@ async fn run_watch(config: &CortexConfig, path: &str) -> anyhow::Result<()> {
         .map(|v| v == "1")
         .unwrap_or(false)
     {
-        let (initial_report, repo_root) =
-            index_with_git_context(config, &watch_path, false, true).await?;
+        let (initial_report, repo_root) = {
+            let policy = cli_indexing::project_config_for_path(&watch_path);
+            let extra_excludes: Vec<String> = policy
+                .as_ref()
+                .map(|p| p.exclude_patterns.clone())
+                .unwrap_or_default();
+            cli_indexing::index_with_git_context(
+                config,
+                &watch_path,
+                false,
+                true,
+                None,
+                &[],
+                &extra_excludes,
+                None,
+            )
+            .await?
+        };
         if let Some(root) = repo_root {
-            record_project_branch_index(&root, &initial_report);
+            cli_indexing::record_project_branch_index(&root, &initial_report);
         }
 
         let client = GraphClient::connect(config).await?;
-        let indexer = Indexer::new(client, config.max_batch_size)?;
+        let indexer = Indexer::from_cortex_config(client, config)?;
         let session = WatchSession::new(config);
         session.watch(watch_path.as_path())?;
         println!(
@@ -2062,12 +1712,14 @@ async fn run_watch(config: &CortexConfig, path: &str) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
     let mut queued_job = None;
-    if let Some((repo_root, branch, commit_hash)) = resolve_git_context(&watch_path) {
+    if let Some((_repo_root, branch, commit_hash)) = cli_indexing::resolve_git_context(&watch_path)
+        && cli_indexing::should_enqueue_index_for_project_async(config, &watch_path, false).await
+    {
         queued_job = Some(
             cortex_watcher::enqueue_index_job(
                 &daemon_paths,
                 &cortex_watcher::IndexJobRequest {
-                    repository_path: repo_root.display().to_string(),
+                    repository_path: cli_indexing::graph_repository_scope(&watch_path),
                     branch,
                     commit_hash,
                     mode: cortex_watcher::JobMode::Full,
@@ -2108,84 +1760,6 @@ fn run_unwatch(config: &CortexConfig, path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn find_git_repository_root(path: &Path) -> Option<PathBuf> {
-    let start = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut current = Some(start.as_path());
-    while let Some(dir) = current {
-        if dir.join(".git").exists() {
-            return Some(dir.to_path_buf());
-        }
-        current = dir.parent();
-    }
-    None
-}
-
-fn resolve_git_context(path: &Path) -> Option<(PathBuf, String, String)> {
-    let repo_root = find_git_repository_root(path)?;
-    let git_ops = GitOperations::new(&repo_root);
-    if !git_ops.is_git_repo() {
-        return None;
-    }
-    let branch = git_ops.get_current_branch().ok()?;
-    let commit = git_ops.get_current_commit().ok()?;
-    Some((repo_root, branch, commit))
-}
-
-async fn index_with_git_context(
-    config: &CortexConfig,
-    path: &Path,
-    force: bool,
-    skip_if_current: bool,
-) -> anyhow::Result<(cortex_indexer::IndexReport, Option<PathBuf>)> {
-    let client = GraphClient::connect(config).await?;
-    let indexer = Indexer::new(client, config.max_batch_size)?;
-
-    if let Some((repo_root, branch, commit)) = resolve_git_context(path) {
-        let report = indexer
-            .index_path_with_branch_context(
-                path,
-                &branch,
-                &commit,
-                &repo_root,
-                force,
-                skip_if_current,
-            )
-            .await?;
-        Ok((report, Some(repo_root)))
-    } else {
-        let report = indexer.index_path_with_options(path, force).await?;
-        Ok((report, None))
-    }
-}
-
-/// Auto-register `repo_root` in the project registry if it is not already
-/// present.  Called by `cortex index` so graph data never becomes orphaned.
-fn ensure_project_registered(repo_root: &Path) {
-    let registry = cortex_watcher::ProjectRegistry::new();
-    if registry.get_project(repo_root).is_none() {
-        let _ = registry.add_project(repo_root, None);
-    }
-}
-
-fn record_project_branch_index(repo_root: &Path, report: &cortex_indexer::IndexReport) {
-    let (Some(branch), Some(commit_hash)) = (&report.branch, &report.commit_hash) else {
-        return;
-    };
-
-    let registry = cortex_watcher::ProjectRegistry::new();
-
-    let duration_ms = (report.duration_secs * 1000.0).round() as u64;
-    let _ = registry.record_branch_index(
-        repo_root,
-        branch.clone(),
-        commit_hash.clone(),
-        report.indexed_files,
-        report.symbol_count,
-        duration_ms,
-    );
-    let _ = registry.cleanup_old_branches(repo_root);
-}
-
 fn normalize_scope_path_str(value: &str) -> String {
     value
         .replace('\\', "/")
@@ -2217,8 +1791,8 @@ fn resolve_project_scope(cli: &Cli) -> ProjectScope {
     }
 
     if let Some(project_path) = &cli.project {
-        let repository_path = normalize_scope_path_str(project_path.to_string_lossy().as_ref());
-        let branch = resolve_git_context(project_path).map(|(_, b, _)| b);
+        let repository_path = cli_indexing::graph_repository_scope(project_path);
+        let branch = cli_indexing::resolve_git_context(project_path).map(|(_, b, _)| b);
         return ProjectScope::ExplicitProject {
             repository_path,
             branch,
@@ -2228,18 +1802,18 @@ fn resolve_project_scope(cli: &Cli) -> ProjectScope {
     let registry = cortex_watcher::ProjectRegistry::new();
     if let Some(project) = registry.get_current_project() {
         return ProjectScope::SingleProject {
-            repository_path: normalize_scope_path_str(project.path.to_string_lossy().as_ref()),
+            repository_path: cli_indexing::graph_repository_scope(&project.path),
             branch: Some(project.branch),
         };
     }
 
     let cwd = std::env::current_dir().unwrap_or_default();
-    if let Some(git_root) = find_git_repository_root(&cwd)
+    if let Some(git_root) = cli_indexing::find_git_repository_root(&cwd)
         && registry.get_project(&git_root).is_some()
     {
-        let branch = resolve_git_context(&git_root).map(|(_, b, _)| b);
+        let branch = cli_indexing::resolve_git_context(&git_root).map(|(_, b, _)| b);
         return ProjectScope::SingleProject {
-            repository_path: normalize_scope_path_str(git_root.to_string_lossy().as_ref()),
+            repository_path: cli_indexing::graph_repository_scope(&git_root),
             branch,
         };
     }
@@ -2272,7 +1846,7 @@ fn default_project_scope_root() -> Option<PathBuf> {
     }
 
     let cwd = std::env::current_dir().ok()?;
-    find_git_repository_root(&cwd).or(Some(cwd))
+    cli_indexing::find_git_repository_root(&cwd).or(Some(cwd))
 }
 
 fn merge_filters_with_scope(
@@ -2542,7 +2116,10 @@ async fn run_analyze(
     }
 
     let graph = GraphClient::connect(config).await?;
-    let analyzer = Analyzer::new(graph.clone());
+    let mut analyzer = Analyzer::new(graph.clone());
+    if let Ok((repo, branch)) = navigation_scope(scope) {
+        analyzer = analyzer.with_repository_scope(repo, branch);
+    }
     let out = match command {
         AnalyzeCommand::Callers(TargetArg { target, filters }) => {
             let filter_obj = merge_filters_with_scope(filters.to_filters(), scope);
@@ -2640,7 +2217,7 @@ async fn run_analyze(
     Ok(())
 }
 
-const MAX_ANALYZE_FILE_BYTES: u64 = 1_048_576;
+const MAX_ANALYZE_FILE_BYTES: u64 = 512 * 1024;
 const ANALYZE_SKIP_DIRS: &[&str] = &[
     ".git",
     ".hg",
@@ -2667,7 +2244,6 @@ struct SmellScanResult {
     smells: Vec<CodeSmell>,
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_analyze_smells(
     config: &CortexConfig,
     path: &str,
@@ -2785,7 +2361,6 @@ fn run_analyze_refactoring(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_analyze_branch_diff(
     config: &CortexConfig,
     source: &str,
@@ -2798,7 +2373,8 @@ async fn run_analyze_branch_diff(
 ) -> anyhow::Result<()> {
     filters.validate()?;
     let input_path = resolve_analysis_repo_path(path)?;
-    let repo_path = find_git_repository_root(&input_path).unwrap_or(input_path.clone());
+    let repo_path =
+        cli_indexing::find_git_repository_root(&input_path).unwrap_or(input_path.clone());
     let git = GitOperations::new(&repo_path);
     if !git.is_git_repo() {
         anyhow::bail!("not a git repository: {}", input_path.display());
@@ -2928,7 +2504,6 @@ fn branch_head_commit(repo_path: &Path, branch: &str) -> Option<String> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn run_analyze_review(
     config: &CortexConfig,
     base: Option<&str>,
@@ -2968,7 +2543,8 @@ async fn run_analyze_review(
         (base_ref, head_ref, files, None)
     } else {
         let repo_input_path = resolve_analysis_repo_path(path)?;
-        let repo_path = find_git_repository_root(&repo_input_path).unwrap_or(repo_input_path);
+        let repo_path =
+            cli_indexing::find_git_repository_root(&repo_input_path).unwrap_or(repo_input_path);
         let local_base = base.unwrap_or("main");
         let local_head = head.unwrap_or("HEAD");
         let files = load_local_review_inputs(&repo_path, local_base, local_head, filters)?;
@@ -3210,10 +2786,10 @@ fn parse_unified_diff_changed_ranges(patch: &str) -> HashMap<String, Vec<ReviewL
             current_path = None;
             continue;
         }
-        if line.starts_with("@@")
-            && let (Some(path), Some(range)) = (current_path.as_ref(), parse_hunk_range(line))
-        {
-            out.entry(path.clone()).or_default().push(range);
+        if line.starts_with("@@") {
+            if let (Some(path), Some(range)) = (current_path.as_ref(), parse_hunk_range(line)) {
+                out.entry(path.clone()).or_default().push(range);
+            }
         }
     }
     out
@@ -3248,19 +2824,15 @@ fn parse_hunk_range(line: &str) -> Option<ReviewLineRange> {
 }
 
 fn encode_path_component(input: &str) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::with_capacity(input.len());
-    for b in input.bytes() {
-        match b {
+    input
+        .bytes()
+        .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
+                (b as char).to_string()
             }
-            _ => {
-                let _ = write!(&mut out, "%{b:02X}");
-            }
-        }
-    }
-    out
+            _ => format!("%{b:02X}"),
+        })
+        .collect::<String>()
 }
 
 fn resolve_analysis_repo_path(path: Option<&Path>) -> anyhow::Result<PathBuf> {
@@ -3588,16 +3160,10 @@ async fn build_project_context(config: &CortexConfig) -> anyhow::Result<ProjectA
     let scope_root = default_project_scope_root()
         .ok_or_else(|| anyhow::anyhow!("Cannot determine project root"))?;
     let repository_path = normalize_scope_path_str(scope_root.to_string_lossy().as_ref());
-    let branch = resolve_git_context(&scope_root).map(|(_, branch, _)| branch);
+    let branch = cli_indexing::resolve_git_context(&scope_root).map(|(_, branch, _)| branch);
     ProjectAnalysisContext::build(graph, repository_path, branch)
         .await
         .map_err(|e| anyhow::anyhow!(e.to_string()))
-}
-
-fn path_for_filter_match(path: &Path) -> std::borrow::Cow<'_, str> {
-    path.to_str()
-        .map(std::borrow::Cow::Borrowed)
-        .unwrap_or_else(|| path.display().to_string().into())
 }
 
 fn collect_analyzable_files(
@@ -3606,7 +3172,7 @@ fn collect_analyzable_files(
     filters: &AnalyzePathFilters,
 ) -> anyhow::Result<Vec<PathBuf>> {
     if root.is_file() {
-        if is_analyzable_file(root) && filters.matches_path(path_for_filter_match(root).as_ref()) {
+        if is_analyzable_file(root) && filters.matches_path(&root.display().to_string()) {
             return Ok(vec![root.to_path_buf()]);
         }
         return Ok(Vec::new());
@@ -3630,8 +3196,7 @@ fn collect_analyzable_files(
         }
 
         if metadata.is_file() {
-            if is_analyzable_file(&current)
-                && filters.matches_path(path_for_filter_match(&current).as_ref())
+            if is_analyzable_file(&current) && filters.matches_path(&current.display().to_string())
             {
                 files.push(current);
             }
@@ -3668,20 +3233,15 @@ fn should_skip_dir(path: &Path, filters: &AnalyzePathFilters) -> bool {
         .and_then(|name| name.to_str())
         .map(|name| ANALYZE_SKIP_DIRS.contains(&name))
         .unwrap_or(false);
-    let excluded = match path.to_str() {
-        Some(s) => filters.is_excluded_path(s),
-        None => filters.is_excluded_path(&path.display().to_string()),
-    };
-    built_in_skip || excluded
+    built_in_skip || filters.is_excluded_path(&path.display().to_string())
 }
 
 fn is_analyzable_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| {
-            ANALYZE_EXTENSIONS
-                .iter()
-                .any(|&cand| ext.eq_ignore_ascii_case(cand))
+            let lower = ext.to_ascii_lowercase();
+            ANALYZE_EXTENSIONS.contains(&lower.as_str())
         })
         .unwrap_or(false)
 }
@@ -3704,11 +3264,79 @@ async fn run_delete(config: &CortexConfig, path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn run_index_report(command: IndexReportCommand, format: OutputFormat) -> anyhow::Result<()> {
+    match command {
+        IndexReportCommand::Analyze {
+            file,
+            max_batch_size,
+        } => {
+            let bytes = std::fs::read(&file)
+                .map_err(|e| anyhow::anyhow!("read {}: {e}", file.display()))?;
+            let report: cortex_indexer::IndexReport = serde_json::from_slice(&bytes)
+                .map_err(|e| anyhow::anyhow!("parse index report JSON: {e}"))?;
+            let analysis = cortex_indexer::analyze_report(&report, max_batch_size);
+            match format {
+                OutputFormat::Json => {
+                    print_formatted(format, &serde_json::to_value(&analysis)?)?;
+                }
+                _ => {
+                    print!("{}", analysis.summary);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 async fn run_stats(config: &CortexConfig, format: OutputFormat) -> anyhow::Result<()> {
     let analyzer = Analyzer::new(GraphClient::connect(config).await?);
     let stats = filter_repository_stats_to_scope(analyzer.repository_stats().await?);
     print_formatted(format, &serde_json::to_value(stats)?)?;
     Ok(())
+}
+
+fn run_savings(json: bool, verbose: bool, reset: bool, format: OutputFormat) -> anyhow::Result<()> {
+    if reset {
+        reset_savings()?;
+        if json {
+            print_formatted(
+                format,
+                &serde_json::json!({ "status": "reset", "message": "savings ledger cleared" }),
+            )?;
+        } else {
+            println!("Token savings ledger reset.");
+        }
+        return Ok(());
+    }
+
+    let report = load_savings_report(None);
+    if json || matches!(format, OutputFormat::Json | OutputFormat::JsonPretty) {
+        print_formatted(format, &serde_json::to_value(&report)?)?;
+        return Ok(());
+    }
+
+    println!("CodeCortex token savings");
+    println!();
+    print_savings_bucket("Today", &report.today);
+    print_savings_bucket("Last 7 days", &report.last_7_days);
+    print_savings_bucket("All time", &report.all_time);
+    if verbose {
+        println!();
+        println!(
+            "Ledger: {} (totals updated {})",
+            cortex_mcp::savings_dir().join("savings.json").display(),
+            report.totals.updated_at_ms
+        );
+    }
+    Ok(())
+}
+
+fn print_savings_bucket(label: &str, bucket: &cortex_mcp::SavingsBucket) {
+    println!("{label}");
+    println!("  calls:    {}", bucket.calls_counted);
+    println!("  returned: {} tokens", bucket.tokens_returned);
+    println!("  saved:    {} tokens", bucket.tokens_saved);
+    println!();
 }
 
 async fn run_query(
@@ -3753,7 +3381,7 @@ async fn run_bundle(
             let bundle = BundleStore::import(path.as_path())?;
             let writer = cortex_graph::NodeWriter::new(client, config.max_batch_size);
             writer.write_nodes(&bundle.nodes).await?;
-            writer.write_edges(&bundle.edges).await?;
+            let _edge_bolt = writer.write_edges(&bundle.edges).await?;
             print_formatted(
                 format,
                 &serde_json::json!({
@@ -3779,9 +3407,15 @@ fn run_config(
         }
         ConfigCommand::Set { key, value } => {
             match key.as_str() {
-                "memgraph_uri" => config.memgraph_uri = value,
-                "memgraph_user" => config.memgraph_user = value,
-                "memgraph_password" => config.memgraph_password = value,
+                "falkordb_uri" => config.falkordb_uri = value,
+                "falkordb_password" => config.falkordb_password = value,
+                "falkordb_graph" => config.falkordb_graph = value,
+                "falkordb_write_pool_size" => {
+                    config.falkordb_write_pool_size = value.parse::<usize>()?;
+                }
+                "falkordb_unwind_batch_max" => {
+                    config.falkordb_unwind_batch_max = Some(value.parse::<usize>()?);
+                }
                 "max_batch_size" => {
                     config.max_batch_size = value.parse::<usize>()?;
                 }
@@ -3789,6 +3423,14 @@ fn run_config(
             }
             config.save()?;
             print_formatted(format, &serde_json::json!({"status":"ok"}))?;
+        }
+        ConfigCommand::Migrate => {
+            let path = CortexConfig::config_path();
+            cortex_core::migrate_config_file(&path)?;
+            print_formatted(
+                format,
+                &serde_json::json!({"status":"ok", "path": path}),
+            )?;
         }
         ConfigCommand::Reset => {
             *config = CortexConfig::default();
@@ -4963,14 +4605,13 @@ fn print_objects_as_table(items: &[serde_json::Value]) -> anyhow::Result<()> {
     table.load_preset(UTF8_FULL);
     table.set_content_arrangement(ContentArrangement::Dynamic);
 
-    // Collect all unique keys from all objects (O(n) vs O(n²) with Vec::contains)
-    let mut seen = HashSet::new();
+    // Collect all unique keys from all objects
     let mut headers: Vec<&str> = Vec::new();
     for item in items {
         if let serde_json::Value::Object(map) = item {
             for key in map.keys() {
-                if seen.insert(key.as_str()) {
-                    headers.push(key.as_str());
+                if !headers.contains(&key.as_str()) {
+                    headers.push(key);
                 }
             }
         }
@@ -5345,7 +4986,7 @@ async fn run_diagnose(
             checks.push(serde_json::json!({
                 "component": "database",
                 "status": "ok",
-                "message": "Connected to Memgraph"
+                "message": "Connected to FalkorDB"
             }));
 
             // Check repositories count
@@ -5600,8 +5241,12 @@ async fn run_project(
             match registry.add_project(&path, Some(project_config)) {
                 Ok(state) => {
                     let (auto_indexed, auto_index_error) = if auto_index {
-                        auto_index_project_current_branch_best_effort(config, &state.path, false)
-                            .await
+                        cli_indexing::auto_index_project_current_branch_best_effort(
+                            config,
+                            &state.path,
+                            false,
+                        )
+                        .await
                     } else {
                         (None, None)
                     };
@@ -5653,19 +5298,39 @@ async fn run_project(
             auto_index,
         } => match registry.set_current_project(&path, branch.clone()) {
             Ok(pr) => {
+                let _ = registry.refresh_git_info(&pr.path);
                 let requested_branch = branch.clone();
                 let project_config = registry
                     .get_project(&pr.path)
                     .map(|state| state.config)
                     .unwrap_or_default();
-                let (auto_indexed, auto_index_error) =
-                    if auto_index && project_config.index_on_switch {
-                        auto_index_project_current_branch_best_effort(config, &pr.path, false).await
+                let (auto_indexed, auto_index_error) = if auto_index
+                    && project_config.index_on_switch
+                {
+                    if !cli_indexing::should_enqueue_index_for_project_async(
+                        config, &pr.path, false,
+                    )
+                    .await
+                    {
+                        (
+                            Some(serde_json::json!({
+                                "skipped": true,
+                                "reason": "branch_index_already_current",
+                                "repository_path": cli_indexing::graph_repository_scope(&pr.path),
+                            })),
+                            None,
+                        )
                     } else {
-                        (None, None)
-                    };
+                        cli_indexing::auto_index_project_current_branch_best_effort(
+                            config, &pr.path, false,
+                        )
+                        .await
+                    }
+                } else {
+                    (None, None)
+                };
                 let branch_mismatch = requested_branch.and_then(|requested| {
-                        resolve_git_context(&pr.path)
+                        cli_indexing::resolve_git_context(&pr.path)
                             .map(|(_, actual_branch, _)| (requested, actual_branch))
                     }).and_then(|(requested, actual)| {
                         if requested != actual {
@@ -5765,8 +5430,12 @@ async fn run_project(
                         && project_config.index_on_switch
                         && branch_change.is_some()
                     {
-                        auto_index_project_current_branch_best_effort(config, &project_path, false)
-                            .await
+                        cli_indexing::auto_index_project_current_branch_best_effort(
+                            config,
+                            &project_path,
+                            false,
+                        )
+                        .await
                     } else {
                         (None, None)
                     };
@@ -5904,38 +5573,62 @@ async fn run_project(
                 "status": "skipped",
                 "reason": "no_git_context",
             });
-            if let Some((repo_root, branch, commit_hash)) = resolve_git_context(&project_path) {
+            if let Some((_repo_root, branch, commit_hash)) =
+                cli_indexing::resolve_git_context(&project_path)
+            {
+                let graph_scope = cli_indexing::graph_repository_scope(&project_path);
                 let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
                 let daemon_status = cortex_watcher::daemon_status(&daemon_paths)
                     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
 
                 if daemon_status.running && !daemon_queue_bypass_enabled() {
-                    let enqueue = cortex_watcher::enqueue_index_job(
-                        &daemon_paths,
-                        &cortex_watcher::IndexJobRequest {
-                            repository_path: repo_root.display().to_string(),
-                            branch: branch.clone(),
-                            commit_hash: commit_hash.clone(),
-                            mode: if force {
-                                cortex_watcher::JobMode::Full
-                            } else {
-                                cortex_watcher::JobMode::IncrementalDiff
-                            },
-                        },
+                    if cli_indexing::should_enqueue_index_for_project_async(
+                        config,
+                        &project_path,
+                        force,
                     )
-                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                    index_result = serde_json::json!({
-                        "status": "queued",
-                        "daemon": true,
-                        "branch": branch,
-                        "commit": commit_hash,
-                        "job": enqueue.job,
-                        "deduplicated": enqueue.deduplicated,
-                    });
+                    .await
+                    {
+                        let enqueue = cortex_watcher::enqueue_index_job(
+                            &daemon_paths,
+                            &cortex_watcher::IndexJobRequest {
+                                repository_path: graph_scope.clone(),
+                                branch: branch.clone(),
+                                commit_hash: commit_hash.clone(),
+                                mode: if force {
+                                    cortex_watcher::JobMode::Full
+                                } else {
+                                    cortex_watcher::JobMode::IncrementalDiff
+                                },
+                            },
+                        )
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                        index_result = serde_json::json!({
+                            "status": "queued",
+                            "daemon": true,
+                            "repository_path": graph_scope,
+                            "branch": branch,
+                            "commit": commit_hash,
+                            "job": enqueue.job,
+                            "deduplicated": enqueue.deduplicated,
+                        });
+                    } else {
+                        index_result = serde_json::json!({
+                            "status": "skipped",
+                            "reason": "branch_index_already_current",
+                            "repository_path": graph_scope,
+                            "branch": branch,
+                            "commit": commit_hash,
+                        });
+                    }
                 } else {
                     let (auto_indexed, auto_index_error) =
-                        auto_index_project_current_branch_best_effort(config, &repo_root, force)
-                            .await;
+                        cli_indexing::auto_index_project_current_branch_best_effort(
+                            config,
+                            &project_path,
+                            force,
+                        )
+                        .await;
                     index_result = serde_json::json!({
                         "status": if auto_indexed.is_some() {
                             "indexed"
@@ -5954,63 +5647,11 @@ async fn run_project(
             }
 
             let cleanup_result = if cleanup_old_branches {
-                // First collect which branches the registry will remove so we
-                // can also purge their graph data.
-                let state_before = registry.get_project(&project_path);
-                let branches_before: std::collections::HashSet<String> = state_before
-                    .as_ref()
-                    .map(|s| {
-                        s.indexed_branches
-                            .keys()
-                            .cloned()
-                            .collect::<std::collections::HashSet<_>>()
-                    })
-                    .unwrap_or_default();
-
                 match registry.cleanup_old_branches(&project_path) {
-                    Ok(removed) => {
-                        // Determine which branches were actually removed.
-                        let state_after = registry.get_project(&project_path);
-                        let branches_after: std::collections::HashSet<String> = state_after
-                            .as_ref()
-                            .map(|s| {
-                                s.indexed_branches
-                                    .keys()
-                                    .cloned()
-                                    .collect::<std::collections::HashSet<_>>()
-                            })
-                            .unwrap_or_default();
-                        let purged_branches: Vec<String> = branches_before
-                            .difference(&branches_after)
-                            .cloned()
-                            .collect();
-
-                        // Purge graph data for removed branches (best-effort).
-                        let repo_path_str = project_path.display().to_string();
-                        let mut graph_deleted = 0usize;
-                        if !purged_branches.is_empty() {
-                            if let Ok(client) = GraphClient::connect(config).await {
-                                for branch in &purged_branches {
-                                    if let Ok(n) = cortex_graph::delete_branch_index(
-                                        &client,
-                                        &repo_path_str,
-                                        branch,
-                                    )
-                                    .await
-                                    {
-                                        graph_deleted += n;
-                                    }
-                                }
-                            }
-                        }
-
-                        serde_json::json!({
-                            "status": "ok",
-                            "removed": removed,
-                            "purged_branches": purged_branches,
-                            "graph_nodes_deleted": graph_deleted,
-                        })
-                    }
+                    Ok(removed) => serde_json::json!({
+                        "status": "ok",
+                        "removed": removed,
+                    }),
                     Err(err) => serde_json::json!({
                         "status": "error",
                         "error": err.to_string(),
@@ -6161,40 +5802,6 @@ async fn run_project(
     }
 
     Ok(())
-}
-
-async fn auto_index_project_current_branch(
-    config: &CortexConfig,
-    project_path: &Path,
-    force: bool,
-) -> anyhow::Result<Option<serde_json::Value>> {
-    let Some((repo_root, branch, commit_hash)) = resolve_git_context(project_path) else {
-        return Ok(None);
-    };
-
-    let (report, repo_root_for_record) =
-        index_with_git_context(config, &repo_root, force, !force).await?;
-    if let Some(root) = repo_root_for_record {
-        record_project_branch_index(&root, &report);
-    }
-
-    Ok(Some(serde_json::json!({
-        "repository_path": repo_root.display().to_string(),
-        "branch": branch,
-        "commit": commit_hash,
-        "report": report
-    })))
-}
-
-async fn auto_index_project_current_branch_best_effort(
-    config: &CortexConfig,
-    project_path: &Path,
-    force: bool,
-) -> (Option<serde_json::Value>, Option<String>) {
-    match auto_index_project_current_branch(config, project_path, force).await {
-        Ok(indexed) => (indexed, None),
-        Err(err) => (None, Some(err.to_string())),
-    }
 }
 
 fn run_skeleton(path: &PathBuf, mode: &str, format: OutputFormat) -> anyhow::Result<()> {
@@ -6493,122 +6100,102 @@ async fn run_search(
 }
 
 async fn run_vector_index(
-    _config: &CortexConfig,
+    config: &CortexConfig,
     path: &str,
     repo: Option<&str>,
     force: bool,
     format: OutputFormat,
 ) -> anyhow::Result<()> {
-    use cortex_vector::{Embedder, OllamaEmbedder, OpenAIEmbedder};
-    use cortex_vector::{HybridSearch, LanceStore, VectorDocument, VectorMetadata};
-    use std::sync::Arc;
+    use cortex_mcp::VectorService;
 
     let target_path = PathBuf::from(path);
     if !target_path.exists() {
         anyhow::bail!("Path does not exist: {}", path);
     }
 
-    // Get vector store path
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let store_path = PathBuf::from(home).join(".cortex/vectors");
-    let store = LanceStore::open(&store_path).await?;
+    let service = VectorService::from_config(config)
+        .await
+        .map_err(anyhow::Error::msg)?;
+    let repository = repo.unwrap_or(path).to_string();
+    let (branch, revision) = resolve_cli_vector_git_context(target_path.as_path());
 
-    // Create embedder
-    let embedder: Arc<dyn Embedder> = if let Ok(api_key) = std::env::var("OPENAI_API_KEY") {
-        Arc::new(OpenAIEmbedder::new(api_key))
-    } else {
-        Arc::new(OllamaEmbedder::new())
-    };
-
-    let hybrid = HybridSearch::new(Arc::new(store), embedder);
-
-    // Collect files to index
-    let mut documents = Vec::new();
-    let repo_path = repo.unwrap_or(path);
-
-    // Resolve the actual git branch so the vector store stays in sync with the
-    // graph index (which is also keyed by repository_path + branch).
-    let resolved_branch = resolve_git_context(&target_path)
-        .map(|(_, branch, _)| branch)
-        .unwrap_or_else(|| "main".to_string());
-
-    if target_path.is_file() {
-        // Index single file
-        if let Ok(content) = tokio::fs::read_to_string(&target_path).await {
-            let doc_id = format!("{}:{}", repo_path, path);
-            let metadata = VectorMetadata::code_symbol(path, "", "file", "")
-                .with_repository(repo_path.to_string(), &resolved_branch);
-
-            documents.push(VectorDocument::with_metadata(
-                doc_id,
-                vec![0.0; 1536], // Placeholder - will be filled by embedder
-                content,
-                metadata,
-            ));
-        }
-    } else {
-        // Index directory - collect code files
-        let extensions = ["rs", "py", "js", "ts", "go", "java", "rb", "c", "cpp", "h"];
-        let mut files_count = 0;
-
-        for ext in &extensions {
-            let pattern = format!("{}/**/*.{}", path, ext);
-            if let Ok(entries) = glob::glob(&pattern) {
-                for entry in entries.flatten() {
-                    if let Ok(content) = std::fs::read_to_string(&entry) {
-                        let file_path = entry.to_string_lossy().to_string();
-                        let doc_id = format!("{}:{}", repo_path, file_path);
-
-                        let lang = match *ext {
-                            "rs" => "rust",
-                            "py" => "python",
-                            "js" => "javascript",
-                            "ts" => "typescript",
-                            "go" => "go",
-                            "java" => "java",
-                            "rb" => "ruby",
-                            "c" => "c",
-                            "cpp" => "cpp",
-                            "h" => "c",
-                            _ => "unknown",
-                        };
-
-                        let metadata = VectorMetadata::code_symbol(&file_path, "", "file", lang)
-                            .with_repository(repo_path.to_string(), &resolved_branch);
-
-                        documents.push(VectorDocument::with_metadata(
-                            doc_id,
-                            vec![0.0; 1536],
-                            content,
-                            metadata,
-                        ));
-                        files_count += 1;
-                    }
-                }
-            }
-        }
-
-        if files_count == 0 {
-            println!("No code files found to index");
-            return Ok(());
-        }
+    if target_path.is_dir() {
+        let scan_root = target_path
+            .canonicalize()
+            .unwrap_or_else(|_| target_path.clone());
+        eprintln!(
+            "Vector indexing files under {} (Ollama embeddings; this can take several minutes on CPU)...",
+            scan_root.display()
+        );
     }
 
-    let count = documents.len();
-    let indexed = hybrid.index_documents(documents).await?;
+    let result = if target_path.is_file() {
+        service
+            .index_file(&target_path, &repository, &branch, &revision)
+            .await
+            .map_err(anyhow::Error::msg)?
+    } else {
+        let scan_root = target_path
+            .canonicalize()
+            .unwrap_or_else(|_| target_path.clone());
+        service
+            .index_repository(
+                &scan_root,
+                &repository,
+                &branch,
+                &revision,
+                None,
+                None,
+                config,
+            )
+            .await
+            .map_err(anyhow::Error::msg)?
+    };
+
+    if result.indexed_documents == 0 && result.scanned_files > 0 {
+        println!("No code files indexed (skipped {})", result.skipped_files);
+    }
 
     print_formatted(
         format,
         &serde_json::json!({
             "path": path,
-            "repository": repo,
-            "files_indexed": indexed,
-            "documents_count": count,
+            "repository": repository,
+            "branch": branch,
+            "revision": revision,
+            "indexed_documents": result.indexed_documents,
+            "scanned_files": result.scanned_files,
+            "skipped_files": result.skipped_files,
             "force": force,
         }),
     )?;
 
     Ok(())
+}
+
+fn find_git_repository_root_cli(path: &Path) -> Option<PathBuf> {
+    let mut current = Some(path);
+    while let Some(dir) = current {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        current = dir.parent();
+    }
+    None
+}
+
+fn resolve_cli_vector_git_context(path: &Path) -> (String, String) {
+    if let Some(root) = find_git_repository_root_cli(path) {
+        let git_ops = GitOperations::new(&root);
+        if git_ops.is_git_repo() {
+            if let (Ok(branch), Ok(revision)) =
+                (git_ops.get_current_branch(), git_ops.get_current_commit())
+            {
+                return (branch, revision);
+            }
+        }
+    }
+    ("main".to_string(), "unknown".to_string())
 }
 
 #[cfg(test)]
@@ -7423,25 +7010,25 @@ mod tests {
 
         let cli = Cli::parse_from(["cortex", "analyze", "smells", "./crates/cortex-cli"]);
         match cli.command {
-            Commands::Analyze {
-                command:
-                    AnalyzeCommand::Smells {
-                        path,
-                        min_severity,
-                        max_files,
-                        limit,
-                        no_graph,
-                        filters,
-                    },
-            } => {
-                assert_eq!(path, "./crates/cortex-cli");
-                assert_eq!(min_severity, "info");
-                assert_eq!(max_files, 1000);
-                assert_eq!(limit, 500);
-                assert!(!no_graph);
-                assert!(filters.to_filters().is_empty());
-            }
-            _ => panic!("expected analyze smells command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::Smells {
+                    path,
+                    min_severity,
+                    max_files,
+                    limit,
+                    no_graph,
+                    filters,
+                } => {
+                    assert_eq!(path, "./crates/cortex-cli");
+                    assert_eq!(min_severity, "info");
+                    assert_eq!(max_files, 1000);
+                    assert_eq!(limit, 500);
+                    assert!(!no_graph);
+                    assert!(filters.to_filters().is_empty());
+                }
+                _ => panic!("expected analyze smells command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7457,12 +7044,11 @@ mod tests {
             "--no-graph",
         ]);
         match cli.command {
-            Commands::Analyze {
-                command: AnalyzeCommand::Smells { no_graph, .. },
-            } => {
-                assert!(no_graph);
-            }
-            _ => panic!("expected analyze smells command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::Smells { no_graph, .. } => assert!(no_graph),
+                _ => panic!("expected analyze smells command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7479,10 +7065,8 @@ mod tests {
         let file = temp.join("sample.rs");
         std::fs::write(&file, "fn helper() {}\n").expect("write sample file");
 
-        let config = CortexConfig {
-            memgraph_uri: "invalid://memgraph".to_string(),
-            ..Default::default()
-        };
+        let mut config = CortexConfig::default();
+        config.falkordb_uri = "invalid://falkordb".to_string();
 
         let result = run_analyze_smells(
             &config,
@@ -7517,10 +7101,8 @@ mod tests {
         let file = temp.join("sample.py");
         std::fs::write(&file, "def helper():\n    return 1\n").expect("write sample file");
 
-        let config = CortexConfig {
-            memgraph_uri: "invalid://memgraph".to_string(),
-            ..Default::default()
-        };
+        let mut config = CortexConfig::default();
+        config.falkordb_uri = "invalid://falkordb".to_string();
 
         let result = run_analyze_smells(
             &config,
@@ -7548,23 +7130,23 @@ mod tests {
 
         let cli = Cli::parse_from(["cortex", "analyze", "refactoring", "."]);
         match cli.command {
-            Commands::Analyze {
-                command:
-                    AnalyzeCommand::Refactoring {
-                        path,
-                        min_severity,
-                        max_files,
-                        limit,
-                        filters,
-                    },
-            } => {
-                assert_eq!(path, ".");
-                assert_eq!(min_severity, "warning");
-                assert_eq!(max_files, 1000);
-                assert_eq!(limit, 500);
-                assert!(filters.to_filters().is_empty());
-            }
-            _ => panic!("expected analyze refactoring command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::Refactoring {
+                    path,
+                    min_severity,
+                    max_files,
+                    limit,
+                    filters,
+                } => {
+                    assert_eq!(path, ".");
+                    assert_eq!(min_severity, "warning");
+                    assert_eq!(max_files, 1000);
+                    assert_eq!(limit, 500);
+                    assert!(filters.to_filters().is_empty());
+                }
+                _ => panic!("expected analyze refactoring command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7573,13 +7155,14 @@ mod tests {
         use clap::Parser;
         let cli = Cli::parse_from(["cortex", "analyze", "similar", "parse", "--min-repos", "3"]);
         match cli.command {
-            Commands::Analyze {
-                command: AnalyzeCommand::Similar { symbol, min_repos },
-            } => {
-                assert_eq!(symbol, "parse");
-                assert_eq!(min_repos, 3);
-            }
-            _ => panic!("expected analyze similar command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::Similar { symbol, min_repos } => {
+                    assert_eq!(symbol, "parse");
+                    assert_eq!(min_repos, 3);
+                }
+                _ => panic!("expected analyze similar command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7588,12 +7171,13 @@ mod tests {
         use clap::Parser;
         let cli = Cli::parse_from(["cortex", "analyze", "shared-deps", "--repos", "/a,/b"]);
         match cli.command {
-            Commands::Analyze {
-                command: AnalyzeCommand::SharedDeps { repos },
-            } => {
-                assert_eq!(repos, vec!["/a".to_string(), "/b".to_string()]);
-            }
-            _ => panic!("expected analyze shared-deps command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::SharedDeps { repos } => {
+                    assert_eq!(repos, vec!["/a".to_string(), "/b".to_string()]);
+                }
+                _ => panic!("expected analyze shared-deps command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7602,13 +7186,14 @@ mod tests {
         use clap::Parser;
         let cli = Cli::parse_from(["cortex", "analyze", "compare-api", "/a", "/b"]);
         match cli.command {
-            Commands::Analyze {
-                command: AnalyzeCommand::CompareApi { repo_a, repo_b },
-            } => {
-                assert_eq!(repo_a, "/a");
-                assert_eq!(repo_b, "/b");
-            }
-            _ => panic!("expected analyze compare-api command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::CompareApi { repo_a, repo_b } => {
+                    assert_eq!(repo_a, "/a");
+                    assert_eq!(repo_b, "/b");
+                }
+                _ => panic!("expected analyze compare-api command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7649,24 +7234,24 @@ mod tests {
             "25",
         ]);
         match cli.command {
-            Commands::Analyze {
-                command:
-                    AnalyzeCommand::BranchDiff {
-                        source,
-                        target,
-                        path,
-                        commit_limit,
-                        filters,
-                        ..
-                    },
-            } => {
-                assert_eq!(source, "feature/auth");
-                assert_eq!(target, "main");
-                assert!(path.is_none());
-                assert_eq!(commit_limit, 25);
-                assert!(filters.to_filters().is_empty());
-            }
-            _ => panic!("expected analyze branch-diff command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::BranchDiff {
+                    source,
+                    target,
+                    path,
+                    commit_limit,
+                    filters,
+                    ..
+                } => {
+                    assert_eq!(source, "feature/auth");
+                    assert_eq!(target, "main");
+                    assert!(path.is_none());
+                    assert_eq!(commit_limit, 25);
+                    assert!(filters.to_filters().is_empty());
+                }
+                _ => panic!("expected analyze branch-diff command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7690,32 +7275,32 @@ mod tests {
             "critical",
         ]);
         match cli.command {
-            Commands::Analyze {
-                command:
-                    AnalyzeCommand::Review {
-                        base,
-                        head,
-                        path,
-                        gitlab_project,
-                        mr_iid,
-                        min_severity,
-                        max_findings,
-                        fail_on,
-                        filters,
-                        ..
-                    },
-            } => {
-                assert_eq!(base, Some("main".to_string()));
-                assert_eq!(head, Some("feature/auth".to_string()));
-                assert!(path.is_none());
-                assert!(gitlab_project.is_none());
-                assert!(mr_iid.is_none());
-                assert_eq!(min_severity, "error");
-                assert_eq!(max_findings, 42);
-                assert_eq!(fail_on, Some("critical".to_string()));
-                assert!(filters.to_filters().is_empty());
-            }
-            _ => panic!("expected analyze review command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::Review {
+                    base,
+                    head,
+                    path,
+                    gitlab_project,
+                    mr_iid,
+                    min_severity,
+                    max_findings,
+                    fail_on,
+                    filters,
+                    ..
+                } => {
+                    assert_eq!(base, Some("main".to_string()));
+                    assert_eq!(head, Some("feature/auth".to_string()));
+                    assert!(path.is_none());
+                    assert!(gitlab_project.is_none());
+                    assert!(mr_iid.is_none());
+                    assert_eq!(min_severity, "error");
+                    assert_eq!(max_findings, 42);
+                    assert_eq!(fail_on, Some("critical".to_string()));
+                    assert!(filters.to_filters().is_empty());
+                }
+                _ => panic!("expected analyze review command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7788,10 +7373,11 @@ mod tests {
             "--structural",
         ]);
         match cli.command {
-            Commands::Analyze {
-                command: AnalyzeCommand::BranchDiff { structural, .. },
-            } => assert!(structural),
-            _ => panic!("expected branch-diff command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::BranchDiff { structural, .. } => assert!(structural),
+                _ => panic!("expected branch-diff command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7857,16 +7443,17 @@ mod tests {
             "src/auth/legacy.rs",
         ]);
         match cli.command {
-            Commands::Analyze {
-                command: AnalyzeCommand::Callers(TargetArg { target, filters }),
-            } => {
-                assert_eq!(target, "authenticate");
-                let parsed = filters.to_filters();
-                assert_eq!(parsed.include_paths, vec!["src/auth"]);
-                assert_eq!(parsed.include_globs, vec!["**/*.rs"]);
-                assert_eq!(parsed.exclude_files, vec!["src/auth/legacy.rs"]);
-            }
-            _ => panic!("expected analyze callers command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::Callers(TargetArg { target, filters }) => {
+                    assert_eq!(target, "authenticate");
+                    let parsed = filters.to_filters();
+                    assert_eq!(parsed.include_paths, vec!["src/auth"]);
+                    assert_eq!(parsed.include_globs, vec!["**/*.rs"]);
+                    assert_eq!(parsed.exclude_files, vec!["src/auth/legacy.rs"]);
+                }
+                _ => panic!("expected analyze callers command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -7888,14 +7475,15 @@ mod tests {
             "main.rs",
         ]);
         match cli.command {
-            Commands::Analyze {
-                command: AnalyzeCommand::DeadCode { filters },
-            } => {
-                let parsed = filters.to_filters();
-                assert_eq!(parsed.include_paths, vec!["src/auth", "src/core"]);
-                assert_eq!(parsed.include_files, vec!["src/auth/token.rs", "main.rs"]);
-            }
-            _ => panic!("expected analyze dead-code command"),
+            Commands::Analyze { command } => match *command {
+                AnalyzeCommand::DeadCode { filters } => {
+                    let parsed = filters.to_filters();
+                    assert_eq!(parsed.include_paths, vec!["src/auth", "src/core"]);
+                    assert_eq!(parsed.include_files, vec!["src/auth/token.rs", "main.rs"]);
+                }
+                _ => panic!("expected analyze dead-code command"),
+            },
+            _ => panic!("expected analyze command"),
         }
     }
 
@@ -8012,6 +7600,42 @@ mod tests {
             Path::new("/repo/src/other/foo.rs"),
             "src/generated/**"
         ));
+    }
+
+    #[test]
+    fn test_incremental_selection_counts_deleted_indexable_files() {
+        let repo = Path::new("/repo");
+        let files = vec![
+            FileDiff {
+                path: "src/live.rs".to_string(),
+                change_type: FileChangeType::Modified,
+                additions: 3,
+                deletions: 1,
+            },
+            FileDiff {
+                path: "src/removed.rs".to_string(),
+                change_type: FileChangeType::Deleted,
+                additions: 0,
+                deletions: 10,
+            },
+            FileDiff {
+                path: "README.md".to_string(),
+                change_type: FileChangeType::Deleted,
+                additions: 0,
+                deletions: 1,
+            },
+            FileDiff {
+                path: "target/generated.rs".to_string(),
+                change_type: FileChangeType::Deleted,
+                additions: 0,
+                deletions: 1,
+            },
+        ];
+
+        let selection = select_incremental_index_files(repo, &files, &["target/**".to_string()]);
+
+        assert_eq!(selection.selected_files, vec!["/repo/src/live.rs"]);
+        assert_eq!(selection.deleted_files, vec!["/repo/src/removed.rs"]);
     }
 
     #[test]

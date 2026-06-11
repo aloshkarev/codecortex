@@ -12,7 +12,7 @@
 //! - **File Hashing**: [`file_hash`] for incremental indexing support
 //! - **Timeout Support**: [`IndexConfig`] for configuring indexing behavior
 //! - **Progress Tracking**: [`IndexProgress`] for real-time status updates
-//! - **Parallel Processing**: [`ParallelProcessor`] for multi-threaded indexing
+//! - **Parallel Processing**: Rayon file-parse batches (`indexer_parse_threads`, `indexer_parse_batch_size`)
 //! - **Incremental Indexing**: [`IncrementalIndexer`] for efficient re-indexing
 //! - **Git-aware Indexing**: [`GitAwareIncremental`] for revision-based tracking
 //!
@@ -67,20 +67,6 @@
 //! // skeleton is a compressed version with signatures only
 //! ```
 //!
-//! ## Parallel Indexing
-//!
-//! ```rust
-//! use cortex_indexer::{ParallelProcessor, ParallelConfig};
-//!
-//! let config = ParallelConfig {
-//!     num_threads: 4,
-//!     min_batch_size: 10,
-//!     ..Default::default()
-//! };
-//! let processor = ParallelProcessor::with_config(config);
-//! // Use processor.process_parallel() for parallel file processing
-//! ```
-//!
 //! ## Incremental Indexing
 //!
 //! ```rust
@@ -98,21 +84,59 @@
 //!     indexer.record_file(Path::new("src/main.rs"), new_content);
 //! }
 //! ```
+//!
+//! ## Large repositories (kernel-scale trees)
+//!
+//! For very large trees, keep memory and graph scope under control:
+//!
+//! - Set **`indexer_max_files`** in [`cortex_core::CortexConfig`] (TOML) to cap how many files one run indexes.
+//! - Use **`index_include_files`** in config to index an explicit subset (for example one subsystem) instead of the full tree.
+//! - Tune **`index_exclude_patterns`** in config and project excludes so discovery skips generated or vendor trees.
+//! - **`falkordb_write_pool_size`** in [`cortex_core::CortexConfig`]: when set to `N > 1`, bulk node upserts and edge UNWIND batches shard across `N` FalkorDB `GRAPH.QUERY` connections (edges shard by `from` id).
+//! - **`falkordb_bulk_index_include_source`** (default `false`): omit `source` / `docstring` / JSON `properties` from FalkorDB bulk node UNWIND for faster indexing; set `true` when graph nodes must carry full source during index.
+//!
+//! ## Multi-process / “distributed” indexing (no cross-machine graph merge)
+//!
+//! There is no single-process merge of partial symbol tables from different machines. For large trees, run **independent** `cortex index` processes where each process has a **disjoint** file set and a **disjoint graph scope**:
+//!
+//! - Prefer **`index_include_files`** in config or repeated **`--include-file`** so each job only discovers its shard.
+//! - Give each shard a stable, unique graph key via **`--graph-repository-path`** (git-aware CLI) or a distinct working tree root, matching the branch-delete caveats documented above.
+//! - Use **separate sled cache files** per shard if needed (`hash_cache_path` / per-home `~/.cortex/hashes.db` isolation), or accept shared cache keys only when `repository_path` strings differ per shard.
+//! - **`indexer_parse_pipeline_depth`** > 0 overlaps parsing of the next batch with graph writes for the current batch (bounded to one in-flight batch). **`indexer_parse_threads`**: unset uses host parallelism minus one (see [`crate::default_indexer_parse_threads`]); `0` uses the global Rayon pool; a positive value sets the pool size explicitly.
 
 pub mod build_detector;
+mod clones;
+mod edge_spill;
 pub mod incremental;
 mod indexer;
 pub mod parallel;
+pub mod reach;
+pub mod report_analysis;
 pub mod skeleton;
 
+pub use clones::{
+    CloneAccumulator, compute_clone_pairs, write_clone_edges_to_graph,
+};
 pub use build_detector::{
     BuildDetector, BuildSystem, CompileCommand, Dependency, DependencyType, ProjectConfig,
 };
 pub use incremental::{
-    ChangeStatus, GitAwareIncremental, HashEntry, IncrementalIndexer, IncrementalStats,
+    ChangeStatus, FileIndexState, FileIndexStatus, GitAwareIncremental, HashEntry,
+    IncrementalIndexer, IncrementalStats, IndexChangePlan, IndexRunMode, PlannedFileChange,
 };
-pub use indexer::{IndexConfig, IndexPhase, IndexProgress, IndexReport, Indexer};
-pub use parallel::{AdaptiveBatcher, ParallelConfig, ParallelProcessor, ParallelStats};
+pub use indexer::{
+    EdgeSpillRelTypeTiming, IndexConfig, IndexPhase, IndexProgress, IndexReport, Indexer,
+    collect_discoverable_source_files, default_indexer_parse_batch_size,
+    default_indexer_parse_threads,
+};
+pub use parallel::{AdaptiveBatcher, ParallelConfig, ParallelStats};
+pub use reach::{
+    ReachAccumulator, ReachEntry, ReachIndex, apply_reach_properties, compute_reach_index,
+    write_reach_to_graph, REACH_D1_COUNT, REACH_D3_IDS, REACH_TRUNCATED,
+};
+pub use report_analysis::{
+    IndexDerivedKpis, IndexHeuristics, IndexReportAnalysis, PhaseRow, analyze_report, derived_kpis,
+};
 pub use skeleton::{
     PrecomputedSkeleton, SkeletonBuilder, SkeletonCache, build_skeleton, file_hash, file_hash_fast,
 };

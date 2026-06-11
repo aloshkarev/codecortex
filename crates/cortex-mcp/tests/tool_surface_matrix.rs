@@ -1,5 +1,10 @@
-use cortex_mcp::tool_names;
+use cortex_mcp::{
+    PrivacyRisk, TokenPolicy, ToolCostClass, output_token_hint, tool_cards, tool_metadata,
+    tool_metadata_for, tool_names,
+};
 use std::collections::{BTreeSet, HashSet};
+
+const EXPECTED_TOOL_COUNT: usize = 84;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CoverageKind {
@@ -54,15 +59,15 @@ const FULL_SURFACE_PROFILES: &[CoverageProfile] = &[
         kind: CoverageKind::RequiresVectorStore,
     },
     CoverageProfile {
-        tool: "search_across_projects",
-        kind: CoverageKind::RequiresVectorStore,
-    },
-    CoverageProfile {
         tool: "vector_index_status",
         kind: CoverageKind::RequiresVectorStore,
     },
     CoverageProfile {
         tool: "vector_delete_repository",
+        kind: CoverageKind::RequiresVectorStore,
+    },
+    CoverageProfile {
+        tool: "search_across_projects",
         kind: CoverageKind::RequiresVectorStore,
     },
     CoverageProfile {
@@ -79,6 +84,10 @@ const FULL_SURFACE_PROFILES: &[CoverageProfile] = &[
     },
     CoverageProfile {
         tool: "analyze_code_relationships",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "find_dead_code",
         kind: CoverageKind::RequiresIndexedGraph,
     },
     CoverageProfile {
@@ -114,10 +123,6 @@ const FULL_SURFACE_PROFILES: &[CoverageProfile] = &[
         kind: CoverageKind::RequiresIndexedGraph,
     },
     CoverageProfile {
-        tool: "find_dead_code",
-        kind: CoverageKind::RequiresIndexedGraph,
-    },
-    CoverageProfile {
         tool: "calculate_cyclomatic_complexity",
         kind: CoverageKind::RequiresIndexedGraph,
     },
@@ -136,6 +141,50 @@ const FULL_SURFACE_PROFILES: &[CoverageProfile] = &[
     CoverageProfile {
         tool: "get_context_capsule",
         kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "get_patch_context",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "get_delta_context",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "get_test_context",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "get_api_contract",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "summarize_module",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "estimate_context_cost",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "recommend_tools",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "tools_search",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "tool_profile",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "get_tool_guidance",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "explain_index_freshness",
+        kind: CoverageKind::HealthOrMetadata,
     },
     CoverageProfile {
         tool: "get_impact_graph",
@@ -159,6 +208,22 @@ const FULL_SURFACE_PROFILES: &[CoverageProfile] = &[
     },
     CoverageProfile {
         tool: "explain_result",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "ctx_stats",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "ctx_grep",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "ctx_slice",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "ctx_peek",
         kind: CoverageKind::HealthOrMetadata,
     },
     CoverageProfile {
@@ -258,8 +323,56 @@ const FULL_SURFACE_PROFILES: &[CoverageProfile] = &[
         kind: CoverageKind::BundleOrLsp,
     },
     CoverageProfile {
+        tool: "manage_codecortex",
+        kind: CoverageKind::BundleOrLsp,
+    },
+    CoverageProfile {
+        tool: "cortex_a2a_spawn_session",
+        kind: CoverageKind::RequiresIndexedGraph,
+    },
+    CoverageProfile {
+        tool: "cortex_a2a_get_task",
+        kind: CoverageKind::BundleOrLsp,
+    },
+    CoverageProfile {
+        tool: "cortex_a2a_send_message",
+        kind: CoverageKind::BundleOrLsp,
+    },
+    CoverageProfile {
+        tool: "cortex_a2a_cancel_task",
+        kind: CoverageKind::BundleOrLsp,
+    },
+    CoverageProfile {
+        tool: "cortex_a2a_list_tasks",
+        kind: CoverageKind::BundleOrLsp,
+    },
+    CoverageProfile {
+        tool: "cortex_a2a_subscribe_task",
+        kind: CoverageKind::BundleOrLsp,
+    },
+    CoverageProfile {
+        tool: "cortex_a2a_list_push_configs",
+        kind: CoverageKind::BundleOrLsp,
+    },
+    CoverageProfile {
         tool: "execute_cypher_query",
         kind: CoverageKind::AdvancedQuery,
+    },
+    CoverageProfile {
+        tool: "ctx_stats",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "ctx_grep",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "ctx_slice",
+        kind: CoverageKind::HealthOrMetadata,
+    },
+    CoverageProfile {
+        tool: "ctx_peek",
+        kind: CoverageKind::HealthOrMetadata,
     },
 ];
 
@@ -300,6 +413,11 @@ fn readme_tool_set() -> HashSet<String> {
 }
 
 #[test]
+fn exported_tool_count_matches_expected_surface() {
+    assert_eq!(tool_names().len(), EXPECTED_TOOL_COUNT);
+}
+
+#[test]
 fn full_surface_profiles_cover_every_exported_tool() {
     let exported: HashSet<&str> = tool_names().iter().copied().collect();
     let profiled: HashSet<&str> = FULL_SURFACE_PROFILES.iter().map(|p| p.tool).collect();
@@ -317,6 +435,93 @@ fn full_surface_profiles_cover_every_exported_tool() {
         "stale coverage profiles not in exported tool_names(): {:?}",
         stale_profiles
     );
+}
+
+#[test]
+fn tool_metadata_covers_every_exported_tool() {
+    let exported: HashSet<&str> = tool_names().iter().copied().collect();
+    let metadata: HashSet<&str> = tool_metadata().iter().map(|m| m.name).collect();
+
+    let missing_metadata: BTreeSet<&str> = exported.difference(&metadata).copied().collect();
+    let stale_metadata: BTreeSet<&str> = metadata.difference(&exported).copied().collect();
+
+    assert!(
+        missing_metadata.is_empty(),
+        "missing metadata for tools: {:?}",
+        missing_metadata
+    );
+    assert!(
+        stale_metadata.is_empty(),
+        "stale metadata not in exported tool_names(): {:?}",
+        stale_metadata
+    );
+}
+
+#[test]
+fn tool_metadata_enforces_budget_and_privacy_contracts() {
+    for meta in tool_metadata() {
+        assert!(
+            !matches!(meta.token_policy, TokenPolicy::UnboundedForbidden),
+            "{} must not allow unbounded source/token output",
+            meta.name
+        );
+        if meta.can_return_source {
+            assert!(
+                !matches!(meta.privacy_risk, PrivacyRisk::Low),
+                "{} returns source and must carry medium/high privacy risk",
+                meta.name
+            );
+        }
+        if matches!(meta.cost_class, ToolCostClass::Expensive) {
+            assert!(
+                !matches!(meta.token_policy, TokenPolicy::MetadataOnly),
+                "{} is expensive and should report bounded output policy",
+                meta.name
+            );
+        }
+    }
+}
+
+#[test]
+fn check_health_surface_avoids_legacy_backend_names() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/handler.rs");
+    let text = std::fs::read_to_string(path).expect("handler.rs");
+    let check_health_block = text
+        .split("async fn check_health")
+        .nth(1)
+        .and_then(|rest| rest.split("async fn ").next())
+        .expect("check_health handler");
+    for marker in ["Memgraph", "memgraph", "Grafeo", "grafeo"] {
+        assert!(
+            !check_health_block.contains(marker),
+            "check_health still mentions legacy backend {marker:?}"
+        );
+    }
+    assert!(
+        check_health_block.contains("\"graph\": if ok"),
+        "check_health should expose graph connectivity under data.graph"
+    );
+}
+
+#[test]
+fn tool_cards_include_agent_routing_guidance() {
+    for card in tool_cards() {
+        assert!(
+            !card.guidance.summary.trim().is_empty(),
+            "{} missing summary",
+            card.metadata.name
+        );
+        assert!(
+            !card.guidance.use_cases.is_empty(),
+            "{} missing use cases",
+            card.metadata.name
+        );
+        assert!(
+            !card.guidance.follow_ups.is_empty() || card.metadata.name == "check_health",
+            "{} missing follow-up guidance",
+            card.metadata.name
+        );
+    }
 }
 
 #[test]
@@ -350,4 +555,16 @@ fn coverage_profiles_include_all_categories() {
         9,
         "all coverage categories should be represented"
     );
+}
+
+#[test]
+fn output_token_hint_is_sane_for_routing_tools() {
+    for name in ["recommend_tools", "get_tool_guidance", "get_patch_context"] {
+        let meta = tool_metadata_for(name).expect(name);
+        let hint = output_token_hint(meta);
+        assert!(
+            (200..=20_000).contains(&hint),
+            "{name} hint {hint} out of expected band"
+        );
+    }
 }

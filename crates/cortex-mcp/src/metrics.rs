@@ -265,7 +265,6 @@ impl MetricsRegistry {
         let snapshot = self.snapshot();
         let mut output = String::new();
 
-        // Help and type declarations
         output.push_str("# HELP cortex_uptime_seconds Service uptime in seconds\n");
         output.push_str("# TYPE cortex_uptime_seconds counter\n");
         output.push_str(&format!("cortex_uptime_seconds {}\n", snapshot.uptime_secs));
@@ -330,7 +329,6 @@ impl MetricsRegistry {
             snapshot.vector_fallbacks
         ));
 
-        // Tool invocations
         output.push_str("\n# HELP cortex_tool_invocations_total Tool invocation count\n");
         output.push_str("# TYPE cortex_tool_invocations_total counter\n");
         for (tool, count) in &snapshot.tool_invocations {
@@ -340,7 +338,6 @@ impl MetricsRegistry {
             ));
         }
 
-        // Tool latencies
         output.push_str("\n# HELP cortex_tool_latency_milliseconds Tool latency in milliseconds\n");
         output.push_str("# TYPE cortex_tool_latency_milliseconds summary\n");
         for (tool, latency) in &snapshot.tool_latencies {
@@ -358,7 +355,6 @@ impl MetricsRegistry {
             ));
         }
 
-        // Error counts
         output.push_str("\n# HELP cortex_errors_total Error count by type\n");
         output.push_str("# TYPE cortex_errors_total counter\n");
         for (error_type, count) in &snapshot.error_counts {
@@ -590,7 +586,6 @@ mod tests {
 
         {
             let metrics = &registry;
-            // Use a registered tool name
             metrics.record_tool_invocation("get_context_capsule");
 
             let start = Instant::now();

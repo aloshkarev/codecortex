@@ -258,7 +258,6 @@ impl ImpactGraphBuilder {
         let mut summary = ImpactSummary::new();
         let mut truncation: Option<TruncationWarning> = None;
 
-        // Process direct callers
         for rel in &direct_callers {
             if !self.include_tests && self.is_test_path(&rel.from_path) {
                 continue;
@@ -300,12 +299,11 @@ impl ImpactGraphBuilder {
             summary.direct_callers += 1;
         }
 
-        // Process transitive callers
         let direct_ids: HashSet<_> = direct_callers.iter().map(|r| &r.from_id).collect();
 
         for rel in &all_callers {
             if direct_ids.contains(&rel.from_id) {
-                continue; // Already counted as direct
+                continue;
             }
 
             if !self.include_tests && self.is_test_path(&rel.from_path) {
@@ -329,7 +327,6 @@ impl ImpactGraphBuilder {
 
             seen_ids.insert(rel.from_id.clone());
 
-            // Calculate depth (simplified - use max depth for transitive)
             let depth = self.calculate_depth(&rel.from_id, &edges).unwrap_or(2);
 
             nodes.push(ImpactNode {
@@ -338,14 +335,13 @@ impl ImpactGraphBuilder {
                 impact_type: ImpactNodeType::TransitiveCaller,
                 path: rel.from_path.clone(),
                 depth,
-                confidence: rel.confidence * 0.9, // Slightly lower confidence for transitive
+                confidence: rel.confidence * 0.9,
                 provenance: rel.provenance,
             });
 
             summary.transitive_callers += 1;
         }
 
-        // Process importers if requested
         if self.include_importers {
             for rel in &importers {
                 if !self.include_tests && self.is_test_path(&rel.from_path) {
@@ -391,7 +387,6 @@ impl ImpactGraphBuilder {
             }
         }
 
-        // Process implementers/overriders
         for rel in &implementers {
             if !self.include_tests && self.is_test_path(&rel.from_path) {
                 continue;
@@ -438,7 +433,6 @@ impl ImpactGraphBuilder {
             }
         }
 
-        // Calculate totals
         summary.total_dependents = summary.direct_callers
             + summary.transitive_callers
             + summary.importers
@@ -471,7 +465,6 @@ impl ImpactGraphBuilder {
 
     /// Calculate the depth of a node in the graph
     fn calculate_depth(&self, node_id: &str, edges: &[ImpactEdge]) -> Option<usize> {
-        // Simplified BFS to find depth
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
 
@@ -556,9 +549,9 @@ mod tests {
         let direct_callers = vec![make_relation("func:a", "func_a", "/src/a.rs")];
 
         let all_callers = vec![
-            make_relation("func:a", "func_a", "/src/a.rs"), // Duplicate of direct
-            make_relation("func:b", "func_b", "/src/b.rs"), // Transitive
-            make_relation("func:c", "func_c", "/src/c.rs"), // Transitive
+            make_relation("func:a", "func_a", "/src/a.rs"),
+            make_relation("func:b", "func_b", "/src/b.rs"),
+            make_relation("func:c", "func_c", "/src/c.rs"),
         ];
 
         let graph = builder.build(

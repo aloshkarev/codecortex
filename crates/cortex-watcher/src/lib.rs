@@ -94,8 +94,9 @@ mod watcher;
 
 pub use daemon::{
     DaemonMetrics, DaemonPaths, DaemonStatus, EnqueueResult, IndexJob, IndexJobRequest, JobMode,
-    ProjectBranchHealth, WatchRegistration, daemon_metrics, daemon_status, enqueue_index_job,
-    list_index_jobs, list_watches, project_branch_health, register_watch, run_daemon,
+    ProjectBranchHealth, WatchRegistration, clear_pending_index_jobs, daemon_metrics,
+    daemon_status, enqueue_index_job, list_index_jobs, list_watches, project_branch_health,
+    record_branch_health_indexed, register_watch, run_daemon, smart_watch_config_for_project,
     start_background, stop_daemon, unregister_watch,
 };
 pub use debounce::{DebounceConfig, DebouncedEvent, EventPriority, FileEventKind, SmartDebouncer};

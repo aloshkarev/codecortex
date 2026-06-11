@@ -1,0 +1,550 @@
+version: 1
+anchors:
+  symbol: tool_names
+  tfidf_symbol: TfIdfScorer
+  capsule_symbol: ContextCapsuleBuilder
+  graph_client: GraphClient
+  falkor_client: FalkorDbClient
+  hybrid_symbol: HybridSearch
+  patch_tool: get_patch_context
+  savings_ledger: SavingsLedger
+  savings_fn: compute_token_savings
+  source_file: crates/cortex-mcp/src/tools.rs
+  handler_file: crates/cortex-mcp/src/handler.rs
+  tfidf_file: crates/cortex-mcp/src/tfidf.rs
+  capsule_file: crates/cortex-mcp/src/capsule.rs
+  graph_client_file: crates/cortex-graph/src/client.rs
+  savings_file: crates/cortex-mcp/src/savings.rs
+  hybrid_file: crates/cortex-vector/src/hybrid.rs
+  patch_file: crates/cortex-mcp/src/intelligence/patch.rs
+  bogus_symbol: __codecortex_no_such_symbol__
+
+cases:
+  # --- exact tier: symbol / name lookups ---
+  - id: exact_tool_names
+    tier: exact
+    query: "${anchors.symbol}"
+    tool: find_code
+    args:
+      query: "${anchors.symbol}"
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - "${anchors.source_file}::${anchors.symbol}"
+
+  - id: exact_tfidf_scorer
+    tier: exact
+    query: "${anchors.tfidf_symbol}"
+    tool: find_code
+    args:
+      query: "${anchors.tfidf_symbol}"
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - "${anchors.tfidf_file}::${anchors.tfidf_symbol}"
+
+  - id: exact_context_capsule_builder
+    tier: exact
+    query: "${anchors.capsule_symbol}"
+    tool: find_code
+    args:
+      query: "${anchors.capsule_symbol}"
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - "${anchors.capsule_file}::${anchors.capsule_symbol}"
+
+  - id: exact_graph_client
+    tier: exact
+    query: "${anchors.graph_client}"
+    tool: find_code
+    args:
+      query: "${anchors.graph_client}"
+      kind: name
+      path_filter: crates/cortex-graph
+    gold:
+      - "${anchors.graph_client_file}::${anchors.graph_client}"
+
+  - id: exact_falkordb_client
+    tier: exact
+    query: "${anchors.falkor_client}"
+    tool: find_code
+    args:
+      query: "${anchors.falkor_client}"
+      kind: name
+      path_filter: crates/cortex-graph
+    gold:
+      - crates/cortex-graph/src/falkordb.rs::${anchors.falkor_client}
+
+  - id: exact_hybrid_search
+    tier: exact
+    query: "${anchors.hybrid_symbol}"
+    tool: find_code
+    args:
+      query: "${anchors.hybrid_symbol}"
+      kind: name
+      path_filter: crates/cortex-vector
+    gold:
+      - "${anchors.hybrid_file}::${anchors.hybrid_symbol}"
+
+  - id: exact_savings_ledger
+    tier: exact
+    query: "${anchors.savings_ledger}"
+    tool: find_code
+    args:
+      query: "${anchors.savings_ledger}"
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - "${anchors.savings_file}::${anchors.savings_ledger}"
+
+  - id: exact_compute_token_savings
+    tier: exact
+    query: "${anchors.savings_fn}"
+    tool: find_code
+    args:
+      query: "${anchors.savings_fn}"
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - "${anchors.savings_file}::${anchors.savings_fn}"
+
+  - id: exact_l1_cache
+    tier: exact
+    query: L1Cache
+    tool: find_code
+    args:
+      query: L1Cache
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - crates/cortex-mcp/src/cache.rs::L1Cache
+
+  - id: exact_vector_service
+    tier: exact
+    query: VectorService
+    tool: find_code
+    args:
+      query: VectorService
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - crates/cortex-mcp/src/vector_service.rs::VectorService
+
+  - id: exact_hash_embedder
+    tier: exact
+    query: HashEmbedder
+    tool: find_code
+    args:
+      query: HashEmbedder
+      kind: name
+      path_filter: crates/cortex-vector
+    gold:
+      - crates/cortex-vector/src/embedder.rs::HashEmbedder
+
+  - id: exact_lance_store
+    tier: exact
+    query: LanceStore
+    tool: find_code
+    args:
+      query: LanceStore
+      kind: name
+      path_filter: crates/cortex-vector
+    gold:
+      - crates/cortex-vector/src/lancedb_store.rs::LanceStore
+
+  - id: exact_build_patch_pack
+    tier: exact
+    query: build_patch_pack
+    tool: find_code
+    args:
+      query: build_patch_pack
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - "${anchors.patch_file}::build_patch_pack"
+
+  - id: exact_recommend_tools
+    tier: exact
+    query: recommend_tools
+    tool: find_code
+    args:
+      query: recommend_tools
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - "${anchors.handler_file}::recommend_tools"
+
+  - id: exact_blackboard_writer
+    tier: exact
+    query: BlackboardWriter
+    tool: find_code
+    args:
+      query: BlackboardWriter
+      kind: name
+      path_filter: crates/cortex-graph
+    gold:
+      - crates/cortex-graph/src/blackboard.rs::BlackboardWriter
+
+  - id: exact_index_config
+    tier: exact
+    query: IndexConfig
+    tool: find_code
+    args:
+      query: IndexConfig
+      kind: name
+      path_filter: crates/cortex-indexer
+    gold:
+      - crates/cortex-indexer/src/indexer.rs::IndexConfig
+
+  - id: exact_centrality_scorer
+    tier: exact
+    query: CentralityScorer
+    tool: find_code
+    args:
+      query: CentralityScorer
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - crates/cortex-mcp/src/centrality.rs::CentralityScorer
+
+  - id: exact_tools_search
+    tier: exact
+    query: tools_search
+    tool: find_code
+    args:
+      query: tools_search
+      kind: name
+      path_filter: crates/cortex-mcp
+    gold:
+      - crates/cortex-mcp/src/lazy_tools.rs::tools_search
+
+  # --- concept tier: natural-language / semantic discovery ---
+  - id: concept_mcp_tool_registry
+    tier: concept
+    query: registry of all MCP tool names exposed to agents
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.source_file}::${anchors.symbol}"
+      - "${anchors.source_file}"
+
+  - id: concept_tfidf_lexical_scoring
+    tier: concept
+    query: TF-IDF lexical scoring for retrieval ranking
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.tfidf_file}::${anchors.tfidf_symbol}"
+      - "${anchors.tfidf_file}"
+
+  - id: concept_context_capsule_hybrid
+    tier: concept
+    query: hybrid context capsule builder combining graph centrality and lexical search
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.capsule_file}::${anchors.capsule_symbol}"
+      - "${anchors.capsule_file}"
+
+  - id: concept_graph_client_falkordb
+    tier: concept
+    query: graph database client connecting to FalkorDB
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.graph_client_file}::${anchors.graph_client}"
+      - crates/cortex-graph/src/falkordb.rs
+
+  - id: concept_patch_context_pre_edit
+    tier: concept
+    query: token-bounded patch context pack before editing code
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.patch_file}"
+      - "${anchors.handler_file}::${anchors.patch_tool}"
+
+  - id: concept_token_savings_mcp
+    tier: concept
+    query: MCP token savings ledger and session counters
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.savings_file}"
+      - "${anchors.savings_file}::${anchors.savings_ledger}"
+
+  - id: concept_hybrid_vector_graph
+    tier: concept
+    query: hybrid search combining semantic vector embeddings and graph structure
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.hybrid_file}::${anchors.hybrid_symbol}"
+      - "${anchors.hybrid_file}"
+
+  - id: concept_handler_tool_routing
+    tier: concept
+    query: MCP handler tool routing guidance and workflow hints
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-mcp/src/handler_guides.rs
+
+  - id: concept_lance_vector_store
+    tier: concept
+    query: LanceDB vector store for code embeddings
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-vector/src/lancedb_store.rs::LanceStore
+      - crates/cortex-vector/src/lancedb_store.rs
+
+  - id: concept_incremental_indexer
+    tier: concept
+    query: incremental parallel code indexer with batch graph writes
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-indexer/src/incremental.rs
+      - crates/cortex-indexer/src/parallel.rs
+
+  - id: concept_code_smells
+    tier: concept
+    query: code smell detection bloaters and couplers analyzer
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-analyzer/src/smells/mod.rs
+      - crates/cortex-analyzer/src/code_smells.rs
+
+  - id: concept_a2a_agent_card
+    tier: concept
+    query: A2A agent card manifest and skill metadata
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-a2a/src/agent_card.rs
+
+  - id: concept_cortexignore_hierarchical
+    tier: concept
+    query: hierarchical cortexignore and gitignore indexing scope
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-core/src/ignore.rs
+      - crates/cortex-core/src/index_scope.rs
+
+  - id: concept_impact_graph
+    tier: concept
+    query: blast radius impact graph for code changes
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-mcp/src/intelligence/impact.rs
+      - crates/cortex-mcp/src/impact.rs
+
+  - id: concept_response_buffer_budget
+    tier: concept
+    query: MCP response buffer token budget enforcement
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-mcp/src/response_buffer.rs
+
+  - id: concept_network_mcp_server
+    tier: concept
+    query: network HTTP MCP server transport
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-mcp/src/network_server.rs
+
+  - id: concept_freshness_intelligence
+    tier: concept
+    query: index freshness checks for stale graph data warnings
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-mcp/src/intelligence/freshness.rs
+
+  - id: concept_tool_recommendations
+    tier: concept
+    query: recommend MCP tools for a coding task
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.handler_file}::recommend_tools"
+      - crates/cortex-mcp/src/intelligence/tool_router.rs
+
+  - id: concept_find_code_symbol_search
+    tier: concept
+    query: search code graph symbols by name pattern type or content
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.handler_file}::find_code"
+
+  - id: concept_get_patch_context_tool
+    tier: concept
+    query: get_patch_context MCP tool for pre-edit planning
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.handler_file}::${anchors.patch_tool}"
+      - "${anchors.patch_file}"
+
+  - id: concept_savings_report
+    tier: concept
+    query: load savings report from disk for MCP sessions
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.savings_file}::load_report"
+      - "${anchors.savings_file}"
+
+  - id: concept_falkordb_bulk_upsert
+    tier: concept
+    query: FalkorDB bulk UNWIND node upsert during indexing
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.graph_client_file}"
+      - crates/cortex-graph/src/falkordb.rs
+
+  # --- multi_hop tier: indirect queries ---
+  - id: multihop_lists_mcp_tools
+    tier: multi_hop
+    query: function that returns the static list of all registered MCP tool names
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.source_file}::${anchors.symbol}"
+
+  - id: multihop_token_savings_computation
+    tier: multi_hop
+    query: where MCP responses compute how many tokens were saved versus raw source
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.savings_file}::${anchors.savings_fn}"
+      - "${anchors.savings_file}::finish_counted_response"
+
+  - id: multihop_falkordb_redis_connection
+    tier: multi_hop
+    query: low-level Redis client that issues FalkorDB GRAPH.QUERY commands
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-graph/src/falkordb.rs::${anchors.falkor_client}
+      - "${anchors.graph_client_file}::connect"
+
+  - id: multihop_patch_pack_builder_chain
+    tier: multi_hop
+    query: async builder that assembles patch context packs used by get_patch_context
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.patch_file}::build_patch_pack"
+      - "${anchors.capsule_file}::${anchors.capsule_symbol}"
+
+  - id: multihop_tfidf_in_capsule_pipeline
+    tier: multi_hop
+    query: TF-IDF scorer wired into the context capsule retrieval pipeline
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.capsule_file}"
+      - "${anchors.tfidf_file}::${anchors.tfidf_symbol}"
+
+  - id: multihop_hybrid_search_entrypoint
+    tier: multi_hop
+    query: MCP tool entrypoint for hybrid vector plus graph code search
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.handler_file}::vector_search_hybrid"
+      - "${anchors.hybrid_file}"
+
+  - id: multihop_find_code_handler
+    tier: multi_hop
+    query: MCP handler that queries the analyzer for symbol name pattern search
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.handler_file}::find_code"
+
+  - id: multihop_a2a_blackboard_graph
+    tier: multi_hop
+    query: graph-backed A2A blackboard writer storing task artifacts in FalkorDB
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-graph/src/blackboard.rs::BlackboardWriter
+
+  - id: multihop_hash_embedder_ci
+    tier: multi_hop
+    query: deterministic hash embedder used in CI vector semantic tests
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-vector/src/embedder.rs::HashEmbedder
+
+  - id: multihop_intelligence_patch_workflow
+    tier: multi_hop
+    query: intelligence module patch planner workflow and next-tool routing
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.patch_file}"
+      - crates/cortex-mcp/src/intelligence/tool_router.rs
+
+  - id: multihop_repository_path_scope
+    tier: multi_hop
+    query: canonical repository path keys for FalkorDB graph index scoping
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - crates/cortex-core/src/index_scope.rs
+
+  - id: multihop_savings_enabled_flag
+    tier: multi_hop
+    query: feature flag check whether MCP token savings recording is enabled
+    tool: vector_search_hybrid
+    args:
+      k: 20
+    gold:
+      - "${anchors.savings_file}::savings_enabled"

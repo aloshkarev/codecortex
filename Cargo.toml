@@ -1,16 +1,18 @@
 [workspace]
 members = [
     "crates/cortex-core",
-    "crates/cortex-parser",
-    "crates/cortex-graph",
     "crates/cortex-indexer",
     "crates/cortex-analyzer",
-    "crates/cortex-watcher",
     "crates/cortex-mcp",
     "crates/cortex-cli",
     "crates/cortex-benches",
-    "crates/cortex-vector",
     "crates/cortex-pipeline",
+    "crates/cortex-a2a",
+    # Extracted to ../crates/ (shared cross-project crates):
+    # cortex-parser   -> ../crates/code-parser/
+    # cortex-graph    -> ../crates/graph-store/
+    # cortex-vector   -> ../crates/vector-store/
+    # cortex-watcher  -> ../crates/fs-watcher/
 ]
 resolver = "2"
 
@@ -19,7 +21,7 @@ version = "1.0.1"
 edition = "2024"
 license = "Apache-2.0"
 authors = ["Aleksandr Loskarev <mailbox@aloshkarev.com>"]
-description = "CodeCortex is a Rust code-graph service and AI productivity toolkit featuring: - **`cortex` CLI** for indexing, search, and analysis - **MCP server mode** for AI clients (Claude, Cursor, VSCode) - **Memgraph backend** (Bolt protocol) with Neo4j support - **Multi-language parsing** via tree-sitter (Rust, Python, Go, Kotlin, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Swift) - **Hybrid search** with vector embeddings - **Enhanced memory system** for AI context persistence"
+description = "CodeCortex is a Rust code-graph service and AI productivity toolkit featuring: - **`cortex` CLI** for indexing, search, and analysis - **MCP server mode** for AI clients (Claude, Cursor, VSCode) - **FalkorDB graph backend** (Redis RESP / GRAPH.QUERY) - **Multi-language parsing** via tree-sitter (Rust, Python, Go, Kotlin, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Swift) - **Hybrid search** with vector embeddings - **Enhanced memory system** for AI context persistence"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -30,7 +32,6 @@ dashmap = "6"
 dialoguer = "0.12"
 ignore = "0.4"
 indicatif = "0.18.4"
-neo4rs = "0.8"
 notify = "8"
 notify-debouncer-mini = "0.7"
 owo-colors = "4"
@@ -41,6 +42,7 @@ serde_json = "1"
 glob = "0.3"
 sled = "0.34"
 thiserror = "2"
+tiktoken-rs = "0.9"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

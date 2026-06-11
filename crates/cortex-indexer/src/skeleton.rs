@@ -70,14 +70,11 @@ impl SkeletonCache {
         let key_minimal = Self::make_key(file_path, "minimal");
         let key_standard = Self::make_key(file_path, "standard");
 
-        // Store under both keys for quick lookup by mode
         let bytes = serde_json::to_vec(skeleton).unwrap_or_default();
 
         if skeleton.minimal == skeleton.standard {
-            // Same content, store once
             self.db.insert(key_minimal, bytes.clone())?;
         } else {
-            // Different content, store minimal version
             let minimal_skeleton = PrecomputedSkeleton {
                 file_hash: skeleton.file_hash.clone(),
                 minimal: skeleton.minimal.clone(),
@@ -90,7 +87,6 @@ impl SkeletonCache {
                 serde_json::to_vec(&minimal_skeleton).unwrap_or_default(),
             )?;
 
-            // Store standard version
             self.db.insert(key_standard, bytes)?;
         }
 
@@ -194,7 +190,6 @@ pub fn build_skeleton(content: &str, mode: &str) -> String {
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Handle block comments (/* */)
         if trimmed.starts_with("/*") {
             in_block_comment = true;
             if mode == "standard" {
@@ -213,11 +208,9 @@ pub fn build_skeleton(content: &str, mode: &str) -> String {
             continue;
         }
 
-        // Collect docstrings for standard mode (with line limit)
         if mode == "standard" && (trimmed.starts_with("///") || trimmed.starts_with("//!")) {
             docstring_line_count += 1;
             if docstring_line_count <= MAX_DOCSTRING_LINES {
-                // Truncate long docstring lines
                 let compressed_doc = if trimmed.len() > MAX_DOCSTRING_LINE_CHARS {
                     let content_part = trimmed.trim_start_matches('/');
                     let truncated = truncate_docstring(content_part, MAX_DOCSTRING_LINE_CHARS - 4);
@@ -230,22 +223,18 @@ pub fn build_skeleton(content: &str, mode: &str) -> String {
             continue;
         }
 
-        // Python-style docstrings (simple heuristic)
         if mode == "standard" && (trimmed.starts_with("\"\"\"") || trimmed.starts_with("'''")) {
             current_docstring.push((*line).to_string());
             continue;
         }
 
-        // Check for signature patterns
         let is_signature = is_signature_line(trimmed);
 
         if is_signature {
-            // Add collected docstrings before the signature
             if mode == "standard" && !current_docstring.is_empty() {
                 for doc_line in &current_docstring {
                     out.push(doc_line.clone());
                 }
-                // Add truncation indicator if docstring was cut short
                 if docstring_line_count > MAX_DOCSTRING_LINES {
                     out.push("/// ...".to_string());
                 }
@@ -253,11 +242,9 @@ pub fn build_skeleton(content: &str, mode: &str) -> String {
             current_docstring.clear();
             docstring_line_count = 0;
 
-            // Apply line compression for long signatures
             let compressed_line = compress_line(line, max_line_width);
             out.push(compressed_line);
 
-            // For minimal mode, limit output size
             if mode == "minimal" && out.len() >= 120 {
                 break;
             }
@@ -267,7 +254,6 @@ pub fn build_skeleton(content: &str, mode: &str) -> String {
             docstring_line_count = 0;
         }
 
-        // For standard mode, include imports at the top
         if mode == "standard"
             && i < 20
             && (trimmed.starts_with("use ")
@@ -295,7 +281,6 @@ pub fn build_skeleton(content: &str, mode: &str) -> String {
 
 /// Check if a line represents a code signature
 fn is_signature_line(trimmed: &str) -> bool {
-    // Rust
     trimmed.starts_with("pub fn ")
         || trimmed.starts_with("fn ")
         || trimmed.starts_with("pub async fn ")
@@ -308,11 +293,9 @@ fn is_signature_line(trimmed: &str) -> bool {
         || trimmed.starts_with("trait ")
         || trimmed.starts_with("impl ")
         || trimmed.starts_with("pub impl ")
-        // Python
         || trimmed.starts_with("def ")
         || trimmed.starts_with("async def ")
         || trimmed.starts_with("class ")
-        // JavaScript/TypeScript
         || trimmed.starts_with("function ")
         || trimmed.starts_with("export function ")
         || trimmed.starts_with("async function ")
@@ -321,19 +304,13 @@ fn is_signature_line(trimmed: &str) -> bool {
         || trimmed.starts_with("export const ")
         || trimmed.starts_with("interface ")
         || trimmed.starts_with("type ")
-        // Java/C++/C#
         || trimmed.starts_with("public ")
         || trimmed.starts_with("private ")
         || trimmed.starts_with("protected ")
         || (trimmed.starts_with("class ") && trimmed.ends_with('{'))
-        // Go
         || trimmed.starts_with("func ")
         || (trimmed.starts_with("type ") && trimmed.contains("struct"))
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Enhanced Compression Functions
-// ═══════════════════════════════════════════════════════════════════════════════
 
 /// Truncate a docstring to keep only the first meaningful sentence
 ///
@@ -348,7 +325,6 @@ fn is_signature_line(trimmed: &str) -> bool {
 pub fn truncate_docstring(doc: &str, max_chars: usize) -> String {
     let doc = doc.trim();
 
-    // If already short enough, return as-is
     if doc.len() <= max_chars {
         return doc.to_string();
     }
@@ -399,7 +375,6 @@ pub fn truncate_docstring(doc: &str, max_chars: usize) -> String {
 pub fn summarize_type(ty: &str, max_len: usize) -> String {
     let ty = ty.trim();
 
-    // If already short enough, return as-is
     if ty.len() <= max_len {
         return ty.to_string();
     }
@@ -409,11 +384,9 @@ pub fn summarize_type(ty: &str, max_len: usize) -> String {
     let close_count = ty.chars().filter(|&c| c == '>').count();
 
     if open_count > 0 && open_count == close_count {
-        // It's a generic type - try to summarize
         if let Some(first_angle) = ty.find('<') {
             let base_type = &ty[..first_angle];
 
-            // Find the matching closing bracket
             let mut depth = 0;
             let mut last_close = 0;
             for (i, c) in ty[first_angle..].char_indices() {
@@ -449,7 +422,6 @@ pub fn summarize_type(ty: &str, max_len: usize) -> String {
         }
     }
 
-    // Check for function pointer types
     if (ty.starts_with("fn(") || ty.starts_with("Fn(") || ty.starts_with("impl Fn("))
         && let Some(paren_end) = find_matching_paren(ty)
     {
@@ -457,11 +429,9 @@ pub fn summarize_type(ty: &str, max_len: usize) -> String {
         if params.len() + 8 <= max_len {
             return format!("{} -> ...", params);
         }
-        // Just show fn(...) -> ...
         return "fn(...) -> ...".to_string();
     }
 
-    // Check for Option/Result types
     for wrapper in ["Option<", "Result<", "Box<", "Arc<", "Rc<", "Vec<"] {
         if ty.starts_with(wrapper) {
             let inner = &ty[wrapper.len()..ty.len().saturating_sub(1)];
@@ -513,7 +483,6 @@ fn find_matching_paren(s: &str) -> Option<usize> {
 pub fn compress_struct_fields(fields: &str, max_total_width: usize) -> String {
     let lines: Vec<&str> = fields.lines().collect();
 
-    // If few fields and short, return as-is
     if lines.len() <= 5 && fields.len() <= max_total_width {
         return fields.to_string();
     }
@@ -524,32 +493,27 @@ pub fn compress_struct_fields(fields: &str, max_total_width: usize) -> String {
     for line in lines {
         let trimmed = line.trim();
 
-        // Skip empty lines and comments
         if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("/*") {
             continue;
         }
 
         field_count += 1;
 
-        // Stop after max fields
         if field_count > MAX_STRUCT_FIELDS {
             compressed.push("    // ... more fields".to_string());
             break;
         }
 
-        // Parse field: "pub name: Type" or "name: Type"
         if let Some(colon_pos) = trimmed.find(':') {
             let field_name = trimmed[..colon_pos].trim();
             let type_part = trimmed[colon_pos + 1..].trim_end_matches(',').trim();
 
-            // Summarize the type if needed
             let available_width = max_total_width.saturating_sub(field_name.len() + 4);
             let max_type = available_width.min(MAX_TYPE_LENGTH);
             let summarized_type = summarize_type(type_part, max_type);
 
             compressed.push(format!("    {}: {}", field_name, summarized_type));
         } else {
-            // Keep line as-is if we can't parse it
             compressed.push(format!("    {}", trimmed));
         }
     }
@@ -561,12 +525,10 @@ pub fn compress_struct_fields(fields: &str, max_total_width: usize) -> String {
 pub fn compress_line(line: &str, max_width: usize) -> String {
     let trimmed = line.trim();
 
-    // Skip short lines
     if trimmed.len() <= max_width {
         return line.to_string();
     }
 
-    // Check for function signatures
     if trimmed.starts_with("fn ")
         || trimmed.starts_with("pub fn ")
         || trimmed.starts_with("async fn ")
@@ -574,7 +536,6 @@ pub fn compress_line(line: &str, max_width: usize) -> String {
         return compress_function_signature(trimmed, max_width);
     }
 
-    // Check for struct definitions with fields on same line
     if trimmed.starts_with("struct ") && trimmed.contains('{') {
         return compress_struct_single_line(trimmed, max_width);
     }
@@ -598,9 +559,7 @@ fn compress_function_signature(sig: &str, max_width: usize) -> String {
         return sig.to_string();
     }
 
-    // Find the parameter list
     if let Some(paren_start) = sig.find('(') {
-        // Find matching closing paren
         let mut depth = 0;
         let mut paren_end = paren_start;
         for (i, c) in sig[paren_start..].char_indices() {
@@ -621,7 +580,6 @@ fn compress_function_signature(sig: &str, max_width: usize) -> String {
         let params = &sig[paren_start + 1..paren_end];
         let return_part = &sig[paren_end + 1..];
 
-        // Compress parameters if needed
         let available_for_params =
             max_width.saturating_sub(fn_name_part.len() + return_part.len() + 5);
 
@@ -652,12 +610,10 @@ fn compress_struct_single_line(struct_line: &str, max_width: usize) -> String {
         return struct_line.to_string();
     }
 
-    // Extract struct name and compress fields
     if let Some(brace_pos) = struct_line.find('{') {
         let name_part = &struct_line[..brace_pos + 1];
         let fields_part = &struct_line[brace_pos + 1..];
 
-        // Count fields
         let field_count = fields_part
             .split(',')
             .filter(|s| !s.trim().is_empty())
@@ -670,10 +626,6 @@ fn compress_struct_single_line(struct_line: &str, max_width: usize) -> String {
 
     struct_line.to_string()
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// File Hash
-// ═══════════════════════════════════════════════════════════════════════════════
 
 /// Compute file hash using SHA-256
 pub fn file_hash(content: &str) -> String {
@@ -720,7 +672,6 @@ impl SkeletonBuilder {
     ) -> (String, bool, f64) {
         let hash = file_hash(content);
 
-        // Try cache first
         if let Some(ref cache) = self.cache
             && let Some(skeleton) = cache.get(file_path, mode)
             && skeleton.file_hash == hash
@@ -732,11 +683,9 @@ impl SkeletonBuilder {
             );
         }
 
-        // Compute on demand
         let skeleton = build_skeleton(content, mode);
         let compression_ratio = skeleton.len() as f64 / content.len().max(1) as f64;
 
-        // Cache the result
         if let Some(ref cache) = self.cache {
             let precomputed = PrecomputedSkeleton::new(content, hash);
             let _ = cache.put(file_path, &precomputed);
@@ -848,7 +797,6 @@ class ESClass {}
         let src = "just regular text\nno signatures\n".repeat(10);
         let skeleton = build_skeleton(&src, "minimal");
 
-        // Should return first 40 lines
         assert!(skeleton.lines().count() <= 40);
     }
 
@@ -919,10 +867,6 @@ class ESClass {}
         assert!(!is_signature_line("// comment"));
         assert!(!is_signature_line("return x;"));
     }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Compression Function Tests
-    // ═══════════════════════════════════════════════════════════════════════════
 
     #[test]
     fn truncate_docstring_short_text() {
@@ -1021,7 +965,6 @@ class ESClass {}
         let result = compress_struct_fields(fields, 40);
         assert!(result.contains("simple:"));
         assert!(result.contains("complex:"));
-        // Complex type should be summarized
         assert!(result.contains("HashMap<"));
     }
 
@@ -1034,10 +977,7 @@ pub fn documented_function() {}
 "#;
         let standard = build_skeleton(src, "standard");
 
-        // Should contain the function signature
         assert!(standard.contains("pub fn documented_function"));
-
-        // Docstring should be present (possibly truncated)
         assert!(standard.contains("///"));
     }
 
@@ -1056,7 +996,6 @@ pub fn many_doc_lines() {}
 "#;
         let standard = build_skeleton(src, "standard");
 
-        // Should have truncation indicator since there are more than MAX_DOCSTRING_LINES
         assert!(standard.contains("/// ..."));
     }
 }

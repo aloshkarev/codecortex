@@ -1,0 +1,26 @@
+---
+description: When to delegate CodeCortex work to Task subagents instead of inline MCP calls
+alwaysApply: true
+---
+
+# CodeCortex subagents
+
+Delegate via **Task** for long or isolated chains (10+ MCP calls).
+
+| Intent | Subagent / tool |
+| --- | --- |
+| Stale index / setup / watch | `codecortex-indexer` |
+| Callers, impact, dead code, search | `codecortex-analyzer` |
+| Branch or PR review | `codecortex-pr-reviewer` |
+| Plan edit (read-only) | `codecortex-patch-planner` |
+| Multi-step PR / kernel / consensus review | [`cortex_a2a_spawn_session`](../../docs/A2A.md) — prefer before Task subagent MCP chains |
+
+For PR review, kernel/eBPF impact, deadlock consensus, and other multi-step orchestration, spawn an A2A session once and poll the returned `task_id` instead of chaining 10+ MCP tools in the host context. See [codecortex-a2a.mdc](codecortex-a2a.mdc) and [docs/A2A.md](../../docs/A2A.md).
+
+## Order
+
+Run **codecortex-indexer** before analyzer/reviewer/planner when `freshness` is not fresh.
+
+Parent agent implements code; **codecortex-patch-planner** does not write files.
+
+**Sync:** [agents/README.md](../../agents/README.md) · hooks: [cursor/README.md](../../cursor/README.md)

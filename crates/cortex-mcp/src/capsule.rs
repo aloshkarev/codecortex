@@ -13,7 +13,8 @@
 
 use crate::cache::CacheHierarchy;
 use crate::centrality::CentralityScorer;
-use crate::tfidf::{Document, TfIdfScorer};
+use crate::rerank::{RerankCandidate, RerankWeights, rerank_score};
+use crate::tfidf::{Bm25Scorer, Document, TfIdfScorer};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -38,6 +39,10 @@ pub struct CapsuleConfig {
     pub module_boost: f64,
     /// Minimum similarity for fuzzy matching
     pub fuzzy_threshold: f64,
+    /// Use BM25 instead of TF-IDF for lexical scoring.
+    pub use_bm25: bool,
+    /// Apply multi-signal reranker after base scoring.
+    pub rerank_enabled: bool,
     /// Field weights for different source fields
     pub field_weights: FieldWeights,
     /// Recency boost configuration
@@ -51,16 +56,18 @@ impl Default for CapsuleConfig {
         Self {
             max_items: 40,
             max_tokens: 6000,
-            initial_threshold: 0.2, // Lower initial threshold
-            min_threshold: 0.05,    // Lower minimum threshold
+            initial_threshold: 0.2,
+            min_threshold: 0.05,
             relaxation_step: 0.05,
             include_tests: false,
             intent_weights: IntentWeights::default(),
-            module_boost: 0.35, // Higher module boost
+            module_boost: 0.35,
             fuzzy_threshold: 0.5,
             field_weights: FieldWeights::default(),
             recency_config: RecencyConfig::default(),
             test_proximity_config: TestProximityConfig::default(),
+            use_bm25: true,
+            rerank_enabled: true,
         }
     }
 }
@@ -322,6 +329,7 @@ pub struct ContextCapsuleBuilder {
     config: CapsuleConfig,
     cache: Option<CacheHierarchy>,
     tfidf_scorer: TfIdfScorer,
+    bm25_scorer: Bm25Scorer,
     centrality_scorer: CentralityScorer,
     /// Query context for proximity scoring
     query_context: QueryContext,
@@ -345,7 +353,6 @@ impl QueryContext {
             .filter(|t| t.len() > 2)
             .collect();
 
-        // Generate n-grams (2-3 chars)
         let mut ngrams = HashSet::new();
         for term in &terms {
             for window in 2..=3 {
@@ -355,7 +362,6 @@ impl QueryContext {
             }
         }
 
-        // Extract potential module hints from terms
         let module_hints: HashSet<String> = terms
             .iter()
             .filter(|t| t.len() >= 3)
@@ -377,6 +383,7 @@ impl ContextCapsuleBuilder {
             config: CapsuleConfig::default(),
             cache: None,
             tfidf_scorer: TfIdfScorer::new(),
+            bm25_scorer: Bm25Scorer::new(),
             centrality_scorer: CentralityScorer::new(),
             query_context: QueryContext::default(),
         }
@@ -388,6 +395,7 @@ impl ContextCapsuleBuilder {
             config,
             cache: None,
             tfidf_scorer: TfIdfScorer::new(),
+            bm25_scorer: Bm25Scorer::new(),
             centrality_scorer: CentralityScorer::new(),
             query_context: QueryContext::default(),
         }
@@ -452,7 +460,6 @@ impl ContextCapsuleBuilder {
         self.config.intent_weights = IntentWeights::for_intent(&detected_intent);
         self.query_context = QueryContext::from_query(query);
 
-        // Build TF-IDF corpus from results
         let documents: Vec<Document> = results
             .iter()
             .map(|r| {
@@ -469,20 +476,17 @@ impl ContextCapsuleBuilder {
             .collect();
 
         self.tfidf_scorer = TfIdfScorer::from_documents(&documents);
+        self.bm25_scorer = Bm25Scorer::from_documents(&documents);
 
-        // Build centrality graph (simplified - using co-occurrence)
         self.build_centrality_from_results(&results);
 
-        // First pass: find directly matching items and extract their paths
         let best_paths = self.extract_relevant_paths(query, &results);
 
-        // Score and filter results
         let mut warnings = Vec::new();
         let mut threshold = self.config.initial_threshold;
         let mut scored_items =
             self.score_results(query, &results, &best_paths, path_filters, threshold);
 
-        // Try with initial threshold, relax if needed
         while scored_items.is_empty() && threshold > self.config.min_threshold {
             threshold -= self.config.relaxation_step;
             threshold = threshold.max(self.config.min_threshold);
@@ -495,21 +499,37 @@ impl ContextCapsuleBuilder {
             warnings.push("no_results_found".to_string());
         }
 
-        // Sort by score and apply token budget
+        if self.config.rerank_enabled {
+            let weights = RerankWeights::default();
+            for (rank, item) in scored_items.iter_mut().enumerate() {
+                let candidate = RerankCandidate {
+                    id: item.id.clone(),
+                    path: item.path.clone(),
+                    name: item.name.clone(),
+                    lexical_rank: rank,
+                    vector_rank: None,
+                    lexical_score: item.score,
+                    vector_score: 0.0,
+                    centrality: item.why.centrality,
+                    token_estimate: item.snippet.chars().count() / 4,
+                    mtime_secs: crate::rerank::file_mtime_secs(&item.path),
+                };
+                item.score = rerank_score(query, &candidate, &weights);
+            }
+        }
+
         scored_items.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Apply token budgeting
         let (budgeted_items, token_estimate, truncated) = self.apply_token_budget(scored_items);
 
         if truncated {
             warnings.push("token_budget_exceeded".to_string());
         }
 
-        // Truncate to max items
         let final_items: Vec<CapsuleItem> = budgeted_items
             .into_iter()
             .take(self.config.max_items)
@@ -534,7 +554,6 @@ impl ContextCapsuleBuilder {
             let path_lower = result.path.to_lowercase();
             let name_lower = result.name.to_lowercase();
 
-            // Check if query matches name, source, or path
             let name_match = name_lower.contains(&query_lower);
             let path_match = path_lower.contains(&query_lower);
             let source_match = result
@@ -543,7 +562,6 @@ impl ContextCapsuleBuilder {
                 .map(|s| s.to_lowercase().contains(&query_lower))
                 .unwrap_or(false);
 
-            // Also check if any query term (or substring) matches the path
             let term_match = self
                 .query_context
                 .module_hints
@@ -551,19 +569,18 @@ impl ContextCapsuleBuilder {
                 .any(|h| path_lower.contains(h));
 
             let path_score = if name_match {
-                1.0 // Direct name match is strongest signal
+                1.0
             } else if path_match {
-                0.9 // Path match
+                0.9
             } else if term_match {
-                0.7 // Query term in path
+                0.7
             } else if source_match {
-                0.5 // Source match
+                0.5
             } else {
                 0.0
             };
 
             if path_score > 0.0 {
-                // Score the full path and the directory
                 *path_scores.entry(result.path.clone()).or_insert(0.0) += path_score;
 
                 if let Some(dir) = std::path::Path::new(&result.path).parent() {
@@ -573,7 +590,6 @@ impl ContextCapsuleBuilder {
             }
         }
 
-        // Sort by score and return top paths
         let mut scored: Vec<_> = path_scores.into_iter().collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         scored.into_iter().take(10).map(|(p, _)| p).collect()
@@ -583,13 +599,11 @@ impl ContextCapsuleBuilder {
     fn build_centrality_from_results(&mut self, results: &[GraphSearchResult]) {
         self.centrality_scorer = CentralityScorer::new();
 
-        // Group results by path to create file-based connections
         let mut by_path: HashMap<String, Vec<&GraphSearchResult>> = HashMap::new();
         for result in results {
             by_path.entry(result.path.clone()).or_default().push(result);
         }
 
-        // Create edges between items in the same file
         for items in by_path.values() {
             for i in 0..items.len() {
                 for j in (i + 1)..items.len() {
@@ -616,12 +630,10 @@ impl ContextCapsuleBuilder {
         results
             .iter()
             .filter(|r| {
-                // Filter out tests if not included
                 if !self.config.include_tests && r.path.contains("/test") {
                     return false;
                 }
 
-                // Apply path filters
                 if !path_filters.is_empty() && !path_filters.iter().any(|f| r.path.contains(f)) {
                     return false;
                 }
@@ -649,32 +661,28 @@ impl ContextCapsuleBuilder {
         let name = &result.name;
         let source = result.source.as_deref().unwrap_or("");
 
-        // Lexical score with fuzzy matching
         let fts = self.compute_lexical_score(query, name, source, &result.path);
 
-        // TF-IDF score
         let doc = Document::new(&result.id, &format!("{} {} {}", name, result.path, source));
-        let tfidf = self
-            .tfidf_scorer
-            .score(&crate::tfidf::tokenize(query), &doc);
+        let query_terms = crate::tfidf::tokenize(query);
+        let lexical_raw = if self.config.use_bm25 {
+            self.bm25_scorer.score(&query_terms, &doc)
+        } else {
+            self.tfidf_scorer.score(&query_terms, &doc)
+        };
 
-        // Normalize TF-IDF to 0-1 range
-        let tfidf_normalized = (tfidf / 2.5).min(1.0);
+        let tfidf_normalized = (lexical_raw / 2.5).min(1.0);
 
-        // Centrality score
         let centrality = self.centrality_scorer.score(&result.id);
 
-        // Proximity score (based on path relevance)
         let proximity = self.compute_proximity_score(&result.path, best_paths);
 
-        // Combined score with intent weights
         let weights = &self.config.intent_weights;
         let combined = (fts * weights.fts_weight)
             + (tfidf_normalized * weights.tfidf_weight)
             + (centrality * weights.centrality_weight)
             + (proximity * weights.proximity_weight);
 
-        // Create snippet
         let snippet: String = source.chars().take(320).collect();
 
         CapsuleItem {
@@ -700,26 +708,20 @@ impl ContextCapsuleBuilder {
         let source_lower = source.to_lowercase();
         let path_lower = path.to_lowercase();
 
-        // Exact match in name (highest score)
         let title_hit: f64 = if name_lower.contains(query) { 1.0 } else { 0.0 };
 
-        // Exact match in source
         let body_hit: f64 = if source_lower.contains(query) {
             0.6
         } else {
             0.0
         };
 
-        // Path match (module relevance)
         let path_hit: f64 = if path_lower.contains(query) { 0.7 } else { 0.0 };
 
-        // Exact name match bonus
         let exact_bonus: f64 = if name_lower == query { 0.3 } else { 0.0 };
 
-        // Fuzzy matching using n-grams
         let fuzzy_score = self.compute_fuzzy_score(query, &name_lower);
 
-        // Prefix/suffix matching
         let prefix_score = if name_lower.starts_with(query) {
             0.4
         } else if query.starts_with(&name_lower) {
@@ -728,7 +730,6 @@ impl ContextCapsuleBuilder {
             0.0
         };
 
-        // Combine scores
         let base_score = title_hit * 0.35 + body_hit * 0.2 + path_hit * 0.2 + exact_bonus;
         let fuzzy_boost = fuzzy_score * 0.15;
         let prefix_boost = prefix_score * 0.1;
@@ -742,7 +743,6 @@ impl ContextCapsuleBuilder {
             return 1.0;
         }
 
-        // Generate n-grams for the name
         let name_chars: Vec<char> = name.chars().collect();
         let mut name_ngrams = HashSet::new();
 
@@ -753,7 +753,6 @@ impl ContextCapsuleBuilder {
             }
         }
 
-        // Count overlapping n-grams
         let overlap = self.query_context.ngrams.intersection(&name_ngrams).count();
         let total = self.query_context.ngrams.len().max(1);
 
@@ -768,21 +767,17 @@ impl ContextCapsuleBuilder {
 
         let path_lower = path.to_lowercase();
 
-        // Check if this path is in or near a best path
         for best in best_paths {
             let best_lower = best.to_lowercase();
 
-            // Exact path match
             if path_lower == best_lower {
                 return self.config.module_boost;
             }
 
-            // Same file
             if path_lower.starts_with(&best_lower) || best_lower.starts_with(&path_lower) {
                 return self.config.module_boost;
             }
 
-            // Same directory
             if let (Some(path_dir), Some(best_dir)) = (
                 std::path::Path::new(path).parent(),
                 std::path::Path::new(best).parent(),
@@ -791,7 +786,6 @@ impl ContextCapsuleBuilder {
                 return self.config.module_boost * 0.8;
             }
 
-            // Path component overlap (e.g., both contain "auth")
             for component in std::path::Path::new(path).components() {
                 if let Some(comp_str) = component.as_os_str().to_str() {
                     let comp_lower = comp_str.to_lowercase();
@@ -812,7 +806,7 @@ impl ContextCapsuleBuilder {
         let mut truncated = false;
 
         for item in items {
-            let item_tokens = item.snippet.len() / 4 + 32; // Rough estimate
+            let item_tokens = item.snippet.len() / 4 + 32;
 
             if token_estimate + item_tokens > self.config.max_tokens {
                 truncated = true;
@@ -994,7 +988,6 @@ mod tests {
 
         let capsule = builder.build("authenticate", results, None, &[]);
 
-        // Should have relaxed threshold to find results
         assert!(!capsule.capsule_items.is_empty());
         assert!(capsule.fallback_relaxed);
     }

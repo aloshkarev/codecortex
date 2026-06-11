@@ -176,7 +176,7 @@ impl LanceStore {
         }
 
         // Create embedding FixedSizeListArray
-        let embedding_array = Self::create_embedding_array(documents)?;
+        let embedding_array = Self::create_embedding_array(&documents)?;
 
         let id_array: ArrayRef = Arc::new(StringArray::from(ids));
         let content_array: ArrayRef = Arc::new(StringArray::from(contents));
@@ -580,7 +580,7 @@ impl VectorStore for LanceStore {
                 if let Some(doc) = Self::row_to_document(&batch, row_idx) {
                     let score = distances
                         .get(row_idx)
-                        .map(|d| 1.0 - (d / 2.0).clamp(0.0, 1.0)) // Convert distance to similarity
+                        .map(|d| 1.0 - (d / 2.0).min(1.0).max(0.0)) // Convert distance to similarity
                         .unwrap_or(1.0);
 
                     search_results.push(SearchResult {
@@ -651,7 +651,7 @@ impl VectorStore for LanceStore {
                 if let Some(doc) = Self::row_to_document(&batch, row_idx) {
                     let score = distances
                         .get(row_idx)
-                        .map(|d| 1.0 - (d / 2.0).clamp(0.0, 1.0))
+                        .map(|d| 1.0 - (d / 2.0).min(1.0).max(0.0))
                         .unwrap_or(1.0);
 
                     search_results.push(SearchResult {
@@ -757,6 +757,13 @@ impl VectorStore for LanceStore {
     }
 
     async fn count(&self) -> Result<usize, VectorError> {
+        self.count_by_filter(HashMap::new()).await
+    }
+
+    async fn count_by_filter(
+        &self,
+        filter: HashMap<String, MetadataValue>,
+    ) -> Result<usize, VectorError> {
         let table = self
             .conn
             .open_table(TABLE_NAME)
@@ -764,7 +771,12 @@ impl VectorStore for LanceStore {
             .await
             .map_err(|e| VectorError::DatabaseError(format!("Failed to open table: {}", e)))?;
 
-        let mut stream = table.query().execute().await.map_err(|e| {
+        let mut query = table.query();
+        if let Some(filter_sql) = Self::build_filter_sql(&filter) {
+            query = query.only_if(&filter_sql);
+        }
+
+        let mut stream = query.execute().await.map_err(|e| {
             VectorError::DatabaseError(format!("Failed to execute count query: {}", e))
         })?;
 

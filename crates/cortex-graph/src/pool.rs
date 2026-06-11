@@ -138,7 +138,6 @@ impl ConnectionPool {
     pub async fn get(&self) -> Result<PoolConnectionGuard<'_>> {
         let start = Instant::now();
 
-        // Wait for a permit
         let permit = time::timeout(self.config.connection_timeout, self.semaphore.acquire())
             .await
             .map_err(|_| {
@@ -149,18 +148,15 @@ impl ConnectionPool {
             })?
             .map_err(|e| CortexError::Database(format!("Failed to acquire permit: {}", e)))?;
 
-        // Update wait statistics
         {
             let mut stats = self.stats.lock().await;
             stats.wait_count += 1;
             stats.total_wait_time_ms += start.elapsed().as_millis() as u64;
         }
 
-        // Try to get an idle connection
-        {
+        let conn = {
             let mut idle = self.idle.lock().await;
             while let Some(mut conn) = idle.pop() {
-                // Check if connection is still valid
                 if !conn.is_expired(self.config.max_lifetime)
                     && !conn.is_idle_expired(self.config.idle_timeout)
                 {
@@ -176,19 +172,25 @@ impl ConnectionPool {
                         pool: self,
                     });
                 }
-                // Connection expired, close it
                 let mut stats = self.stats.lock().await;
                 stats.connections_closed += 1;
                 stats.idle_connections = idle.len();
             }
+            None
+        };
+
+        if conn.is_some() {
+            return Ok(PoolConnectionGuard {
+                conn,
+                permit,
+                pool: self,
+            });
         }
 
-        // Create a new connection
         let client = crate::GraphClient::connect(&self.db_config).await?;
         let mut conn = PooledConnection::new(client);
         conn.mark_used();
 
-        // Update statistics
         {
             let mut stats = self.stats.lock().await;
             stats.connections_created += 1;
@@ -215,7 +217,6 @@ impl ConnectionPool {
     /// Health check for the pool
     pub async fn health_check(&self) -> Result<bool> {
         let guard = self.get().await?;
-        // Try a simple query
         guard.client()?.raw_query("RETURN 1").await?;
         Ok(true)
     }
@@ -251,7 +252,6 @@ impl Drop for PoolConnectionGuard<'_> {
             let config = self.pool.config.clone();
 
             tokio::spawn(async move {
-                // Check if connection is still valid
                 if conn.is_expired(config.max_lifetime) {
                     let mut stats = stats.lock().await;
                     stats.connections_closed += 1;
@@ -259,11 +259,9 @@ impl Drop for PoolConnectionGuard<'_> {
                     return;
                 }
 
-                // Return to idle pool
                 let mut idle = idle.lock().await;
                 let mut stats = stats.lock().await;
 
-                // Don't exceed max idle connections
                 if idle.len() < config.min_idle * 2 {
                     idle.push(conn);
                 } else {
@@ -274,7 +272,6 @@ impl Drop for PoolConnectionGuard<'_> {
                 stats.idle_connections = idle.len();
             });
         }
-        // Permit is automatically released when dropped
     }
 }
 
@@ -324,35 +321,27 @@ mod tests {
 
     #[test]
     fn connection_expiry_check() {
-        // Test expiry logic using Instant directly
         use std::time::Instant;
 
         let created_at = Instant::now();
 
-        // Should not be expired immediately
         let not_expired = created_at.elapsed() < Duration::from_secs(3600);
         assert!(not_expired);
 
-        // Should be expired if max_lifetime is very short
         let expired = created_at.elapsed() > Duration::ZERO;
-        // Just testing that is_expired returns a boolean
         let _: bool = expired;
     }
 
     #[test]
     fn connection_idle_check() {
-        // Test idle expiry logic using Instant directly
         use std::time::Instant;
 
         let last_used = Instant::now();
 
-        // Should not be idle expired immediately
         let not_idle_expired = last_used.elapsed() < Duration::from_secs(300);
         assert!(not_idle_expired);
 
-        // Should be idle expired if idle_timeout is very short
         let idle_expired = last_used.elapsed() > Duration::ZERO;
-        // Just testing that the comparison returns a boolean
         let _: bool = idle_expired;
     }
 

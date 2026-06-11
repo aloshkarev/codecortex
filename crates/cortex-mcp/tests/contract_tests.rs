@@ -73,9 +73,6 @@ const VALID_ERROR_CODES: &[&str] = &[
     "SENSITIVE_CONTENT_DETECTED",
 ];
 
-// =============================================================================
-// Schema Validation Tests
-// =============================================================================
 
 mod schema_validation {
     use super::*;
@@ -157,7 +154,6 @@ mod schema_validation {
 
         validate_envelope(&parsed).expect("full metadata envelope should validate");
 
-        // Verify all fields are present
         assert_eq!(parsed["meta"]["cache_hit"], "l1");
         assert_eq!(parsed["meta"]["rows_scanned"], 500);
         assert_eq!(parsed["meta"]["request_id"], "test-request-id");
@@ -185,9 +181,6 @@ mod schema_validation {
     }
 }
 
-// =============================================================================
-// Error Code Conformance Tests
-// =============================================================================
 
 mod error_codes {
     use super::*;
@@ -273,9 +266,6 @@ mod error_codes {
     }
 }
 
-// =============================================================================
-// Meta Field Tests
-// =============================================================================
 
 mod meta_fields {
     use super::*;
@@ -295,7 +285,6 @@ mod meta_fields {
         let duration = parsed["meta"]["duration_ms"]
             .as_u64()
             .expect("duration is u64");
-        // Duration should be very small for instant completion
         assert!(duration < 1000, "Duration should be less than 1 second");
     }
 
@@ -370,9 +359,6 @@ mod meta_fields {
     }
 }
 
-// =============================================================================
-// Status Tests
-// =============================================================================
 
 mod status_tests {
     use super::*;
@@ -410,9 +396,6 @@ mod status_tests {
     }
 }
 
-// =============================================================================
-// Feature Flag Tests
-// =============================================================================
 
 mod feature_flags {
     use cortex_mcp::FeatureFlags;
@@ -422,7 +405,6 @@ mod feature_flags {
         let flags1 = FeatureFlags::global();
         let flags2 = FeatureFlags::global();
 
-        // Both should return the same static reference
         assert!(std::ptr::eq(flags1, flags2));
     }
 
@@ -439,7 +421,6 @@ mod feature_flags {
     fn feature_flags_alternative_names() {
         let flags = FeatureFlags::all_enabled();
 
-        // Both naming conventions should work
         assert!(flags.is_enabled("context_capsule"));
         assert!(flags.is_enabled("mcp.context_capsule.enabled"));
         assert!(flags.is_enabled("impact_graph"));
@@ -455,12 +436,76 @@ mod feature_flags {
     }
 }
 
-// =============================================================================
-// Integration Tests - Response Content
-// =============================================================================
 
 mod integration {
     use super::*;
+    use cortex_mcp::contracts::success_json;
+
+    #[test]
+    fn success_json_matches_envelope_schema() {
+        let started = Instant::now();
+        let text = success_json(json!({"results": []}), started, Vec::new(), false);
+        let parsed: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(parsed["status"], "ok");
+        assert!(parsed.get("data").is_some());
+        assert!(parsed["meta"]["duration_ms"].is_number());
+    }
+
+    /// Tools migrated from legacy Self::ok to envelope_success (regression guard).
+    const ENVELOPE_MIGRATED_TOOLS: &[&str] = &[
+        "check_health",
+        "list_indexed_repositories",
+        "get_repository_stats",
+        "list_jobs",
+        "check_job_status",
+        "find_code",
+        "quick_info",
+        "branch_structural_diff",
+        "pr_review",
+        "watch_directory",
+        "list_watched_paths",
+        "unwatch_directory",
+        "load_bundle",
+        "export_bundle",
+        "search_across_projects",
+        "find_similar_across_projects",
+        "find_shared_dependencies",
+        "compare_api_surface",
+        "list_projects",
+        "add_project",
+        "remove_project",
+        "set_current_project",
+        "get_current_project",
+        "list_branches",
+        "refresh_project",
+        "project_status",
+        "project_sync",
+        "project_branch_diff",
+        "project_queue_status",
+        "project_metrics",
+    ];
+
+    #[test]
+    fn envelope_migrated_tool_list_non_empty() {
+        assert!(ENVELOPE_MIGRATED_TOOLS.len() >= 30);
+    }
+
+    /// `check_health` exposes graph connectivity under `data.graph` (not legacy `memgraph`).
+    #[test]
+    fn check_health_response_uses_graph_key() {
+        let sample = json!({
+            "status": "ok",
+            "data": {
+                "graph": "connected",
+                "backend": "falkordb",
+                "analyzer": {}
+            },
+            "meta": { "duration_ms": 1, "partial_response": false },
+            "warnings": []
+        });
+        assert_eq!(sample["data"]["graph"], "connected");
+        assert!(sample["data"].get("memgraph").is_none());
+    }
 
     #[test]
     fn envelope_contains_data_field() {
@@ -496,8 +541,34 @@ mod integration {
             .text
             .clone();
 
-        // Should parse as valid JSON
         let parsed: Result<Value, _> = serde_json::from_str(&text);
         assert!(parsed.is_ok(), "Response should be valid JSON");
+    }
+
+    #[test]
+    fn envelope_token_savings_schema() {
+        use cortex_mcp::contracts::TokenSavings;
+
+        let result = EnvelopeBuilder::new(Instant::now())
+            .token_savings(TokenSavings {
+                returned_tokens: 120,
+                baseline_tokens: 900,
+                saved_tokens: 780,
+                baseline_estimated: true,
+                tokenizer: "cl100k_base".to_string(),
+            })
+            .success(json!({"items": []}));
+
+        let text = result.content[0]
+            .as_text()
+            .expect("text content")
+            .text
+            .clone();
+        let parsed: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(parsed["meta"]["token_savings"]["returned_tokens"], 120);
+        assert_eq!(parsed["meta"]["token_savings"]["baseline_tokens"], 900);
+        assert_eq!(parsed["meta"]["token_savings"]["saved_tokens"], 780);
+        assert_eq!(parsed["meta"]["token_savings"]["baseline_estimated"], true);
+        assert_eq!(parsed["meta"]["token_savings"]["tokenizer"], "cl100k_base");
     }
 }

@@ -26,6 +26,9 @@ pub fn detect_feature_envy(source: &str, file_path: &str, config: &SmellConfig) 
     let methods = extract_methods_with_access_patterns(&lines, lang);
 
     for (method_name, method_info) in &methods {
+        if super::is_test_artifact(file_path, method_name) {
+            continue;
+        }
         let own_accesses = method_info.own_class_accesses;
         let other_accesses = method_info.other_class_accesses;
 
@@ -33,7 +36,6 @@ pub fn detect_feature_envy(source: &str, file_path: &str, config: &SmellConfig) 
             continue;
         }
 
-        // Calculate envy ratio
         let total = own_accesses + other_accesses;
         let envy_ratio = other_accesses as f64 / total as f64;
 
@@ -150,14 +152,12 @@ pub fn detect_inappropriate_intimacy(
 
     let classes = extract_class_intimacy_data(&lines, lang);
 
-    // Compare pairs of classes for bidirectional access
     let class_names: Vec<&String> = classes.keys().collect();
     for i in 0..class_names.len() {
         for j in (i + 1)..class_names.len() {
             let class1 = &classes[class_names[i]];
             let class2 = &classes[class_names[j]];
 
-            // Check for bidirectional access
             let class1_accesses_2 = class1.accesses.get(class_names[j]).unwrap_or(&0);
             let class2_accesses_1 = class2.accesses.get(class_names[i]).unwrap_or(&0);
 
@@ -284,12 +284,10 @@ pub fn detect_message_chains(
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Skip comments and strings
         if shared_is_comment_line(trimmed, lang) {
             continue;
         }
 
-        // Find all message chains in the line
         let chains = extract_message_chains(trimmed, lang);
 
         for chain in chains {
@@ -338,7 +336,6 @@ pub fn detect_middle_man(source: &str, file_path: &str, config: &SmellConfig) ->
 
         let delegate_ratio = class_info.delegating_methods as f64 / class_info.total_methods as f64;
 
-        // Use a minimum of 3 delegating methods as threshold
         if delegate_ratio >= config.max_delegate_ratio && class_info.delegating_methods >= 3 {
             smells.push(CodeSmell {
                 smell_type: SmellType::MiddleMan,
@@ -367,7 +364,6 @@ pub fn detect_middle_man(source: &str, file_path: &str, config: &SmellConfig) ->
     smells
 }
 
-// Data structures
 
 struct MethodInfo {
     line_number: u32,
@@ -396,7 +392,6 @@ struct MessageChain {
     preview: String,
 }
 
-// Helper functions
 
 fn extract_methods_with_access_patterns(
     lines: &[&str],
@@ -412,12 +407,10 @@ fn extract_methods_with_access_patterns(
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim();
 
-        // Track class
         if is_class_definition(trimmed, lang) {
             current_class = Some(extract_class_name(trimmed));
         }
 
-        // Track method start
         if is_method_definition(trimmed, lang) {
             let method_name = extract_method_name(trimmed);
             current_method = Some(method_name.clone());
@@ -435,7 +428,6 @@ fn extract_methods_with_access_patterns(
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            // Count accesses
             if let Some(ref mut info) = method_info {
                 let accesses = extract_member_accesses(trimmed);
                 for (_var, is_self) in accesses {
@@ -447,12 +439,11 @@ fn extract_methods_with_access_patterns(
                 }
             }
 
-            // Method end
-            if brace_count == 0
-                && i as u32 >= method_start
-                && let (Some(method_name), Some(info)) = (current_method.take(), method_info.take())
-            {
-                methods.insert(method_name, info);
+            if brace_count == 0 && i as u32 >= method_start {
+                if let (Some(method_name), Some(info)) = (current_method.take(), method_info.take())
+                {
+                    methods.insert(method_name, info);
+                }
             }
         }
     }
@@ -491,7 +482,6 @@ fn extract_class_intimacy_data(
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            // Track what other classes this class accesses
             if let Some(info) = classes.get_mut(class_name) {
                 let foreign_accesses = extract_foreign_class_accesses(trimmed);
                 for foreign_class in foreign_accesses {
@@ -543,14 +533,13 @@ fn extract_class_delegation_data(
             brace_count += trimmed.matches('{').count() as i32;
             brace_count -= trimmed.matches('}').count() as i32;
 
-            if let Some(info) = classes.get_mut(class_name)
-                && is_method_definition(trimmed, lang)
-            {
-                info.total_methods += 1;
+            if let Some(info) = classes.get_mut(class_name) {
+                if is_method_definition(trimmed, lang) {
+                    info.total_methods += 1;
 
-                // Check if this method is a delegation
-                if is_delegating_method(trimmed, lines, i, lang) {
-                    info.delegating_methods += 1;
+                    if is_delegating_method(trimmed, lines, i, lang) {
+                        info.delegating_methods += 1;
+                    }
                 }
             }
 
@@ -567,7 +556,6 @@ fn extract_message_chains(line: &str, lang: SourceLanguage) -> Vec<MessageChain>
     let mut chains = Vec::new();
     let cleaned = remove_strings_and_comments(line, lang);
 
-    // Find patterns like var.method().method2().method3()
     let mut _current_chain = String::new();
     let mut chain_length = 0;
     let mut start_var = String::new();
@@ -578,7 +566,6 @@ fn extract_message_chains(line: &str, lang: SourceLanguage) -> Vec<MessageChain>
     while i < chars.len() {
         let c = chars[i];
 
-        // Start of identifier
         if c.is_alphanumeric() || c == '_' {
             let mut ident = String::new();
             while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
@@ -586,7 +573,6 @@ fn extract_message_chains(line: &str, lang: SourceLanguage) -> Vec<MessageChain>
                 i += 1;
             }
 
-            // Check if followed by method call
             if i < chars.len() && chars[i] == '.' {
                 if !in_chain {
                     start_var = ident.clone();
@@ -595,20 +581,16 @@ fn extract_message_chains(line: &str, lang: SourceLanguage) -> Vec<MessageChain>
                 _current_chain = ident;
                 chain_length = 0;
             } else if i < chars.len() && chars[i] == '(' {
-                // Method call - continue chain
                 if in_chain {
                     chain_length += 1;
                 }
             }
         } else if c == '.' && in_chain {
-            // Continue chain
         } else if c == ')' && in_chain {
-            // End of method call - check if chain continues
             if i + 1 < chars.len() && chars[i + 1] == '.' {
                 chain_length += 1;
                 i += 1; // Skip the dot
             } else {
-                // Chain ends
                 if chain_length >= 2 {
                     let preview_len = (i + 1).min(50);
                     chains.push(MessageChain {
@@ -628,7 +610,6 @@ fn extract_message_chains(line: &str, lang: SourceLanguage) -> Vec<MessageChain>
         i += 1;
     }
 
-    // Check for chain at end of line
     if chain_length >= 2 {
         let preview_len = line.len().min(50);
         chains.push(MessageChain {
@@ -645,7 +626,6 @@ fn extract_member_accesses(line: &str) -> Vec<(String, bool)> {
     let mut accesses = Vec::new();
     let cleaned = remove_strings_and_comments(line, SourceLanguage::Unknown);
 
-    // Find patterns like self.field, this.field, other.field
     let patterns = ["self.", "this.", "&self.", "&mut self."];
 
     for pattern in patterns {
@@ -662,11 +642,9 @@ fn extract_member_accesses(line: &str) -> Vec<(String, bool)> {
         }
     }
 
-    // Find other object accesses (simplified)
     let chars: Vec<char> = cleaned.chars().collect();
     let mut i = 0;
     while i < chars.len() {
-        // Look for identifier.identifier patterns
         if chars[i].is_alphabetic() || chars[i] == '_' {
             let mut first_ident = String::new();
             while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
@@ -700,7 +678,6 @@ fn extract_foreign_class_accesses(line: &str) -> Vec<String> {
     let mut classes = Vec::new();
     let cleaned = remove_strings_and_comments(line, SourceLanguage::Unknown);
 
-    // Find type names and foreign object instantiations
     let patterns = [
         ("new ", "("),
         ("::new(", ")"),
@@ -711,20 +688,17 @@ fn extract_foreign_class_accesses(line: &str) -> Vec<String> {
     for (start_pattern, _end_pattern) in patterns {
         if let Some(start) = cleaned.find(start_pattern) {
             let before = &cleaned[..start];
-            // Get the class name before the pattern
             if let Some(class_name) = before
                 .split(|c: char| !c.is_alphanumeric() && c != '_')
-                .next_back()
-                && !class_name.is_empty()
-                && class_name != "self"
-                && class_name != "this"
+                .last()
             {
-                classes.push(class_name.to_string());
+                if !class_name.is_empty() && class_name != "self" && class_name != "this" {
+                    classes.push(class_name.to_string());
+                }
             }
         }
     }
 
-    // Also check for type annotations
     for type_pattern in ["&mut ", "& ", ": "] {
         let mut pos = 0;
         while let Some(start) = cleaned[pos..].find(type_pattern) {
@@ -732,10 +706,10 @@ fn extract_foreign_class_accesses(line: &str) -> Vec<String> {
             if let Some(type_name) = rest
                 .split(|c: char| c.is_whitespace() || c == ',' || c == ')')
                 .next()
-                && !type_name.is_empty()
-                && type_name.chars().next().unwrap_or('_').is_uppercase()
             {
-                classes.push(type_name.to_string());
+                if !type_name.is_empty() && type_name.chars().next().unwrap_or('_').is_uppercase() {
+                    classes.push(type_name.to_string());
+                }
             }
             pos += start + type_pattern.len();
         }
@@ -866,7 +840,8 @@ fn is_method_definition(trimmed: &str, lang: SourceLanguage) -> bool {
 
 fn extract_class_name(line: &str) -> String {
     for prefix in ["impl ", "struct ", "class ", "pub struct ", "pub class "] {
-        if let Some(rest) = line.strip_prefix(prefix) {
+        if line.starts_with(prefix) {
+            let rest = &line[prefix.len()..];
             return rest
                 .split(|c: char| c.is_whitespace() || c == '{' || c == '<' || c == '(')
                 .find(|s| !s.is_empty())

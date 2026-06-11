@@ -1,7 +1,7 @@
-/// Live integration tests against a running Memgraph instance on 127.0.0.1:7687.
+/// Live integration tests against a running FalkorDB instance on 127.0.0.1:6379.
 ///
-/// These tests do NOT use testcontainers — they require Memgraph to already be
-/// running (e.g. via `docker run -p 7687:7687 memgraph/memgraph-mage:3.8.1`).
+/// These tests do NOT use testcontainers — they require FalkorDB to already be
+/// running (e.g. via `docker run -p 6379:6379 falkordb/falkordb`).
 ///
 /// Run with:
 ///   cargo test -p cortex-graph --test live_test -- --nocapture
@@ -13,38 +13,27 @@ use cortex_core::{CortexConfig, SearchKind};
 use cortex_graph::GraphClient;
 use cortex_indexer::Indexer;
 use std::path::PathBuf;
-use std::sync::Once;
+use std::sync::OnceLock;
 
-static INIT: Once = Once::new();
-
-/// Point sled cache into a temp dir inside the workspace so the sandbox allows it.
-/// Uses a unique cache directory per test to avoid sled lock contention.
-fn init_cache_path() {
-    INIT.call_once(|| {
-        // Use a unique directory per test process to avoid sled lock contention
-        let test_name = std::thread::current()
-            .name()
-            .unwrap_or_default()
-            .replace("::", "_");
-        let cache_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/test-sled-cache")
-            .join(test_name);
-        std::fs::create_dir_all(&cache_dir).ok();
-        // SAFETY: single-threaded initialisation via `Once`; no other thread reads this var yet.
-        unsafe { std::env::set_var("CORTEX_CACHE_PATH", cache_dir.display().to_string()) };
-    });
+fn live_indexer_hash_db() -> PathBuf {
+    static CACHE: OnceLock<PathBuf> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let dir =
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-sled-cache-live");
+            std::fs::create_dir_all(&dir).ok();
+            dir.join("hashes.db")
+        })
+        .clone()
 }
 
 fn live_uri() -> String {
-    std::env::var("BOLT_URI").unwrap_or_else(|_| "bolt://127.0.0.1:7687".to_string())
-}
-
-fn live_user() -> String {
-    std::env::var("BOLT_USER").unwrap_or_default()
+    std::env::var("CORTEX_TEST_GRAPH_URI")
+        .unwrap_or_else(|_| "falkor://127.0.0.1:6379".to_string())
 }
 
 fn live_password() -> String {
-    std::env::var("BOLT_PASSWORD").unwrap_or_default()
+    std::env::var("CORTEX_TEST_GRAPH_PASSWORD").unwrap_or_default()
 }
 
 fn fixture_path() -> PathBuf {
@@ -54,48 +43,45 @@ fn fixture_path() -> PathBuf {
 
 fn live_config() -> CortexConfig {
     CortexConfig {
-        memgraph_uri: live_uri(),
-        memgraph_user: live_user(),
-        memgraph_password: live_password(),
+        falkordb_uri: live_uri(),
+        falkordb_password: live_password(),
         max_batch_size: 100,
+        hash_cache_path: Some(live_indexer_hash_db()),
         watched_paths: vec![],
         ..Default::default()
     }
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+fn live_indexer(client: &GraphClient) -> Indexer {
+    Indexer::from_cortex_config(client.clone(), &live_config()).expect("indexer")
+}
 
 async fn connect() -> GraphClient {
     eprintln!("DEBUG: Starting connect()...");
-    init_cache_path();
-    eprintln!("DEBUG: init_cache_path() done");
+    eprintln!("DEBUG: indexer hash cache {:?}", live_indexer_hash_db());
     let config = live_config();
     eprintln!(
-        "DEBUG: Config created: uri={}, user={}, password={}",
-        config.memgraph_uri, config.memgraph_user, config.memgraph_password
+        "DEBUG: Config created: uri={}, password={}",
+        config.falkordb_uri, config.falkordb_password
     );
     let result = GraphClient::connect(&config).await;
     eprintln!("DEBUG: GraphClient::connect returned");
-    result.expect("connect to live Bolt server on 127.0.0.1:7687")
+    result.expect("connect to live FalkorDB on 127.0.0.1:6379")
 }
 
 async fn fresh_client() -> GraphClient {
     let client = connect().await;
-    // Wipe all data so each test starts from a clean slate.
     client
         .raw_query("MATCH (n) DETACH DELETE n")
         .await
         .expect("wipe graph");
-    // Also clear the sled hash-cache so files are always re-indexed.
-    let cache_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/test-sled-cache");
-    if cache_path.exists() {
-        std::fs::remove_dir_all(&cache_path).ok();
+    let db = live_indexer_hash_db();
+    let _ = std::fs::remove_file(&db);
+    if let Some(parent) = db.parent() {
+        std::fs::create_dir_all(parent).ok();
     }
-    std::fs::create_dir_all(&cache_path).ok();
     client
 }
-
-// ── connectivity ──────────────────────────────────────────────────────────────
 
 #[tokio::test]
 async fn live_connect_and_ping() {
@@ -106,12 +92,10 @@ async fn live_connect_and_ping() {
     assert_eq!(val, Some(42), "expected 42, got {:?}", val);
 }
 
-// ── indexing ──────────────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn live_index_rust_fixture() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("create indexer");
+    let indexer = live_indexer(&client);
 
     let fixture = fixture_path();
     assert!(fixture.exists(), "fixture must exist: {fixture:?}");
@@ -132,7 +116,7 @@ async fn live_index_rust_fixture() {
 #[tokio::test]
 async fn live_index_produces_function_nodes() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -158,7 +142,7 @@ async fn live_index_produces_function_nodes() {
 #[tokio::test]
 async fn live_index_produces_file_nodes() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -176,7 +160,7 @@ async fn live_index_produces_file_nodes() {
 #[tokio::test]
 async fn live_index_produces_repository_and_directory_nodes() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -197,12 +181,10 @@ async fn live_index_produces_repository_and_directory_nodes() {
     assert!(!dir_rows.is_empty(), ":Directory nodes must exist");
 }
 
-// ── analyzer queries ──────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn live_analyzer_callers_of_fib() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -218,7 +200,7 @@ async fn live_analyzer_callers_of_fib() {
 #[tokio::test]
 async fn live_analyzer_callees_of_main() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -246,7 +228,7 @@ async fn live_analyzer_callees_of_main() {
 #[tokio::test]
 async fn live_analyzer_dead_code() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -271,7 +253,7 @@ async fn live_analyzer_dead_code() {
 #[tokio::test]
 async fn live_analyzer_complexity() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -286,7 +268,7 @@ async fn live_analyzer_complexity() {
 #[tokio::test]
 async fn live_analyzer_repository_stats() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -307,7 +289,7 @@ async fn live_analyzer_repository_stats() {
 #[tokio::test]
 async fn live_find_code_by_name() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -328,7 +310,7 @@ async fn live_find_code_by_name() {
 #[tokio::test]
 async fn live_find_code_by_pattern() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -349,7 +331,7 @@ async fn live_find_code_by_pattern() {
 #[tokio::test]
 async fn live_call_chain() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -371,7 +353,7 @@ async fn live_call_chain() {
 #[tokio::test]
 async fn live_execute_cypher_count_nodes() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -390,9 +372,40 @@ async fn live_execute_cypher_count_nodes() {
 }
 
 #[tokio::test]
+async fn live_resolve_call_targets_chunked() {
+    let client = fresh_client().await;
+    let indexer = live_indexer(&client);
+    let fixture = fixture_path();
+    let repo = fixture.display().to_string();
+    indexer
+        .index_path_with_options(&fixture, true)
+        .await
+        .expect("index");
+
+    let rows = client
+        .raw_query("MATCH (ct:CallTarget) RETURN ct.id AS id LIMIT 500")
+        .await
+        .expect("list call targets");
+    let ids: Vec<String> = rows
+        .iter()
+        .filter_map(|v| v.get("id").and_then(|x| x.as_str()).map(str::to_string))
+        .collect();
+    assert!(!ids.is_empty(), "fixture should produce CallTarget nodes");
+
+    let chunked = client
+        .resolve_call_targets(&repo, None, &ids)
+        .await
+        .expect("chunked resolve");
+    assert!(
+        chunked <= ids.len().saturating_mul(2),
+        "chunked resolve count should be bounded"
+    );
+}
+
+#[tokio::test]
 async fn live_resolve_call_targets() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     let fixture = fixture_path();
     indexer
         .index_path_with_options(&fixture, true)
@@ -400,7 +413,7 @@ async fn live_resolve_call_targets() {
         .expect("index");
 
     let resolved = client
-        .resolve_call_targets(&fixture.display().to_string(), None)
+        .resolve_call_targets(&fixture.display().to_string(), None, &[])
         .await
         .expect("resolve_call_targets");
     println!("resolved call targets: {resolved}");
@@ -410,12 +423,10 @@ async fn live_resolve_call_targets() {
     );
 }
 
-// ── delete repository ─────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn live_delete_repository() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
 
     let fixture = fixture_path();
     indexer
@@ -454,12 +465,10 @@ async fn live_delete_repository() {
     );
 }
 
-// ── raw query output ──────────────────────────────────────────────────────────
-
 #[tokio::test]
 async fn live_raw_query_returns_json_objects() {
     let client = fresh_client().await;
-    let indexer = Indexer::new(client.clone(), 100).expect("indexer");
+    let indexer = live_indexer(&client);
     indexer
         .index_path_with_options(&fixture_path(), true)
         .await
@@ -473,7 +482,6 @@ async fn live_raw_query_returns_json_objects() {
     for row in &rows {
         let node = row.get("n").expect("row must have 'n' key");
         println!("row n = {node}");
-        // Each value must be a JSON object (not a raw Debug string)
         assert!(node.is_object(), "expected JSON object, got: {node}");
         assert!(node.get("name").is_some(), "Function node must have 'name'");
     }

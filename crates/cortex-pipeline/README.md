@@ -1,89 +1,43 @@
 # cortex-pipeline
 
-> `cortex-pipeline` implements an ECL (Extract → Cognify → Embed → Load) pipeline for enriched code processing in CodeCortex. Inspired by the [cognee](https://github.com/topoteretes/cognee) knowledge enrichment approach, it processes code through configurable stages that parse, analyze, embed, and persist entities to both graph and vector stores in a single pass.
+ECL (Extract → Cognify → Load) Pipeline for structured code processing.
 
-## What it does
+## Overview
 
-- Orchestrates multi-stage code processing: parsing → relationship extraction → embedding generation → graph+vector persistence
-- Accepts input as a directory, single file, or raw content string
-- Supports optional LLM summarization in the Cognify stage for richer embeddings
-- Tracks progress and errors per stage with graceful recovery between stages
-- Provides a `Stage` trait for custom processing steps
+This crate provides a flexible pipeline architecture inspired by [cognee](https://github.com/topoteretes/cognee) for processing code through multiple enrichment stages.
 
 ## Architecture
 
+```text
+┌──────────────────────────────────────────────────────────────────┐
+│                        Pipeline                                    │
+├────────────────┬────────────────┬────────────────┬───────────────┤
+│    Extract     │    Cognify     │     Embed      │     Load      │
+│                │                │                │               │
+│ • Parse files  │ • Extract rel. │ • Generate     │ • Store in    │
+│ • Detect lang  │ • Calc metrics │   embeddings   │   graph +     │
+│ • Build AST    │ • Identify sm. │ • Summarize    │   vector DB   │
+└────────────────┴────────────────┴────────────────┴───────────────┘
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                        Pipeline                              │
-├────────────────┬───────────────┬──────────────┬─────────────┤
-│    Extract     │    Cognify    │    Embed     │    Load     │
-│                │               │              │             │
-│ • Parse files  │ • Extract rel.│ • Generate   │ • Store in  │
-│ • Detect lang  │ • Calc metrics│   embeddings │   graph +   │
-│ • Build AST    │ • Importance  │ • Summarize  │   vector DB │
-│                │   scoring     │   (optional) │             │
-└────────────────┴───────────────┴──────────────┴─────────────┘
-```
-
-## Stages
-
-### ExtractStage
-
-Parses source files and produces `ExtractedEntity` records:
-
-- Auto-detects language from file extension using `cortex-core`'s `Language::from_path`
-- Supports all 14 languages (Rust, Python, Go, TypeScript, JavaScript, C, C++, Java, PHP, Ruby, Kotlin, Swift, JSON, Shell)
-- Configurable max file size (default unlimited)
-- Uses `walkdir` for directory traversal with `.gitignore` awareness
-
-### CognifyStage
-
-Enriches extracted entities and produces `CognifiedEntity` records:
-
-- Extracts relationships between entities (calls, imports, inheritance)
-- Calculates cyclomatic complexity and assigns importance scores
-- Optional LLM summarization (requires configured `llm.provider` in `CortexConfig`)
-
-### EmbedStage
-
-Generates vector embeddings and produces `EmbeddedEntity` records:
-
-- Creates embeddings from entity summaries or source text
-- Configurable embedding dimension (default 1536)
-- Supports both OpenAI and Ollama providers via `cortex-vector`
-
-### LoadStage
-
-Persists to both graph and vector databases and returns `LoadResult`:
-
-- Writes graph nodes and edges to Memgraph/Neo4j/Neptune via `cortex-graph`
-- Writes embeddings to LanceDB/Qdrant/JSON via `cortex-vector`
-- Creates relationships between co-located entities
-- Batch-processes writes for efficiency (configurable batch size)
-
-## Stage data types
-
-| Type | Produced by | Description |
-|------|------------|-------------|
-| `ExtractedEntity` | `ExtractStage` | Parsed code entity with source text |
-| `CognifiedEntity` | `CognifyStage` | Entity with relationships, metrics, and importance score |
-| `EmbeddedEntity` | `EmbedStage` | Entity with vector embedding |
-| `LoadResult` | `LoadStage` | Storage operation result with counts |
 
 ## Usage
 
-### Basic pipeline (default ECL stages)
+### Basic Pipeline
 
 ```rust
 use cortex_pipeline::{Pipeline, PipelineContext};
 
+// Create pipeline with default ECL stages
 let pipeline = Pipeline::with_default_stages();
+
+// Create context from a directory
 let context = PipelineContext::from_directory("/path/to/code");
+
+// Run the pipeline
 let result = pipeline.run(context).await?;
-println!("Loaded {} entities", result.entities_loaded);
 ```
 
-### Custom pipeline
+### Custom Pipeline
 
 ```rust
 use cortex_pipeline::{Pipeline, stage::{ExtractStage, CognifyStage, EmbedStage, LoadStage}};
@@ -95,19 +49,19 @@ let pipeline = Pipeline::new()
     .add_stage(CognifyStage::new()
         .with_summarization(true))
     .add_stage(EmbedStage::new()
-        .with_dimension(1536))
+        .with_dimension(768))
     .add_stage(LoadStage::new()
         .with_batch_size(50));
 ```
 
-### Input types
+### Input Types
 
 ```rust
-// From a directory
-let ctx = PipelineContext::from_directory("src/");
-
 // From a single file
 let ctx = PipelineContext::from_file("src/main.rs");
+
+// From a directory
+let ctx = PipelineContext::from_directory("src/");
 
 // From raw content
 let ctx = PipelineContext::from_content(
@@ -117,7 +71,59 @@ let ctx = PipelineContext::from_content(
 );
 ```
 
-### Custom stage
+## Stages
+
+### ExtractStage
+
+Parses source files and extracts code entities:
+
+- Detects file language from extension
+- Supports runtime language extensions, including Kotlin/Swift/JSON/Shell in addition to the baseline set
+- Configurable max file size
+
+### CognifyStage
+
+Analyzes code and enriches entities:
+
+- Extracts relationships between entities
+- Calculates complexity metrics
+- Assigns importance scores
+- Optional LLM summarization
+
+### EmbedStage
+
+Generates vector embeddings:
+
+- Creates embeddings from entity summaries
+- Configurable embedding dimension
+- Supports multiple embedding providers
+
+### LoadStage
+
+Stores entities in databases:
+
+- Persists to FalkorDB graph store
+- Stores embeddings in vector store
+- Creates relationships between entities
+- Batch processing support
+
+## Context Types
+
+| Type | Description |
+| ------ | ----------- |
+| `ExtractedEntity` | Parsed code entity with source |
+| `CognifiedEntity` | Entity with relationships and metrics |
+| `EmbeddedEntity` | Entity with vector embedding |
+| `LoadResult` | Result of storage operations |
+
+## Features
+
+- **Async Processing**: All stages are async for non-blocking operation
+- **Progress Tracking**: Real-time pipeline state updates
+- **Error Handling**: Graceful error recovery between stages
+- **Extensibility**: Implement `Stage` trait for custom stages
+
+## Custom Stages
 
 ```rust
 use cortex_pipeline::{Stage, PipelineContext, StageResult};
@@ -127,7 +133,9 @@ pub struct MyCustomStage;
 
 #[async_trait]
 impl Stage for MyCustomStage {
-    fn name(&self) -> &str { "custom" }
+    fn name(&self) -> &str {
+        "custom"
+    }
 
     async fn process(&self, context: &mut PipelineContext) -> anyhow::Result<StageResult> {
         // Custom processing logic
@@ -136,10 +144,10 @@ impl Stage for MyCustomStage {
 }
 ```
 
-## Supported languages
+## Supported Languages
 
 | Language | Extensions |
-|----------|-----------|
+| -------- | ---------- |
 | Rust | `.rs` |
 | Python | `.py` |
 | Go | `.go` |
@@ -155,21 +163,24 @@ impl Stage for MyCustomStage {
 | JSON | `.json` |
 | Shell | `.sh`, `.bash`, `.zsh` |
 
-## Dependencies
-
-- `cortex-core` — Config, errors, language detection
-- `cortex-graph` — Graph database client
-- `cortex-parser` — Tree-sitter parsing
-- `cortex-vector` — Vector store and embeddings
-- `async-trait` — Async trait support for `Stage`
-- `walkdir` — Directory traversal
-- `tracing` — Logging and instrumentation
-
 ## Tests
 
 ```bash
+# Run tests
 cargo test --package cortex-pipeline
+
+# Run with output
 cargo test --package cortex-pipeline -- --nocapture
 ```
 
 Current test count: **33 tests**
+
+## Dependencies
+
+- `cortex-core` - Core types and error handling
+- `cortex-graph` - Graph database client
+- `cortex-parser` - Tree-sitter parsing
+- `cortex-vector` - Vector store and embeddings
+- `async-trait` - Async trait support
+- `tracing` - Logging and instrumentation
+- `walkdir` - Directory traversal
