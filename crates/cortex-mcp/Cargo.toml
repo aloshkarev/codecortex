@@ -28,7 +28,7 @@ cortex-watcher = { path = "../cortex-watcher" }
 dashmap.workspace = true
 futures-util = "0.3"
 rmcp.workspace = true
-rusqlite = { version = "0.38", features = ["bundled"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
