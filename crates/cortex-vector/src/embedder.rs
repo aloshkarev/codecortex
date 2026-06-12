@@ -769,7 +769,7 @@ impl Embedder for OllamaEmbedder {
         for chunk in prepared.chunks(batch_size) {
             match self.request_batch_embeddings(chunk).await {
                 Ok(embeddings) => all.extend(embeddings),
-                Err(EmbeddingError::HttpError(err)) if chunk.len() > 1 => {
+                Err(EmbeddingError::HttpError(_err)) if chunk.len() > 1 => {
                     for text in chunk {
                         all.push(self.embed_single_with_retry(text).await?);
                     }

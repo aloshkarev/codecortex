@@ -63,11 +63,11 @@
 //! ```
 
 mod analyzer;
+pub mod clones;
 pub mod code_smells;
 pub mod context;
 pub mod coupling;
 pub mod cross_project;
-pub mod clones;
 pub mod duplication;
 pub mod navigation;
 pub mod refactoring;
@@ -76,6 +76,7 @@ pub mod smells;
 pub mod symbol_resolve;
 
 pub use analyzer::{AnalyzePathFilters, Analyzer};
+pub use clones::{CloneCandidate, FunctionBody, find_clone_pairs, tokenize_body};
 pub use code_smells::{
     CodeSmell, FunctionMetrics, Severity, SmellCategory, SmellConfig, SmellDetector, SmellType,
 };
@@ -88,7 +89,6 @@ pub use cross_project::{
     ApiSurfaceComparison, CrossProjectAnalyzer, CrossProjectLocation, CrossProjectMatch,
     SharedDependency,
 };
-pub use clones::{find_clone_pairs, tokenize_body, CloneCandidate, FunctionBody};
 pub use duplication::{CodeLocation, DuplicateBlock, DuplicationConfig, DuplicationDetector};
 pub use navigation::{
     BranchStructuralDiff, DefinitionConfidence, DefinitionResult, ImpactEntry, ModifiedSymbolEntry,

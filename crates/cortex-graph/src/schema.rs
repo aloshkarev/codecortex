@@ -940,6 +940,8 @@ mod tests {
         });
         assert!(super::index_row_has_label_property(&row, "CodeNode", "id"));
         let row2 = serde_json::json!({"label": "File", "property": "path"});
-        assert!(!super::index_row_has_label_property(&row2, "CodeNode", "id"));
+        assert!(!super::index_row_has_label_property(
+            &row2, "CodeNode", "id"
+        ));
     }
 }

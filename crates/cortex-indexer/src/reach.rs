@@ -59,7 +59,10 @@ pub fn compute_reach_index(
 
     let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
     for (caller, callee) in &accumulator.calls {
-        reverse.entry(callee.as_str()).or_default().push(caller.as_str());
+        reverse
+            .entry(callee.as_str())
+            .or_default()
+            .push(caller.as_str());
     }
 
     let mut entries = HashMap::new();
@@ -113,10 +116,7 @@ pub fn compute_reach_index(
 }
 
 pub fn apply_reach_properties(props: &mut HashMap<String, String>, entry: &ReachEntry) {
-    props.insert(
-        REACH_D1_COUNT.to_string(),
-        entry.reach_d1_count.to_string(),
-    );
+    props.insert(REACH_D1_COUNT.to_string(), entry.reach_d1_count.to_string());
     props.insert(
         REACH_D3_IDS.to_string(),
         serde_json::to_string(&entry.reach_d3_ids).unwrap_or_else(|_| "[]".to_string()),
@@ -263,7 +263,10 @@ mod tests {
             props.get(REACH_D3_IDS).map(String::as_str),
             Some("[\"func:b\"]")
         );
-        assert_eq!(props.get(REACH_TRUNCATED).map(String::as_str), Some("false"));
+        assert_eq!(
+            props.get(REACH_TRUNCATED).map(String::as_str),
+            Some("false")
+        );
     }
 
     #[test]

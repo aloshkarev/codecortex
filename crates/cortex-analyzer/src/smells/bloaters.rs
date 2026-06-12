@@ -464,7 +464,6 @@ pub fn detect_switch_statements(
     smells
 }
 
-
 #[allow(dead_code)]
 fn extract_function_name(line: &str) -> String {
     shared_extract_function_name(line)

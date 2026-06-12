@@ -453,6 +453,13 @@ impl DuplicationDetector {
             }
         }
 
+        if sources.len() > 15 {
+            let lsh = self.detect_project_wide_lsh(&sources);
+            if !lsh.is_empty() {
+                return lsh;
+            }
+        }
+
         let mut duplicates = self.find_duplicates(&sources);
         if duplicates.is_empty() {
             for (line, locations) in self.find_duplicate_lines(&sources) {
@@ -492,6 +499,48 @@ impl DuplicationDetector {
                 && a.location2.end_line == b.location2.end_line
         });
         duplicates
+    }
+
+    /// MinHash+LSH clone detection for larger repos (delegates to [`crate::clones`]).
+    fn detect_project_wide_lsh(&self, sources: &[(String, String)]) -> Vec<DuplicateBlock> {
+        use crate::clones::{FunctionBody, find_clone_pairs, tokenize_body};
+
+        let min_tokens = self.config.min_tokens.max(50);
+        let mut bodies = Vec::new();
+        for (path, content) in sources {
+            let tokens = tokenize_body(content);
+            if tokens.len() < min_tokens {
+                continue;
+            }
+            bodies.push(FunctionBody {
+                id: format!("{path}:body"),
+                path: path.clone(),
+                tokens,
+            });
+        }
+        let pairs = find_clone_pairs(
+            &bodies,
+            min_tokens,
+            self.config.similarity_threshold.max(0.85),
+        );
+        pairs
+            .into_iter()
+            .map(|pair| DuplicateBlock {
+                location1: CodeLocation {
+                    file_path: pair.path_a,
+                    start_line: 1,
+                    end_line: 1,
+                },
+                location2: CodeLocation {
+                    file_path: pair.path_b,
+                    start_line: 1,
+                    end_line: 1,
+                },
+                similarity: pair.jaccard,
+                line_count: min_tokens,
+                snippet: String::new(),
+            })
+            .collect()
     }
 }
 

@@ -211,7 +211,6 @@ pub fn detect_shotgun_surgery_with_context(
     smells
 }
 
-
 struct ClassInfo {
     line_number: u32,
     methods: Vec<String>,
@@ -222,7 +221,6 @@ struct FunctionInfo {
     line_number: u32,
     calls: Vec<String>,
 }
-
 
 fn extract_classes(lines: &[&str], lang: SourceLanguage) -> HashMap<String, ClassInfo> {
     let mut classes: HashMap<String, ClassInfo> = HashMap::new();

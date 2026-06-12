@@ -1,4 +1,4 @@
-.PHONY: all build install clean test release run-mcp run-falkordb stop-falkordb status help mcp-bootstrap mcp-smoke mcp-semantic-audit mcp-semantic-pr mcp-vector-semantic-pr retrieval-eval retrieval-eval-strict mcp-audit-all cortexignore-git-oracle measure-init measure-session-start measure-session-end measure-report measure-mcp-capture measure-bootstrap fmt lint check nix-build nix-check
+.PHONY: all build install clean test release run-mcp run-falkordb stop-falkordb status help mcp-bootstrap mcp-smoke mcp-semantic-audit mcp-semantic-pr mcp-vector-semantic-pr retrieval-eval retrieval-eval-strict perf-regression mcp-audit-all cortexignore-git-oracle measure-init measure-session-start measure-session-end measure-report measure-mcp-capture measure-bootstrap fmt lint check nix-build nix-check
 
 # Directories
 BIN_DIR := $(HOME)/.local/bin
@@ -123,6 +123,11 @@ retrieval-eval-strict:
 		--repo "$(CORTEX_RETRIEVAL_REPO)" \
 		--token-efficiency \
 		--strict
+
+# Performance regression gate (Criterion scenarios + budget checker)
+perf-regression:
+	@cargo bench -p cortex-benches --bench performance_scenarios -- --sample-size 10
+	@python3 scripts/measurement/check_perf_regression.py --strict
 
 # Full PR audit gate: smoke + graph semantic + vector semantic
 mcp-audit-all:

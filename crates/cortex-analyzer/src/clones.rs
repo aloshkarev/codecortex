@@ -92,10 +92,7 @@ pub fn find_clone_pairs(
         let sig = minhash_signature(&body.tokens);
         signatures.insert(body.id.clone(), (sig.clone(), body.path.clone()));
         for band_hash in lsh_bands(&sig) {
-            buckets
-                .entry(band_hash)
-                .or_default()
-                .push(body.id.clone());
+            buckets.entry(band_hash).or_default().push(body.id.clone());
         }
     }
 

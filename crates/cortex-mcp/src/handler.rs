@@ -8,17 +8,17 @@ use crate::contracts::{
     WARNING_EMBEDDER_TIMEOUT, WARNING_FALLBACK_TO_LEXICAL, WARNING_VECTOR_STORE_UNAVAILABLE,
     error as envelope_error, success as envelope_success, success_json as envelope_success_json,
 };
-use crate::response_buffer::ResponseBuffer;
 use crate::handler_guides::{
     codecortex_prompt_text, codecortex_prompts, codecortex_resource_text, codecortex_resources,
     codecortex_server_instructions, freshness_state_from_label, infer_agent_intent,
     metadata_safe_fallbacks, recommendation_entry, recommendation_warnings,
     recommended_tool_sequence, tool_card_for,
 };
-use crate::lazy_tools::{self, PromotedTools, new_promoted_tools};
 use crate::jobs::{JobRegistry, JobState};
+use crate::lazy_tools::{self, PromotedTools, new_promoted_tools};
 use crate::memory::{Classification, MemoryStore, Observation, Severity as MemorySeverity};
 use crate::metrics::global_metrics;
+use crate::response_buffer::ResponseBuffer;
 use crate::vector_service::{VectorSearchFilters, VectorSearchRequest, VectorService};
 use crate::{FeatureFlags, ToolCard, tool_metadata_for};
 use cortex_analyzer::{
@@ -28,9 +28,7 @@ use cortex_analyzer::{
     normalize_repo_relative_file, normalize_repo_scope,
 };
 use cortex_core::{CortexConfig, GitOperations, IndexFreshness, ProjectStatus, SearchKind};
-use cortex_graph::{
-    BackendKind, BundleStore, GraphClient, get_branch_indexes, mark_branch_vector_fresh,
-};
+use cortex_graph::{BundleStore, GraphClient, get_branch_indexes, mark_branch_vector_fresh};
 use cortex_indexer::Indexer;
 use cortex_parser::SignatureExtractor;
 use cortex_vector::{HybridSearch, LanceStore, SearchType};
@@ -98,7 +96,6 @@ impl Default for McpServeOptions {
         }
     }
 }
-
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IndexPathReq {
@@ -358,6 +355,7 @@ pub struct PatchContextReq {
     pub exclude_paths: Option<Vec<String>>,
     pub budget_tokens: Option<usize>,
     pub mode: Option<String>,
+    pub if_none_match: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -368,6 +366,7 @@ pub struct DeltaContextReq {
     pub include_paths: Option<Vec<String>>,
     pub exclude_paths: Option<Vec<String>>,
     pub budget_tokens: Option<usize>,
+    pub if_none_match: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -375,6 +374,7 @@ pub struct TestContextReq {
     pub symbol: String,
     pub repo_path: Option<String>,
     pub budget_tokens: Option<usize>,
+    pub if_none_match: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -382,6 +382,7 @@ pub struct ApiContractReq {
     pub symbol: String,
     pub repo_path: Option<String>,
     pub include_related: Option<bool>,
+    pub if_none_match: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -797,7 +798,6 @@ pub struct FindPatternsReq {
     pub exclude_globs: Option<Vec<String>>,
 }
 
-
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct AddProjectReq {
     /// Path to the project directory
@@ -896,7 +896,6 @@ struct ObservationRecord {
     #[serde(default)]
     pub embedding: Option<Vec<f32>>,
 }
-
 
 #[derive(Clone)]
 pub struct CortexHandler {
@@ -1074,6 +1073,31 @@ impl CortexHandler {
         )
     }
 
+    fn maybe_not_modified(
+        &self,
+        tool: &str,
+        repo: Option<&str>,
+        if_none_match: Option<&str>,
+        etag: &str,
+        baseline_chars: usize,
+        baseline_sample: &str,
+        builder: EnvelopeBuilder,
+    ) -> Option<CallToolResult> {
+        if if_none_match == Some(etag) {
+            Some(crate::savings::finish_not_modified_response(
+                self.savings_enabled(),
+                builder,
+                etag,
+                tool,
+                repo,
+                baseline_chars,
+                baseline_sample,
+            ))
+        } else {
+            None
+        }
+    }
+
     fn baseline_sample(text: &str) -> String {
         text.chars().take(8192).collect()
     }
@@ -1156,10 +1180,6 @@ impl CortexHandler {
         Ok(store)
     }
 
-    fn ok(text: impl Into<String>) -> CallToolResult {
-        CallToolResult::success(vec![Content::text(text)])
-    }
-
     fn call_tool_result_text(result: &CallToolResult) -> String {
         result
             .content
@@ -1206,7 +1226,10 @@ impl CortexHandler {
         tool_name: &str,
         result: CallToolResult,
     ) -> CallToolResult {
-        if matches!(tool_name, "ctx_stats" | "ctx_grep" | "ctx_slice" | "ctx_peek") {
+        if matches!(
+            tool_name,
+            "ctx_stats" | "ctx_grep" | "ctx_slice" | "ctx_peek"
+        ) {
             return result;
         }
         if result.is_error == Some(true) {
@@ -1413,7 +1436,6 @@ impl CortexHandler {
         }
         Ok(analyzer)
     }
-
 
     #[tool(
         description = "Index a directory or file into the code graph (and optionally vector store). Use when the user asks to index a repo, add code to the graph, or (re)build the index. Run before graph/vector tools can return results. Returns graph and optional vector indexing stats."
@@ -1632,7 +1654,6 @@ impl CortexHandler {
         ))
     }
 
-
     #[tool(
         description = "Watch a directory for file changes and reindex automatically. Use when the user wants to keep the index up to date as they edit. Starts a watcher; combine with list_watched_paths and unwatch_directory to manage."
     )]
@@ -1718,7 +1739,6 @@ impl CortexHandler {
             false,
         ))
     }
-
 
     #[tool(
         description = "Search the code graph by symbol name, pattern, type, or content. Use when the user asks to find a function/class by name, list symbols matching a pattern, or search by code type (e.g. function, class). Returns matching symbols with file paths and signatures."
@@ -2238,10 +2258,7 @@ impl CortexHandler {
             source_branch: req.head_ref.clone().unwrap_or_else(|| "HEAD".to_string()),
             target_branch: req.base_ref.clone().unwrap_or_else(|| "main".to_string()),
             scope: crate::intelligence::ScopeFilters::new(vec![scope_path.clone()], vec![]),
-            budget_tokens: req
-                .budget_tokens
-                .unwrap_or(8000)
-                .clamp(512, 16_000) as u32,
+            budget_tokens: req.budget_tokens.unwrap_or(8000).clamp(512, 16_000) as u32,
             target_symbol: None,
         };
         let mut pack = crate::intelligence::compute_pr_review_pack(&graph, &params).await;
@@ -2499,8 +2516,7 @@ impl CortexHandler {
             .await
             .map_err(|e| McpError::internal_error(e, None))?;
         if self.config.vector.rerank_enabled {
-            let weights =
-                crate::rerank::rerank_weights_from_vector_config(&self.config.vector);
+            let weights = crate::rerank::rerank_weights_from_vector_config(&self.config.vector);
             let candidates: Vec<crate::rerank::RerankCandidate> = results
                 .iter()
                 .enumerate()
@@ -2538,13 +2554,7 @@ impl CortexHandler {
                                 ((ctx.callers_count + ctx.callees_count) as f64 / 16.0).min(1.0)
                             })
                             .unwrap_or(0.0),
-                        token_estimate: r
-                            .result
-                            .content
-                            .as_deref()
-                            .unwrap_or("")
-                            .chars()
-                            .count()
+                        token_estimate: r.result.content.as_deref().unwrap_or("").chars().count()
                             / 4,
                         mtime_secs: crate::rerank::file_mtime_secs(
                             r.result
@@ -3048,19 +3058,20 @@ impl CortexHandler {
                         .to_string(),
                     path: item.get("path").and_then(|v| v.as_str())?.to_string(),
                     name: item.get("name").and_then(|v| v.as_str())?.to_string(),
-                    source: item.get("snippet").and_then(|v| v.as_str()).map(str::to_string),
+                    source: item
+                        .get("snippet")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
                     line_number: item.get("line_number").and_then(|v| v.as_u64()),
                 })
             })
             .collect();
 
         let mut capsule_config = crate::capsule::CapsuleConfig::default();
-        if self.config.vector.rerank_enabled {
-            capsule_config.rerank_enabled = true;
-            capsule_config.use_bm25 = true;
-            capsule_config.rerank_weights =
-                crate::rerank::rerank_weights_from_vector_config(&self.config.vector);
-        }
+        capsule_config.use_bm25 = true;
+        capsule_config.rerank_enabled = self.config.vector.rerank_enabled;
+        capsule_config.rerank_weights =
+            crate::rerank::rerank_weights_from_vector_config(&self.config.vector);
         let mut capsule_builder = ContextCapsuleBuilder::with_config(capsule_config)
             .with_max_items(max_items)
             .with_max_tokens(max_tokens)
@@ -3237,9 +3248,22 @@ impl CortexHandler {
         };
         let baseline_sample = serde_json::to_string(&pack.data).unwrap_or_default();
         let baseline_chars = baseline_sample.chars().count().saturating_mul(5);
+        let etag = crate::rerank::content_etag(&baseline_sample);
+        if let Some(resp) = self.maybe_not_modified(
+            "get_patch_context",
+            Some(repo_path.as_str()),
+            req.if_none_match.as_deref(),
+            &etag,
+            baseline_chars,
+            &Self::baseline_sample(&baseline_sample),
+            EnvelopeBuilder::new(started).audit_tool("get_patch_context"),
+        ) {
+            return Ok(resp);
+        }
         Ok(self.finish_counted_tool(
             EnvelopeBuilder::new(started)
                 .audit_tool("get_patch_context")
+                .etag(&etag)
                 .cost_class("bounded")
                 .freshness(pack.meta.freshness)
                 .token_budget(TokenBudget {
@@ -3295,9 +3319,22 @@ impl CortexHandler {
         .await;
         let baseline_sample = serde_json::to_string(&pack.data).unwrap_or_default();
         let baseline_chars = baseline_sample.chars().count().saturating_mul(5);
+        let etag = crate::rerank::content_etag(&baseline_sample);
+        if let Some(resp) = self.maybe_not_modified(
+            "get_delta_context",
+            Some(repo_path.as_str()),
+            req.if_none_match.as_deref(),
+            &etag,
+            baseline_chars,
+            &Self::baseline_sample(&baseline_sample),
+            EnvelopeBuilder::new(started).audit_tool("get_delta_context"),
+        ) {
+            return Ok(resp);
+        }
         Ok(self.finish_counted_tool(
             EnvelopeBuilder::new(started)
                 .audit_tool("get_delta_context")
+                .etag(&etag)
                 .cost_class("bounded")
                 .freshness(pack.meta.freshness)
                 .token_budget(TokenBudget {
@@ -3371,9 +3408,23 @@ impl CortexHandler {
         } else {
             baseline_sample.chars().count().saturating_mul(3)
         };
+        let payload_text = payload.to_string();
+        let etag = crate::rerank::content_etag(&payload_text);
+        if let Some(resp) = self.maybe_not_modified(
+            "get_test_context",
+            req.repo_path.as_deref(),
+            req.if_none_match.as_deref(),
+            &etag,
+            baseline_chars,
+            &Self::baseline_sample(&baseline_sample),
+            EnvelopeBuilder::new(started).audit_tool("get_test_context"),
+        ) {
+            return Ok(resp);
+        }
         Ok(self.finish_counted_tool(
             EnvelopeBuilder::new(started)
                 .audit_tool("get_test_context")
+                .etag(&etag)
                 .cost_class("bounded")
                 .freshness(FreshnessState::Unknown)
                 .token_budget(TokenBudget {
@@ -3499,9 +3550,23 @@ impl CortexHandler {
             "estimated_tokens": estimated_tokens,
             "notes": ["Contracts are signature-only by default to avoid full-source exposure."]
         });
+        let payload_text = payload.to_string();
+        let etag = crate::rerank::content_etag(&payload_text);
+        if let Some(resp) = self.maybe_not_modified(
+            "get_api_contract",
+            req.repo_path.as_deref(),
+            req.if_none_match.as_deref(),
+            &etag,
+            baseline_chars,
+            &Self::baseline_sample(&baseline_sample),
+            EnvelopeBuilder::new(started).audit_tool("get_api_contract"),
+        ) {
+            return Ok(resp);
+        }
         Ok(self.finish_counted_tool(
             EnvelopeBuilder::new(started)
                 .audit_tool("get_api_contract")
+                .etag(&etag)
                 .cost_class("bounded")
                 .freshness(FreshnessState::Unknown)
                 .token_budget(TokenBudget {
@@ -3814,13 +3879,8 @@ impl CortexHandler {
         let promote = req.promote.unwrap_or(false);
         let all_tools = self.tool_router.list_all();
         let mut promoted = lazy_tools::lock_promoted(&self.promoted_tools);
-        let result = lazy_tools::tools_search(
-            &all_tools,
-            &mut promoted,
-            &req.query,
-            max_results,
-            promote,
-        );
+        let result =
+            lazy_tools::tools_search(&all_tools, &mut promoted, &req.query, max_results, promote);
         Ok(envelope_success(
             serde_json::to_value(&result).unwrap_or_else(|_| json!({})),
             started,
@@ -4197,9 +4257,7 @@ impl CortexHandler {
         } else {
             IndexFreshness::Unknown
         };
-        let vector_freshness = self
-            .resolve_vector_freshness_label(&path, latest)
-            .await;
+        let vector_freshness = self.resolve_vector_freshness_label(&path, latest).await;
         let repair_commands = vec![
             format!("cortex index {} --force", shell_quote(&path)),
             format!("cortex vector-index {}", shell_quote(&path)),
@@ -5283,7 +5341,6 @@ impl CortexHandler {
         ))
     }
 
-
     #[tool(
         description = "List all repositories currently indexed in the graph. Use when the user asks 'what repos are indexed?', 'which projects are in the graph?', or to verify indexing before running graph tools."
     )]
@@ -5359,7 +5416,6 @@ impl CortexHandler {
         ))
     }
 
-
     #[tool(description = "Check status of a background indexing job by ID")]
     async fn check_job_status(
         &self,
@@ -5384,7 +5440,6 @@ impl CortexHandler {
             false,
         ))
     }
-
 
     #[tool(description = "Load a .ccx graph bundle file into memory")]
     async fn load_bundle(
@@ -5430,7 +5485,6 @@ impl CortexHandler {
             false,
         ))
     }
-
 
     #[tool(
         description = "Get rich signature information for a symbol (function, method, struct, enum). Returns parameters, return type, visibility, async status, generics, and related symbols."
@@ -6372,40 +6426,40 @@ impl CortexHandler {
 
         if check_type == "all" || check_type == "graph_connectivity" {
             match self.graph_client().await {
-                    Ok(client) => {
-                        let test_query = "MATCH (n) RETURN count(n) as count LIMIT 1";
-                        let start = Instant::now();
-                        match client.raw_query(test_query).await {
-                            Ok(_results) => {
-                                let latency_ms = start.elapsed().as_millis();
-                                if latency_ms > 100 {
-                                    issues.push(json!({
+                Ok(client) => {
+                    let test_query = "MATCH (n) RETURN count(n) as count LIMIT 1";
+                    let start = Instant::now();
+                    match client.raw_query(test_query).await {
+                        Ok(_results) => {
+                            let latency_ms = start.elapsed().as_millis();
+                            if latency_ms > 100 {
+                                issues.push(json!({
                                     "check": "graph_latency",
                                     "severity": "warning",
                                     "message": format!("Graph query latency high: {}ms (threshold: 100ms)", latency_ms)
                                 }));
-                                    suggested_actions
-                                        .push("Consider checking graph database server resources");
-                                }
-                            }
-                            Err(e) => {
-                                issues.push(json!({
-                                    "check": "graph_query",
-                                    "severity": "critical",
-                                    "message": format!("Graph query failed: {}", e)
-                                }));
-                                suggested_actions.push(self.graph_connect_hint());
+                                suggested_actions
+                                    .push("Consider checking graph database server resources");
                             }
                         }
+                        Err(e) => {
+                            issues.push(json!({
+                                "check": "graph_query",
+                                "severity": "critical",
+                                "message": format!("Graph query failed: {}", e)
+                            }));
+                            suggested_actions.push(self.graph_connect_hint());
+                        }
                     }
-                    Err(e) => {
-                        issues.push(json!({
-                            "check": "graph_connection",
-                            "severity": "critical",
-                            "message": format!("Cannot connect to graph database: {}", e)
-                        }));
-                        suggested_actions.push(self.graph_connect_hint());
-                    }
+                }
+                Err(e) => {
+                    issues.push(json!({
+                        "check": "graph_connection",
+                        "severity": "critical",
+                        "message": format!("Cannot connect to graph database: {}", e)
+                    }));
+                    suggested_actions.push(self.graph_connect_hint());
+                }
             }
         }
 
@@ -6809,7 +6863,6 @@ impl CortexHandler {
         matches
     }
 
-
     #[tool(
         description = "Check FalkorDB/graph connectivity and report server health. Use when the user sees graph-related errors, or asks 'is the database up?'. Returns graph connection status, configured backend, and analyzer capabilities."
     )]
@@ -6831,7 +6884,6 @@ impl CortexHandler {
             !ok,
         ))
     }
-
 
     #[tool(description = "List all registered projects with their Git branch status")]
     async fn list_projects(&self) -> Result<CallToolResult, McpError> {
@@ -7495,8 +7547,7 @@ impl CortexHandler {
         let before = req.before.unwrap_or(0);
         let after = req.after.unwrap_or(0);
         let buffer = self.response_buffer.lock().await;
-        let matches = match buffer.grep(req.response_id.as_deref(), &req.pattern, before, after)
-        {
+        let matches = match buffer.grep(req.response_id.as_deref(), &req.pattern, before, after) {
             Ok(matches) => matches,
             Err(e) => return Ok(envelope_error("NOT_FOUND", e, None, started)),
         };
@@ -7545,9 +7596,7 @@ impl CortexHandler {
         ))
     }
 
-    #[tool(
-        description = "Return the first N lines from a buffered tool response (default 20)."
-    )]
+    #[tool(description = "Return the first N lines from a buffered tool response (default 20).")]
     async fn ctx_peek(
         &self,
         Parameters(req): Parameters<CtxPeekReq>,
@@ -7575,7 +7624,6 @@ impl CortexHandler {
     }
 }
 
-
 #[tool_handler]
 impl ServerHandler for CortexHandler {
     async fn call_tool(
@@ -7584,8 +7632,7 @@ impl ServerHandler for CortexHandler {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let tool_name = request.name.clone();
-        let tcc =
-            rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
+        let tcc = rmcp::handler::server::tool::ToolCallContext::new(self, request, context);
         let result = self.tool_router.call(tcc).await?;
         Ok(self.wrap_result(&tool_name, result).await)
     }
@@ -7701,7 +7748,6 @@ impl ServerHandler for CortexHandler {
         }
     }
 }
-
 
 pub async fn start_stdio(config: CortexConfig) -> anyhow::Result<()> {
     start_stdio_with_flags(config, FeatureFlags::from_env()).await
@@ -8333,10 +8379,7 @@ impl CortexHandler {
         let metadata_label = latest.map(|record| record.vector_freshness.as_str().to_string());
         match self.vector_service().await {
             Ok(service) => {
-                let count = service
-                    .count_documents(Some(repo_path))
-                    .await
-                    .unwrap_or(0);
+                let count = service.count_documents(Some(repo_path)).await.unwrap_or(0);
                 if count == 0 {
                     return "none".to_string();
                 }
@@ -8371,7 +8414,9 @@ impl CortexHandler {
                 escape_cypher(path)
             );
             if let Ok(rows) = client.raw_query(&query).await {
-                if let Some(lang) = rows.first().and_then(|row| row.get("lang").and_then(Value::as_str))
+                if let Some(lang) = rows
+                    .first()
+                    .and_then(|row| row.get("lang").and_then(Value::as_str))
                 {
                     langs.insert(path.clone(), lang.to_ascii_lowercase());
                 }
@@ -8429,8 +8474,7 @@ fn synthesize_test_run_commands(tests: &[Value], langs: &HashMap<String, String>
                     .parent()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| ".".to_string());
-                name
-                    .map(|n| format!("go test {dir} -run {n}"))
+                name.map(|n| format!("go test {dir} -run {n}"))
                     .unwrap_or_else(|| format!("go test {dir}"))
             }
             "typescript" | "javascript" | "ts" | "js" => {
@@ -9046,7 +9090,6 @@ mod tests {
             assert!(is_state, "Name {} should indicate state", name);
         }
     }
-
 
     #[test]
     fn escape_cypher_escapes_quotes() {

@@ -13,11 +13,7 @@ fn cl100k_base() -> Option<&'static CoreBPE> {
 
 /// Active tokenizer label for envelope metadata.
 pub fn tokenizer_name(exact: bool) -> &'static str {
-    if exact {
-        "cl100k_base"
-    } else {
-        "chars/4"
-    }
+    if exact { "cl100k_base" } else { "chars/4" }
 }
 
 /// Count tokens in `text`. Returns `(count, exact)` where `exact` is false when
@@ -101,7 +97,8 @@ mod tests {
     #[test]
     fn estimate_baseline_extrapolates_larger_total() {
         let sample = "abcd".repeat(100);
-        let (baseline, estimated) = estimate_baseline_from_sample(sample.chars().count() * 4, &sample);
+        let (baseline, estimated) =
+            estimate_baseline_from_sample(sample.chars().count() * 4, &sample);
         assert!(estimated);
         assert!(baseline >= count_tokens(&sample).0);
     }

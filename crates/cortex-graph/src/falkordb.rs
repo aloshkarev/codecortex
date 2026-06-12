@@ -1,9 +1,9 @@
 //! FalkorDB graph client (RESP `GRAPH.QUERY` via `redis` crate).
 
+use crate::falkordb_params::GraphParam;
 use crate::falkordb_params::prepare_cypher_query;
 use crate::falkordb_profile;
 use cortex_core::{CortexConfig, CortexError, Result};
-use crate::falkordb_params::GraphParam;
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::sync::Arc;

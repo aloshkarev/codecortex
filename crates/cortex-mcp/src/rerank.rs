@@ -1,7 +1,7 @@
 //! Multi-signal reranking for capsule and hybrid retrieval.
 
-use cortex_core::{RerankWeightsConfig, VectorConfig};
 use crate::tfidf::tokenize;
+use cortex_core::{RerankWeightsConfig, VectorConfig};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -64,8 +64,8 @@ pub struct RerankCandidate {
 
 /// Combined rerank score for a candidate.
 pub fn rerank_score(query: &str, candidate: &RerankCandidate, weights: &RerankWeights) -> f64 {
-    let lexical = rrf_kernel(candidate.lexical_rank, 60.0) * weights.lexical
-        + candidate.lexical_score * 0.1;
+    let lexical =
+        rrf_kernel(candidate.lexical_rank, 60.0) * weights.lexical + candidate.lexical_score * 0.1;
     let vector = candidate
         .vector_rank
         .map(|r| rrf_kernel(r, 60.0) * weights.vector)
@@ -74,8 +74,7 @@ pub fn rerank_score(query: &str, candidate: &RerankCandidate, weights: &RerankWe
     let path_penalty = path_penalty(&candidate.path) * weights.path_penalty;
     let definition = definition_bias(query, &candidate.name) * weights.definition_bias;
     let recency = recency_boost(candidate.mtime_secs) * weights.recency;
-    let token_penalty =
-        (candidate.token_estimate as f64 / 4000.0).min(1.0) * weights.token_cost;
+    let token_penalty = (candidate.token_estimate as f64 / 4000.0).min(1.0) * weights.token_cost;
     lexical + vector + centrality + definition + recency - path_penalty - token_penalty
 }
 

@@ -716,7 +716,6 @@ pub fn generate_observation_id() -> String {
     format!("obs-{}", uuid::Uuid::new_v4())
 }
 
-
 /// Developer rules file patterns to auto-detect
 pub const DEV_RULES_FILES: &[&str] = &[
     ".cursorrules",
@@ -807,7 +806,6 @@ fn ingest_file(
     Ok(obs.observation_id)
 }
 
-
 /// Calculate decayed importance for an observation
 pub fn calculate_decayed_importance(observation: &Observation, now_ms: i64) -> f64 {
     let age_days = (now_ms - observation.created_at) as f64 / (24.0 * 60.0 * 60.0 * 1000.0);
@@ -845,7 +843,6 @@ pub fn find_low_importance_observations(
 
     Ok(low_importance)
 }
-
 
 /// Link two observations together
 pub fn link_observations(

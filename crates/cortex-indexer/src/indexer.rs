@@ -16,8 +16,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::{Duration, Instant};
 use tracing::{Level, debug, info, instrument, span, warn};
 
@@ -82,17 +82,13 @@ pub fn hash_cache_held_in_process(path: &Path) -> bool {
     let Ok(registry) = HASH_CACHE_REGISTRY.lock() else {
         return false;
     };
-    registry
-        .get(&canon)
-        .and_then(Weak::upgrade)
-        .is_some()
+    registry.get(&canon).and_then(Weak::upgrade).is_some()
 }
 
 fn canonical_hash_cache_path(path: &Path) -> Result<PathBuf> {
     if path.exists() {
-        path.canonicalize().map_err(|e| {
-            CortexError::Io(format!("canonicalize hash cache path {path:?}: {e}"))
-        })
+        path.canonicalize()
+            .map_err(|e| CortexError::Io(format!("canonicalize hash cache path {path:?}: {e}")))
     } else if let Some(parent) = path.parent() {
         if parent.as_os_str().is_empty() {
             return Ok(path.to_path_buf());
@@ -101,10 +97,7 @@ fn canonical_hash_cache_path(path: &Path) -> Result<PathBuf> {
             let parent_canon = parent.canonicalize().map_err(|e| {
                 CortexError::Io(format!("canonicalize hash cache parent {parent:?}: {e}"))
             })?;
-            let file_name = path
-                .file_name()
-                .map(PathBuf::from)
-                .unwrap_or_default();
+            let file_name = path.file_name().map(PathBuf::from).unwrap_or_default();
             Ok(parent_canon.join(file_name))
         } else {
             std::fs::create_dir_all(parent).map_err(|e| {
@@ -135,15 +128,14 @@ fn open_hash_cache_with_retry(path: &Path) -> std::result::Result<sled::Db, sled
 fn acquire_shared_hash_cache(path: PathBuf) -> Result<Arc<sled::Db>> {
     let canon = canonical_hash_cache_path(&path)?;
     if let Some(parent) = canon.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            CortexError::Io(format!("create hash cache directory {parent:?}: {e}"))
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| CortexError::Io(format!("create hash cache directory {parent:?}: {e}")))?;
     }
 
     {
-        let registry = HASH_CACHE_REGISTRY.lock().map_err(|e| {
-            CortexError::Io(format!("hash cache registry poisoned: {e}"))
-        })?;
+        let registry = HASH_CACHE_REGISTRY
+            .lock()
+            .map_err(|e| CortexError::Io(format!("hash cache registry poisoned: {e}")))?;
         if let Some(existing) = registry.get(&canon).and_then(Weak::upgrade) {
             return Ok(existing);
         }
@@ -153,9 +145,9 @@ fn acquire_shared_hash_cache(path: PathBuf) -> Result<Arc<sled::Db>> {
         .map_err(|e| hash_cache_open_error(&canon, HASH_CACHE_OPEN_ATTEMPTS, e))?;
     let arc = Arc::new(db);
 
-    let mut registry = HASH_CACHE_REGISTRY.lock().map_err(|e| {
-        CortexError::Io(format!("hash cache registry poisoned: {e}"))
-    })?;
+    let mut registry = HASH_CACHE_REGISTRY
+        .lock()
+        .map_err(|e| CortexError::Io(format!("hash cache registry poisoned: {e}")))?;
     registry.retain(|_, weak| weak.strong_count() > 0);
     if let Some(existing) = registry.get(&canon).and_then(Weak::upgrade) {
         return Ok(existing);
@@ -1279,7 +1271,16 @@ impl Indexer {
 
         if let Some(acc) = clone_acc.as_ref() {
             let pairs = crate::clones::compute_clone_pairs(acc);
-            crate::clones::write_clone_edges_to_graph(&self.client, &pairs, write_chunk).await?;
+            let replace_clones =
+                force || change_plan.mode != crate::incremental::IndexRunMode::Incremental;
+            crate::clones::write_clone_edges_to_graph(
+                &self.client,
+                &repository_path,
+                &pairs,
+                write_chunk,
+                replace_clones,
+            )
+            .await?;
             info!(
                 target: "cortex_indexer::metrics",
                 phase = "clone_index",
@@ -1549,7 +1550,13 @@ impl Indexer {
         branch: &Option<String>,
         commit_hash: &Option<String>,
     ) -> Result<()> {
-        write_cache_entries(self.cache.as_ref(), files, repository_path, branch, commit_hash)
+        write_cache_entries(
+            self.cache.as_ref(),
+            files,
+            repository_path,
+            branch,
+            commit_hash,
+        )
     }
 
     /// Get current indexing progress

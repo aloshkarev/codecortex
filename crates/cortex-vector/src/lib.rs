@@ -58,11 +58,11 @@ pub mod static_embedder;
 pub use embedder::{
     Embedder, EmbeddingError, EmbeddingProvider, HashEmbedder, OllamaEmbedder, OpenAIEmbedder,
 };
-pub use static_embedder::{FallbackEmbedder, StaticEmbedder};
 pub use hybrid::{HybridResult, HybridSearch, SearchType};
 pub use json_store::JsonStore;
 pub use lancedb_store::LanceStore;
 pub use schema::{VectorDocument, VectorMetadata};
+pub use static_embedder::{FallbackEmbedder, StaticEmbedder};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

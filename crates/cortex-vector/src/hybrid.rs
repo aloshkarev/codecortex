@@ -80,6 +80,7 @@ pub struct GraphContext {
 pub struct HybridSearch {
     vector_store: Arc<dyn VectorStore>,
     embedder: Arc<dyn Embedder>,
+    use_rrf_fusion: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -92,11 +93,21 @@ enum QueryIntent {
 }
 
 impl HybridSearch {
-    /// Create a new hybrid search instance
+    /// Create a new hybrid search instance (RRF fusion enabled by default).
     pub fn new(vector_store: Arc<dyn VectorStore>, embedder: Arc<dyn Embedder>) -> Self {
+        Self::with_fusion(vector_store, embedder, true)
+    }
+
+    /// Create hybrid search with explicit fusion mode (`true` = RRF, `false` = legacy weighted sum).
+    pub fn with_fusion(
+        vector_store: Arc<dyn VectorStore>,
+        embedder: Arc<dyn Embedder>,
+        use_rrf_fusion: bool,
+    ) -> Self {
         Self {
             vector_store,
             embedder,
+            use_rrf_fusion,
         }
     }
 
@@ -199,11 +210,8 @@ impl HybridSearch {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        if hybrid_fusion_rrf_enabled() {
-            let vector_ranked: Vec<String> = reranked
-                .iter()
-                .map(|r| r.result.id.clone())
-                .collect();
+        if self.use_rrf_fusion {
+            let vector_ranked: Vec<String> = reranked.iter().map(|r| r.result.id.clone()).collect();
             let mut lexical_ranked: Vec<(String, f32)> = reranked
                 .iter()
                 .map(|r| {
@@ -211,10 +219,12 @@ impl HybridSearch {
                     (r.result.id.clone(), hint)
                 })
                 .collect();
-            lexical_ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            lexical_ranked
+                .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             let lexical_ids: Vec<String> = lexical_ranked.into_iter().map(|(id, _)| id).collect();
             let fused = rrf_fuse_ids(&[vector_ranked, lexical_ids], 60.0);
-            let score_map: HashMap<String, f32> = fused.into_iter().map(|(id, s)| (id, s as f32)).collect();
+            let score_map: HashMap<String, f32> =
+                fused.into_iter().map(|(id, s)| (id, s as f32)).collect();
             for item in &mut reranked {
                 if let Some(s) = score_map.get(&item.result.id) {
                     item.combined_score = *s;
@@ -506,13 +516,6 @@ fn estimated_graph_signal(result: &HybridResult) -> f32 {
         .as_ref()
         .map(|ctx| ((ctx.callers_count + ctx.callees_count) as f32 / 16.0).min(1.0))
         .unwrap_or(0.0)
-}
-
-fn hybrid_fusion_rrf_enabled() -> bool {
-    std::env::var("CORTEX_HYBRID_FUSION")
-        .unwrap_or_else(|_| "rrf".to_string())
-        .to_ascii_lowercase()
-        != "legacy"
 }
 
 fn rrf_fuse_ids(rank_lists: &[Vec<String>], k: f64) -> Vec<(String, f64)> {

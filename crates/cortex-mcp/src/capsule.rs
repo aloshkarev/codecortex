@@ -493,12 +493,18 @@ impl ContextCapsuleBuilder {
 
         if self.config.rerank_enabled {
             let weights = &self.config.rerank_weights;
+            let lexical_ranks = crate::rerank::rank_map_from_scores(
+                &scored_items
+                    .iter()
+                    .map(|item| (item.id.clone(), item.score))
+                    .collect::<Vec<_>>(),
+            );
             for (rank, item) in scored_items.iter_mut().enumerate() {
                 let candidate = RerankCandidate {
                     id: item.id.clone(),
                     path: item.path.clone(),
                     name: item.name.clone(),
-                    lexical_rank: rank,
+                    lexical_rank: lexical_ranks.get(&item.id).copied().unwrap_or(rank),
                     vector_rank: None,
                     lexical_score: item.score,
                     vector_score: 0.0,
@@ -747,8 +753,15 @@ impl ContextCapsuleBuilder {
 
         let overlap = self.query_context.ngrams.intersection(&name_ngrams).count();
         let total = self.query_context.ngrams.len().max(1);
+        let term_boost = self
+            .query_context
+            .terms
+            .iter()
+            .filter(|t| name.contains(t.as_str()))
+            .count() as f64
+            * 0.15;
 
-        (overlap as f64 / total as f64).min(1.0)
+        ((overlap as f64 / total as f64) + term_boost).min(1.0)
     }
 
     /// Compute proximity score based on path relevance

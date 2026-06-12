@@ -517,7 +517,11 @@ mod tests {
     #[test]
     fn auto_detect_cargo_workspace() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"rdiameter\"\n").unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"rdiameter\"\n",
+        )
+        .unwrap();
         let plan = A2aValidateConfig::default()
             .resolve(dir.path())
             .expect("plan");
@@ -529,8 +533,11 @@ mod tests {
     #[test]
     fn auto_detect_cmake_prefers_build_sh() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.16)\n",
+        )
+        .unwrap();
         fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 0\n").unwrap();
         let plan = A2aValidateConfig::default()
             .resolve(dir.path())
@@ -542,8 +549,11 @@ mod tests {
     #[test]
     fn auto_detect_cmake_falls_back_to_cmake_build() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.16)\n",
+        )
+        .unwrap();
         let plan = A2aValidateConfig::default()
             .resolve(dir.path())
             .expect("plan");
@@ -554,10 +564,17 @@ mod tests {
     #[test]
     fn cmake_takes_precedence_over_cargo_at_same_root() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.16)\n",
+        )
+        .unwrap();
         fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 0\n").unwrap();
-        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"twag\"\n").unwrap();
+        fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"twag\"\n",
+        )
+        .unwrap();
         let plan = A2aValidateConfig::default()
             .resolve(dir.path())
             .expect("plan");
@@ -595,8 +612,11 @@ mod tests {
     #[test]
     fn twag_monorepo_root_auto_detects_build_sh() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
-            .unwrap();
+        fs::write(
+            dir.path().join("CMakeLists.txt"),
+            "cmake_minimum_required(VERSION 3.16)\n",
+        )
+        .unwrap();
         fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 0\n").unwrap();
         let rdiameter = dir.path().join("third_party/tngf_cp/rdiameter");
         fs::create_dir_all(&rdiameter).unwrap();

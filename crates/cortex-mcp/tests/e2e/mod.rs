@@ -11,7 +11,6 @@ use cortex_mcp::{
     ImpactGraphBuilder, LogicFlowSearcher, MemoryStore, Observation, RawRelation,
 };
 
-
 /// Minimum Recall@20 for context capsule
 const MIN_RECALL_20: f64 = 0.85;
 
@@ -25,7 +24,6 @@ const MIN_PATH_COMPLETENESS: f64 = 0.8;
 /// Minimum staleness accuracy
 #[allow(dead_code)]
 const MIN_STALENESS_ACCURACY: f64 = 0.9;
-
 
 mod capsule_quality {
     use super::*;
@@ -203,7 +201,6 @@ mod capsule_quality {
     }
 }
 
-
 mod impact_graph {
     use super::*;
     use cortex_mcp::Provenance;
@@ -302,7 +299,6 @@ mod impact_graph {
     }
 }
 
-
 mod logic_flow {
     use super::*;
     use cortex_mcp::RawEdge;
@@ -365,9 +361,7 @@ mod logic_flow {
     fn logic_flow_returns_blockers_when_no_path() {
         let searcher = LogicFlowSearcher::new().with_partial(true);
 
-        let edges = vec![
-            make_edge("func:a", "start", "func:b", "middle"),
-        ];
+        let edges = vec![make_edge("func:a", "start", "func:b", "middle")];
 
         let result = searcher.search("start", "end", edges);
 
@@ -376,7 +370,6 @@ mod logic_flow {
         assert!(result.blockers.is_some(), "Should return blockers");
     }
 }
-
 
 mod memory_store {
     use super::*;
@@ -461,7 +454,6 @@ mod memory_store {
         assert_eq!(results.len(), 5, "Should find all matching observations");
     }
 }
-
 
 mod performance_slos {
     use super::*;
@@ -554,7 +546,6 @@ mod performance_slos {
     }
 }
 
-
 mod centrality {
     use super::*;
     use cortex_mcp::Edge;
@@ -591,7 +582,6 @@ mod centrality {
         assert_eq!(graph.edge_count(), 3);
     }
 }
-
 
 fn current_time_ms() -> i64 {
     std::time::SystemTime::now()

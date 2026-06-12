@@ -1,7 +1,8 @@
 //! `cortex doctor` — FalkorDB, vector tier, and embedder health checks.
 
 use cortex_core::{
-    CortexConfig, IndexingProfile, default_write_pool_size, indexing_settings, validate_falkordb_uri,
+    CortexConfig, IndexingProfile, default_write_pool_size, indexing_settings,
+    validate_falkordb_uri,
 };
 use cortex_graph::GraphClient;
 use cortex_mcp::tool_names;
@@ -146,8 +147,8 @@ pub async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
     println!("   URI: {}", config.falkordb_uri);
 
     let default_port = cortex_graph::detect_backend_from_config(config).default_port();
-    let (db_host, db_port) =
-        parse_falkordb_uri(&config.falkordb_uri, default_port).unwrap_or(("127.0.0.1", default_port));
+    let (db_host, db_port) = parse_falkordb_uri(&config.falkordb_uri, default_port)
+        .unwrap_or(("127.0.0.1", default_port));
 
     if !check_port_reachable(db_host, db_port) {
         println!(
@@ -332,12 +333,13 @@ pub async fn run_doctor(config: &CortexConfig) -> anyhow::Result<()> {
     println!("   Embedding dimension: {}", config.vector.embedding_dim);
     println!(
         "   Hybrid fusion: {} | Rerank: {} | Embedder fallback: {}",
-        config.vector.hybrid_fusion,
-        config.vector.rerank_enabled,
-        config.vector.embedding_fallback
+        config.vector.hybrid_fusion, config.vector.rerank_enabled, config.vector.embedding_fallback
     );
     if config.clone_detection_enabled {
-        println!("   {} Clone detection: enabled (SIMILAR_TO edges at index time)", "✓".green());
+        println!(
+            "   {} Clone detection: enabled (SIMILAR_TO edges at index time)",
+            "✓".green()
+        );
     } else {
         println!(
             "   {} Clone detection: disabled (set clone_detection_enabled = true)",

@@ -1,6 +1,6 @@
 //! Index-time MinHash+LSH clone detection and `SIMILAR_TO` edge materialization.
 
-use cortex_analyzer::clones::{find_clone_pairs, tokenize_body, CloneCandidate, FunctionBody};
+use cortex_analyzer::clones::{CloneCandidate, FunctionBody, find_clone_pairs, tokenize_body};
 use cortex_core::{CodeEdge, EdgeKind, EntityKind, IndexedFile, Result};
 use cortex_graph::GraphClient;
 use std::collections::HashMap;
@@ -17,10 +17,7 @@ pub struct CloneAccumulator {
 impl CloneAccumulator {
     pub fn push_file(&mut self, file: &IndexedFile) {
         for node in &file.nodes {
-            if !matches!(
-                node.kind,
-                EntityKind::Function | EntityKind::Method
-            ) {
+            if !matches!(node.kind, EntityKind::Function | EntityKind::Method) {
                 continue;
             }
             let Some(source) = node.source.as_deref() else {
@@ -45,21 +42,33 @@ impl CloneAccumulator {
 
 /// Find clone pairs from accumulated bodies.
 pub fn compute_clone_pairs(accumulator: &CloneAccumulator) -> Vec<CloneCandidate> {
-    find_clone_pairs(
-        accumulator.bodies(),
-        MIN_TOKENS,
-        JACCARD_THRESHOLD,
-    )
+    find_clone_pairs(accumulator.bodies(), MIN_TOKENS, JACCARD_THRESHOLD)
+}
+
+/// Remove existing `SIMILAR_TO` edges for a repository before rewriting clone index.
+pub async fn clear_similar_to_edges(client: &GraphClient, repository_path: &str) -> Result<()> {
+    let query = format!(
+        "MATCH (a:CodeNode {{repository_path: '{}'}})-[r:SIMILAR_TO]->() DELETE r",
+        repository_path.replace('\'', "\\'")
+    );
+    client.raw_query(&query).await?;
+    Ok(())
 }
 
 /// Persist `SIMILAR_TO` edges for clone pairs (undirected: one edge per pair).
 pub async fn write_clone_edges_to_graph(
     client: &GraphClient,
+    repository_path: &str,
     pairs: &[CloneCandidate],
     chunk_size: usize,
+    replace_existing: bool,
 ) -> Result<()> {
     if pairs.is_empty() {
         return Ok(());
+    }
+
+    if replace_existing {
+        clear_similar_to_edges(client, repository_path).await?;
     }
 
     let mut edges = Vec::with_capacity(pairs.len());
@@ -100,9 +109,7 @@ mod tests {
                 path: Some("a.rs".into()),
                 line_number: Some(1),
                 lang: Some(Language::Rust),
-                source: Some(
-                    "fn foo() { let x = 1; let y = 2; let z = x + y; return z; }".into(),
-                ),
+                source: Some("fn foo() { let x = 1; let y = 2; let z = x + y; return z; }".into()),
                 docstring: None,
                 properties: HashMap::new(),
             }],

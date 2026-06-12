@@ -455,7 +455,11 @@ impl EnvelopeBuilder {
         });
         let payload_str = payload.to_string();
         let audit_name = self.audit_tool_name.clone();
-        self.emit_audit_and_telemetry(audit_name.as_deref(), "not_modified", Some(payload_str.len()));
+        self.emit_audit_and_telemetry(
+            audit_name.as_deref(),
+            "not_modified",
+            Some(payload_str.len()),
+        );
         CallToolResult::success(vec![Content::text(payload_str)])
     }
 
@@ -544,7 +548,6 @@ impl EnvelopeBuilder {
     }
 }
 
-
 /// Legacy function: Check if a feature flag is enabled via environment variable.
 /// Consider using `FeatureFlags` from `flags.rs` instead.
 pub fn feature_flag_enabled(flag_name: &str, default_value: bool) -> bool {
@@ -627,7 +630,6 @@ pub fn error(
     });
     CallToolResult::success(vec![Content::text(payload.to_string())])
 }
-
 
 /// Generate a unique request ID
 pub fn generate_request_id() -> String {

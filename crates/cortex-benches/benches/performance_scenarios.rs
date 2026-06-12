@@ -8,7 +8,7 @@ use cortex_mcp::{
     CacheHierarchy, CapsuleConfig, ContextCapsuleBuilder, Document, GraphSearchResult,
     ImpactGraphBuilder, L1Cache, Provenance, RawRelation, TfIdfScorer,
 };
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 fn make_capsule_result(id: &str, name: &str, path: &str) -> GraphSearchResult {
     GraphSearchResult {
@@ -85,9 +85,7 @@ fn bench_scenario_tfidf_score(c: &mut Criterion) {
         .map(|i| {
             Document::new(
                 &format!("doc:{i}"),
-                &format!(
-                    "function authenticate user token refresh handler service module {i}"
-                ),
+                &format!("function authenticate user token refresh handler service module {i}"),
             )
         })
         .collect();

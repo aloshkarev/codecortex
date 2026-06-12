@@ -67,6 +67,8 @@ pub fn live_tool_names(promoted: &HashSet<String>) -> HashSet<String> {
 }
 
 /// Deferred tools (exported but not currently live).
+/// Names of tools not yet promoted in the current session (lazy-load routing).
+#[allow(dead_code)]
 pub fn deferred_tool_names(promoted: &HashSet<String>) -> Vec<String> {
     let exported: HashSet<&str> = tool_names().iter().copied().collect();
     let live = live_tool_names(promoted);
@@ -275,7 +277,7 @@ mod tests {
             format!("Tool {name}"),
             std::sync::Arc::new(schema),
         )
-            .annotate(ToolAnnotations::default())
+        .annotate(ToolAnnotations::default())
     }
 
     #[test]

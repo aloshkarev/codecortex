@@ -557,7 +557,6 @@ pub fn detect_speculative_generality(
     smells
 }
 
-
 struct FunctionInfo {
     line_number: u32,
     tokens: Vec<String>,
@@ -585,7 +584,6 @@ struct GenericTypeInfo {
     line_number: u32,
     unused_params: usize,
 }
-
 
 fn is_comment_line(trimmed: &str, lang: SourceLanguage) -> bool {
     shared_is_comment_line(trimmed, lang)

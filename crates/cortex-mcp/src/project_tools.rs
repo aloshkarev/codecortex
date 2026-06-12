@@ -2,4 +2,3 @@
 //!
 //! Project management types are defined in handler.rs alongside the tool implementations.
 //! This module is kept for future expansion of project-related utilities.
-

@@ -195,13 +195,15 @@ impl Drop for McpSession {
     }
 }
 
-fn bounded_payload(session: &mut McpSession, repo: &Path, file: &Path, symbol: Option<&str>) -> String {
+fn bounded_payload(
+    session: &mut McpSession,
+    repo: &Path,
+    file: &Path,
+    symbol: Option<&str>,
+) -> String {
     let repo_s = repo.display().to_string();
     let path_s = file.display().to_string();
-    let skeleton = session.call(
-        "get_skeleton",
-        json!({"path": path_s, "repo_path": repo_s}),
-    );
+    let skeleton = session.call("get_skeleton", json!({"path": path_s, "repo_path": repo_s}));
     let mut parts = vec![skeleton.to_string()];
     if let Some(sym) = symbol {
         let contract = session.call(
@@ -226,7 +228,10 @@ fn main() {
     }
 
     let mut session = McpSession::start();
-    let _ = session.call("set_current_project", json!({"path": repo.display().to_string()}));
+    let _ = session.call(
+        "set_current_project",
+        json!({"path": repo.display().to_string()}),
+    );
 
     let mut files = Vec::new();
     let mut total_full = 0usize;
@@ -251,7 +256,8 @@ fn main() {
         total_full += full_tokens;
         total_bounded += bounded_tokens;
         files.push(FileSample {
-            path: file.strip_prefix(&repo)
+            path: file
+                .strip_prefix(&repo)
                 .unwrap_or(&file)
                 .display()
                 .to_string(),

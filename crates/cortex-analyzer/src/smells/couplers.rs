@@ -364,7 +364,6 @@ pub fn detect_middle_man(source: &str, file_path: &str, config: &SmellConfig) ->
     smells
 }
 
-
 struct MethodInfo {
     line_number: u32,
     own_class_accesses: usize,
@@ -391,7 +390,6 @@ struct MessageChain {
     length: usize,
     preview: String,
 }
-
 
 fn extract_methods_with_access_patterns(
     lines: &[&str],

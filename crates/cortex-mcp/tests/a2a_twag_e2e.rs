@@ -5,9 +5,7 @@
 use cortex_a2a::task_store::SledTaskStore;
 use cortex_a2a::wire::TaskStateWire;
 use cortex_a2a::{A2aHub, SpawnSessionRequest};
-use cortex_core::{
-    A2aConfig, A2aTaskStoreKind, CortexConfig, McpToolsConfig,
-};
+use cortex_core::{A2aConfig, A2aTaskStoreKind, CortexConfig, McpToolsConfig};
 use cortex_graph::GraphClient;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -40,15 +38,12 @@ async fn build_twag_hub(task_store_path: PathBuf) -> A2aHub {
     };
 
     let blackboard = if config.a2a.blackboard.enabled {
-        GraphClient::connect(&config)
-            .await
-            .ok()
-            .map(|client| {
-                Arc::new(cortex_graph::BlackboardWriter::new(
-                    client,
-                    config.a2a.blackboard_write_batch_size(64),
-                ))
-            })
+        GraphClient::connect(&config).await.ok().map(|client| {
+            Arc::new(cortex_graph::BlackboardWriter::new(
+                client,
+                config.a2a.blackboard_write_batch_size(64),
+            ))
+        })
     } else {
         None
     };
@@ -133,7 +128,10 @@ async fn twag_consensus_review_completes_with_sled_store() {
         artifact.get("status").and_then(Value::as_str),
         Some("completed")
     );
-    assert!(artifact.get("patch").is_some(), "artifact should include patch");
+    assert!(
+        artifact.get("patch").is_some(),
+        "artifact should include patch"
+    );
 
     drop(hub);
     let sled = SledTaskStore::open(&store_path).expect("reopen sled store");

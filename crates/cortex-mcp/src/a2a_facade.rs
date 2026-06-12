@@ -1,5 +1,6 @@
 //! Thin re-exports over the shared [`crate::intelligence`] module (legacy host helpers).
 
+#[allow(unused_imports)]
 pub use crate::intelligence::{
     ImpactGraphParams, PatchContextParams, ScopeFilters, compute_api_contract,
     compute_delta_context, compute_impact_graph, compute_patch_context, compute_test_context,

@@ -69,13 +69,15 @@ pub fn fixtures_dir() -> PathBuf {
 
 pub fn load_manifest() -> Value {
     let path = fixtures_dir().join("manifest.json");
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let raw =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse manifest: {e}"))
 }
 
 pub fn load_case(id: &str) -> TwagGoldenCase {
     let path = fixtures_dir().join(format!("{id}.json"));
-    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let raw =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     serde_json::from_str(&raw).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
 }
 
@@ -354,7 +356,12 @@ fn assert_definition_case(case: &TwagGoldenCase, body: &Value) {
                 .and_then(Value::as_str)
                 .is_some_and(|p| p.ends_with(&expect.file_path_suffix))
         })
-        .unwrap_or_else(|| panic!("{}: no definition with suffix {}", case.id, expect.file_path_suffix));
+        .unwrap_or_else(|| {
+            panic!(
+                "{}: no definition with suffix {}",
+                case.id, expect.file_path_suffix
+            )
+        });
     assert_eq!(
         hit.get("name").and_then(Value::as_str),
         Some(expect.name.as_str()),
@@ -398,8 +405,7 @@ pub fn filter_relationship_rows(rows: &[Value], callee_suffix: Option<&str>) -> 
                     .get("callee_name")
                     .and_then(Value::as_str)
                     .is_some_and(|_| {
-                        node_path(row.get("caller"))
-                            .is_some_and(|p| p.ends_with(suffix))
+                        node_path(row.get("caller")).is_some_and(|p| p.ends_with(suffix))
                     })
         })
         .cloned()

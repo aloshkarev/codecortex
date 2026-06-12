@@ -8,8 +8,7 @@ use crate::proto::lf::a2a::v1::{
 use crate::session::{A2aTaskRecord, TaskState as StoreState};
 use crate::wire::{
     A2aMessage, A2aPart, ArtifactWire, SendMessageConfigurationWire, SendMessageRequestWire,
-    SendMessageResponseWire, StreamResponseWire, TaskArtifactUpdateWire, TaskStateWire,
-    TaskStatusWire, TaskWire,
+    SendMessageResponseWire, StreamResponseWire, TaskStateWire, TaskStatusWire, TaskWire,
 };
 use anyhow::{Result, anyhow};
 use prost_types::Value as ProstValue;

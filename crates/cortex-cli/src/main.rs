@@ -679,7 +679,10 @@ enum BundleCommand {
 #[derive(Debug, Subcommand)]
 enum ConfigCommand {
     Show,
-    Set { key: String, value: String },
+    Set {
+        key: String,
+        value: String,
+    },
     /// Rewrite legacy Memgraph/Grafeo keys to FalkorDB names in ~/.cortex/config.toml
     Migrate,
     Reset,
@@ -1078,7 +1081,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::VectorIndex { path, repo, force } => {
             run_vector_index(&config, &path, repo.as_deref(), force, format).await?
         }
-        Commands::Savings { json, verbose, reset } => run_savings(json, verbose, reset, format)?,
+        Commands::Savings {
+            json,
+            verbose,
+            reset,
+        } => run_savings(json, verbose, reset, format)?,
         Commands::Workspace { command } => run_workspace_command(*command, format)?,
     }
     Ok(())
@@ -3427,10 +3434,7 @@ fn run_config(
         ConfigCommand::Migrate => {
             let path = CortexConfig::config_path();
             cortex_core::migrate_config_file(&path)?;
-            print_formatted(
-                format,
-                &serde_json::json!({"status":"ok", "path": path}),
-            )?;
+            print_formatted(format, &serde_json::json!({"status":"ok", "path": path}))?;
         }
         ConfigCommand::Reset => {
             *config = CortexConfig::default();

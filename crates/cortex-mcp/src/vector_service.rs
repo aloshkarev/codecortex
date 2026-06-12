@@ -15,6 +15,7 @@ use std::sync::Arc;
 pub struct VectorService {
     store: Arc<LanceStore>,
     embedder: Arc<dyn Embedder>,
+    use_rrf_fusion: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -45,22 +46,11 @@ impl VectorService {
     ///
     /// Respects `[llm] provider`: when set to `"ollama"`, uses Ollama even if `OPENAI_API_KEY`
     /// is set in the environment (previously the env key always forced OpenAI).
-    pub fn apply_vector_runtime_config(config: &CortexConfig) {
-        // SAFETY: single-threaded MCP startup; env is process-local config for hybrid search.
-        unsafe {
-            std::env::set_var("CORTEX_HYBRID_FUSION", &config.vector.hybrid_fusion);
-            let rerank = if config.vector.rerank_enabled {
-                "1"
-            } else {
-                "0"
-            };
-            std::env::set_var("CORTEX_RERANK_ENABLED", rerank);
-        }
+    fn use_rrf_fusion(config: &CortexConfig) -> bool {
+        config.vector.hybrid_fusion.to_ascii_lowercase() != "legacy"
     }
 
     pub fn build_embedder(config: &CortexConfig) -> Result<Arc<dyn Embedder>, String> {
-        Self::apply_vector_runtime_config(config);
-
         if std::env::var("CORTEX_TEST_EMBEDDER").ok().as_deref() == Some("1") {
             return Ok(Arc::new(HashEmbedder::new()));
         }
@@ -134,7 +124,19 @@ impl VectorService {
                 .map_err(|e| format!("open vector store failed: {e}"))?,
         );
         let embedder = Self::build_embedder(config)?;
-        Ok(Self { store, embedder })
+        Ok(Self {
+            store,
+            embedder,
+            use_rrf_fusion: Self::use_rrf_fusion(config),
+        })
+    }
+
+    fn hybrid_search(&self) -> HybridSearch {
+        HybridSearch::with_fusion(
+            self.store.clone(),
+            self.embedder.clone(),
+            self.use_rrf_fusion,
+        )
     }
 
     /// Same as [`Self::from_config`] using `CortexConfig::load()` (or defaults if load fails).
@@ -184,7 +186,7 @@ impl VectorService {
         &self,
         request: VectorSearchRequest<'_>,
     ) -> Result<Vec<HybridResult>, String> {
-        let hybrid = HybridSearch::new(self.store.clone(), self.embedder.clone());
+        let hybrid = self.hybrid_search();
         let filter = build_metadata_filter(request.filters);
 
         if filter.is_empty() {
@@ -236,7 +238,7 @@ impl VectorService {
                 skipped_files: 1,
             });
         };
-        let hybrid = HybridSearch::new(self.store.clone(), self.embedder.clone());
+        let hybrid = self.hybrid_search();
         let indexed = hybrid
             .index_documents(vec![document])
             .await
@@ -267,7 +269,7 @@ impl VectorService {
         let mut indexed_documents = 0usize;
         const INDEX_CHUNK: usize = 8;
 
-        let hybrid = HybridSearch::new(self.store.clone(), self.embedder.clone());
+        let hybrid = self.hybrid_search();
 
         for file in files {
             if let Some(paths) = include_paths {
@@ -438,10 +440,6 @@ pub fn collect_indexable_code_files_with_stats(
     walker.collect_files_with_stats(&scan_root, None, |p| Language::from_path(p).is_some())
 }
 
-fn is_code_file(path: &Path) -> bool {
-    Language::from_path(path).is_some()
-}
-
 fn language_from_path(path: &Path) -> &'static str {
     match path
         .extension()
@@ -483,8 +481,8 @@ pub fn vector_store_path(config: &CortexConfig) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{VectorService, collect_indexable_code_files, is_code_file, language_from_path};
-    use cortex_core::CortexConfig;
+    use super::{VectorService, collect_indexable_code_files, language_from_path};
+    use cortex_core::{CortexConfig, Language};
     use cortex_vector::{EmbeddingProvider, HashEmbedder};
     use std::path::Path;
 
@@ -520,12 +518,12 @@ mod tests {
 
     #[test]
     fn recognizes_code_files() {
-        assert!(is_code_file(Path::new("src/main.rs")));
-        assert!(is_code_file(Path::new("app.ts")));
-        assert!(is_code_file(Path::new("scripts/build.sh")));
-        assert!(is_code_file(Path::new("build.gradle.kts")));
-        assert!(is_code_file(Path::new("package.json")));
-        assert!(!is_code_file(Path::new("README.md")));
+        assert!(Language::from_path(Path::new("src/main.rs")).is_some());
+        assert!(Language::from_path(Path::new("app.ts")).is_some());
+        assert!(Language::from_path(Path::new("scripts/build.sh")).is_some());
+        assert!(Language::from_path(Path::new("build.gradle.kts")).is_some());
+        assert!(Language::from_path(Path::new("package.json")).is_some());
+        assert!(Language::from_path(Path::new("README.md")).is_none());
     }
 
     #[test]

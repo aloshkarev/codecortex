@@ -220,7 +220,6 @@ pub fn detect_divergent_change(
     smells
 }
 
-
 struct ClassInfo {
     line_number: u32,
     methods: HashSet<String>,

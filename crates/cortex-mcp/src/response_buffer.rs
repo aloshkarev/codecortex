@@ -169,7 +169,10 @@ impl ResponseBuffer {
                 line_number: idx + 1,
                 line: (*line).to_string(),
                 before: lines[start..idx].iter().map(|s| (*s).to_string()).collect(),
-                after: lines[idx + 1..end].iter().map(|s| (*s).to_string()).collect(),
+                after: lines[idx + 1..end]
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect(),
             });
         }
         Ok(matches)

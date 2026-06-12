@@ -28,8 +28,7 @@ fn live_indexer_hash_db() -> PathBuf {
 }
 
 fn live_uri() -> String {
-    std::env::var("CORTEX_TEST_GRAPH_URI")
-        .unwrap_or_else(|_| "falkor://127.0.0.1:6379".to_string())
+    std::env::var("CORTEX_TEST_GRAPH_URI").unwrap_or_else(|_| "falkor://127.0.0.1:6379".to_string())
 }
 
 fn live_password() -> String {

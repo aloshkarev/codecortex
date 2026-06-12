@@ -158,6 +158,7 @@ pub use quality::{
     QualityConfig, QualityHealthStatus, QualityRegistry, QualitySummaryReport, QualityTimer,
     ToolQualityMetrics,
 };
+pub use rerank::{RerankCandidate, RerankWeights, content_etag, rerank_candidates};
 pub use savings::{
     SavingsBucket, SavingsEvent, SavingsLedger, SavingsReport, SavingsTotals, SessionCounters,
     compute_token_savings, finish_counted_response, flush as flush_savings, init_from_config,
@@ -165,7 +166,6 @@ pub use savings::{
     savings_dir, savings_enabled,
 };
 pub use telemetry::{TelemetryCollector, TelemetryRegistry, ToolTelemetry};
-pub use rerank::{content_etag, rerank_candidates, RerankCandidate, RerankWeights};
 pub use tfidf::{Bm25Scorer, Document, LexicalMode, TfIdfScorer, rrf_fuse, tokenize};
 pub use tools::{
     IndexTier, PrivacyRisk, TimeoutTier, TokenPolicy, ToolCard, ToolCostClass, ToolGuidance,

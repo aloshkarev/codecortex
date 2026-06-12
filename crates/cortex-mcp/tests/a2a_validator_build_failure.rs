@@ -2,10 +2,10 @@
 //!
 //! Does not require graph — uses a temp repo with a failing `build.sh`.
 
+use async_trait::async_trait;
+use cortex_a2a::services::{A2aServices, ValidationSummary};
 use cortex_a2a::{A2aHub, A2aPayload, SpawnSessionRequest};
 use cortex_core::{A2aConfig, A2aValidateConfig, CortexConfig};
-use cortex_a2a::services::{A2aServices, ValidationSummary};
-use async_trait::async_trait;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -258,8 +258,11 @@ async fn validator_build_failure_emits_fix_build_insight() {
 #[test]
 fn failing_twag_layout_resolves_build_sh() {
     let dir = TempDir::new().unwrap();
-    fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
-        .unwrap();
+    fs::write(
+        dir.path().join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.16)\n",
+    )
+    .unwrap();
     fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 1\n").unwrap();
     let plan = A2aValidateConfig::default()
         .resolve(dir.path())

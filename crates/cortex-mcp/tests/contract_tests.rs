@@ -73,7 +73,6 @@ const VALID_ERROR_CODES: &[&str] = &[
     "SENSITIVE_CONTENT_DETECTED",
 ];
 
-
 mod schema_validation {
     use super::*;
 
@@ -181,7 +180,6 @@ mod schema_validation {
     }
 }
 
-
 mod error_codes {
     use super::*;
 
@@ -265,7 +263,6 @@ mod error_codes {
         assert_eq!(parsed["status"], "error");
     }
 }
-
 
 mod meta_fields {
     use super::*;
@@ -359,7 +356,6 @@ mod meta_fields {
     }
 }
 
-
 mod status_tests {
     use super::*;
 
@@ -395,7 +391,6 @@ mod status_tests {
         assert!(parsed["meta"]["partial_response"].as_bool().unwrap());
     }
 }
-
 
 mod feature_flags {
     use cortex_mcp::FeatureFlags;
@@ -435,7 +430,6 @@ mod feature_flags {
         assert!(!flags.is_enabled("mcp.unknown.enabled"));
     }
 }
-
 
 mod integration {
     use super::*;

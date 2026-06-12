@@ -749,7 +749,10 @@ lexical = 2.0
         assert_eq!(weights.vector, default_rerank_weight_vector());
         assert_eq!(weights.centrality, default_rerank_weight_centrality());
         assert_eq!(weights.path_penalty, default_rerank_weight_path_penalty());
-        assert_eq!(weights.definition_bias, default_rerank_weight_definition_bias());
+        assert_eq!(
+            weights.definition_bias,
+            default_rerank_weight_definition_bias()
+        );
         assert_eq!(weights.recency, default_rerank_weight_recency());
         assert_eq!(weights.token_cost, default_rerank_weight_token_cost());
     }

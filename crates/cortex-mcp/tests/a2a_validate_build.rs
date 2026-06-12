@@ -8,8 +8,11 @@ use tempfile::TempDir;
 #[test]
 fn twag_layout_resolves_to_build_sh() {
     let dir = TempDir::new().unwrap();
-    fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
-        .unwrap();
+    fs::write(
+        dir.path().join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.16)\n",
+    )
+    .unwrap();
     fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 0\n").unwrap();
 
     let plan = A2aValidateConfig::default()
@@ -22,7 +25,11 @@ fn twag_layout_resolves_to_build_sh() {
 #[test]
 fn rdiameter_layout_resolves_to_cargo_check() {
     let dir = TempDir::new().unwrap();
-    fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"rdiameter\"\n").unwrap();
+    fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname = \"rdiameter\"\n",
+    )
+    .unwrap();
 
     let plan = A2aValidateConfig::default()
         .resolve(dir.path())
@@ -34,8 +41,11 @@ fn rdiameter_layout_resolves_to_cargo_check() {
 #[test]
 fn rdiameter_from_twag_monorepo_via_working_directory() {
     let dir = TempDir::new().unwrap();
-    fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
-        .unwrap();
+    fs::write(
+        dir.path().join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.16)\n",
+    )
+    .unwrap();
     fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 0\n").unwrap();
     let rdiameter = dir.path().join("third_party/tngf_cp/rdiameter");
     fs::create_dir_all(&rdiameter).unwrap();

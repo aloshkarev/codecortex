@@ -114,11 +114,11 @@ pub mod reach;
 pub mod report_analysis;
 pub mod skeleton;
 
-pub use clones::{
-    CloneAccumulator, compute_clone_pairs, write_clone_edges_to_graph,
-};
 pub use build_detector::{
     BuildDetector, BuildSystem, CompileCommand, Dependency, DependencyType, ProjectConfig,
+};
+pub use clones::{
+    CloneAccumulator, clear_similar_to_edges, compute_clone_pairs, write_clone_edges_to_graph,
 };
 pub use incremental::{
     ChangeStatus, FileIndexState, FileIndexStatus, GitAwareIncremental, HashEntry,
@@ -131,8 +131,8 @@ pub use indexer::{
 };
 pub use parallel::{AdaptiveBatcher, ParallelConfig, ParallelStats};
 pub use reach::{
-    ReachAccumulator, ReachEntry, ReachIndex, apply_reach_properties, compute_reach_index,
-    write_reach_to_graph, REACH_D1_COUNT, REACH_D3_IDS, REACH_TRUNCATED,
+    REACH_D1_COUNT, REACH_D3_IDS, REACH_TRUNCATED, ReachAccumulator, ReachEntry, ReachIndex,
+    apply_reach_properties, compute_reach_index, write_reach_to_graph,
 };
 pub use report_analysis::{
     IndexDerivedKpis, IndexHeuristics, IndexReportAnalysis, PhaseRow, analyze_report, derived_kpis,

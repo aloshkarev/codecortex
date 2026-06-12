@@ -4,6 +4,7 @@ use crate::embedder::{Embedder, EmbeddingError, EmbeddingProvider};
 use async_trait::async_trait;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const STATIC_DIM: usize = 128;
 
@@ -93,7 +94,7 @@ impl Embedder for StaticEmbedder {
 pub struct FallbackEmbedder {
     primary: std::sync::Arc<dyn Embedder>,
     fallback: StaticEmbedder,
-    label: String,
+    used_fallback: AtomicBool,
 }
 
 impl FallbackEmbedder {
@@ -101,12 +102,20 @@ impl FallbackEmbedder {
         Self {
             primary,
             fallback,
-            label: "static-fallback".to_string(),
+            used_fallback: AtomicBool::new(false),
         }
     }
 
-    pub fn fallback_label(&self) -> &str {
-        &self.label
+    pub fn used_fallback(&self) -> bool {
+        self.used_fallback.load(Ordering::Relaxed)
+    }
+
+    pub fn effective_model(&self) -> String {
+        if self.used_fallback() {
+            self.fallback.model().to_string()
+        } else {
+            self.primary.model().to_string()
+        }
     }
 }
 
@@ -116,6 +125,7 @@ impl Embedder for FallbackEmbedder {
         match self.primary.embed(text).await {
             Ok(v) => Ok(v),
             Err(_) => {
+                self.used_fallback.store(true, Ordering::Relaxed);
                 self.fallback.embed(text).await
             }
         }
@@ -124,7 +134,10 @@ impl Embedder for FallbackEmbedder {
     async fn embed_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         match self.primary.embed_batch(texts).await {
             Ok(v) => Ok(v),
-            Err(_) => self.fallback.embed_batch(texts).await,
+            Err(_) => {
+                self.used_fallback.store(true, Ordering::Relaxed);
+                self.fallback.embed_batch(texts).await
+            }
         }
     }
 
@@ -137,7 +150,11 @@ impl Embedder for FallbackEmbedder {
     }
 
     fn model(&self) -> &str {
-        self.fallback.model()
+        if self.used_fallback() {
+            self.fallback.model()
+        } else {
+            self.primary.model()
+        }
     }
 }
 
