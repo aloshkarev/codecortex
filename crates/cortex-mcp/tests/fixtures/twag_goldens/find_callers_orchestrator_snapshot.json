@@ -1,0 +1,29 @@
+{
+  "id": "find_callers_orchestrator_snapshot",
+  "tool": "analyze_code_relationships",
+  "setup": {
+    "set_current_project": "/run/media/alex/artefacts/projects/work/twag"
+  },
+  "args": {
+    "query_type": "find_callers",
+    "target": "snapshot"
+  },
+  "expect": {
+    "status_in": [
+      "ok"
+    ],
+    "min_results": 9,
+    "caller_names": [
+      "bulk_sync_forwarding_rules",
+      "collect_health_status",
+      "handle_radius_access_request",
+      "initialize",
+      "install_forwarding",
+      "log_statistics",
+      "on_config_moved",
+      "on_dea_received",
+      "setup_redis_persistence"
+    ],
+    "callee_path_suffix": "components/cp/src/orchestrator.cpp"
+  }
+}

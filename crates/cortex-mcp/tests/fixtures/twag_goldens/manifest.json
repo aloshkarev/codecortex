@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "repo": "/run/media/alex/artefacts/projects/work/twag",
+  "cases": [
+    "find_callers_orchestrator_snapshot",
+    "find_callers_apply_config_snapshot",
+    "go_to_definition_orchestrator_snapshot",
+    "go_to_definition_should_relay",
+    "find_all_usages_should_relay",
+    "find_all_usages_peer_state"
+  ]
+}

@@ -71,15 +71,15 @@ pub mod tokens;
 
 pub use a2a_config::{
     A2aBlackboardConfig, A2aConfig, A2aConsensusReviewConfig, A2aRoleConfig, A2aRoleMode,
-    A2aServerConfig, A2aTaskStoreKind, A2aWorkflowsConfig,
+    A2aServerConfig, A2aTaskStoreKind, A2aValidateConfig, A2aWorkflowsConfig, ValidateBuildPlan,
 };
 pub use complexity::{
     ComplexityRating, compute_cognitive_complexity, compute_cyclomatic_complexity,
 };
 pub use config::{
     CortexConfig, DEFAULT_INDEXER_PARSE_BATCH_SIZE, IndexingProfile, IndexingSettings, LlmConfig,
-    PoolConfig, VectorConfig, active_indexing_profile_from_env, default_write_pool_size,
-    indexing_settings, migrate_config_file, validate_falkordb_uri,
+    PoolConfig, RerankWeightsConfig, VectorConfig, active_indexing_profile_from_env,
+    default_write_pool_size, indexing_settings, migrate_config_file, validate_falkordb_uri,
 };
 pub use error::{CortexError, Result};
 pub use git::{

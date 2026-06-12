@@ -493,6 +493,7 @@ mod tests {
         let mut config = CortexConfig::default();
         config.llm.provider = "ollama".to_string();
         config.llm.ollama_embedding_model = "nomic-embed-text".to_string();
+        config.vector.embedding_fallback = "none".to_string();
         let embedder = VectorService::build_embedder(&config).expect("embedder");
         assert_eq!(embedder.provider(), EmbeddingProvider::Ollama);
         assert_eq!(embedder.model(), "nomic-embed-text");

@@ -1,5 +1,6 @@
 //! Multi-signal reranking for capsule and hybrid retrieval.
 
+use cortex_core::{RerankWeightsConfig, VectorConfig};
 use crate::tfidf::tokenize;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -20,16 +21,31 @@ pub struct RerankWeights {
 
 impl Default for RerankWeights {
     fn default() -> Self {
+        Self::from(&RerankWeightsConfig::default())
+    }
+}
+
+impl From<&RerankWeightsConfig> for RerankWeights {
+    fn from(config: &RerankWeightsConfig) -> Self {
         Self {
-            lexical: 1.0,
-            vector: 0.8,
-            centrality: 0.6,
-            path_penalty: 0.4,
-            definition_bias: 0.6,
-            recency: 0.3,
-            token_cost: 0.25,
+            lexical: config.lexical,
+            vector: config.vector,
+            centrality: config.centrality,
+            path_penalty: config.path_penalty,
+            definition_bias: config.definition_bias,
+            recency: config.recency,
+            token_cost: config.token_cost,
         }
     }
+}
+
+/// Resolve rerank weights from vector config (absent table → built-in defaults).
+pub fn rerank_weights_from_vector_config(vector: &VectorConfig) -> RerankWeights {
+    vector
+        .rerank_weights
+        .as_ref()
+        .map(RerankWeights::from)
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone)]
@@ -182,5 +198,20 @@ mod tests {
     #[test]
     fn path_penalty_demotes_tests() {
         assert!(path_penalty("src/auth/mod.rs") < path_penalty("src/auth/tests/mod.rs"));
+    }
+
+    #[test]
+    fn rerank_weights_from_vector_config_applies_toml_override() {
+        // TOML parsing of [vector.rerank_weights] is covered in cortex-core;
+        // here we verify the override-merge into RerankWeights.
+        let mut vector = cortex_core::config::VectorConfig::default();
+        vector.rerank_weights = Some(cortex_core::config::RerankWeightsConfig {
+            lexical: 2.0,
+            ..Default::default()
+        });
+        let weights = rerank_weights_from_vector_config(&vector);
+        assert_eq!(weights.lexical, 2.0);
+        assert_eq!(weights.vector, 0.8);
+        assert_eq!(weights.centrality, 0.6);
     }
 }

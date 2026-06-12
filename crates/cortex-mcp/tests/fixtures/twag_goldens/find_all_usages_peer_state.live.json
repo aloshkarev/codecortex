@@ -1,0 +1,41 @@
+{
+  "data": {
+    "groups": [
+      {
+        "symbol": "PeerState",
+        "usages": [
+          {
+            "context_name": "peer.rs",
+            "file_path": "/run/media/alex/artefacts/projects/work/twag/third_party/tngf_cp/rdiameter/crates/rdiameter-core/src/peer.rs",
+            "line_number": 1,
+            "source_snippet": "",
+            "symbol_name": "PeerState",
+            "usage_kind": "type_reference"
+          },
+          {
+            "context_name": "integration.rs",
+            "file_path": "/run/media/alex/artefacts/projects/work/twag/third_party/tngf_cp/rdiameter/crates/rdiameter-core/tests/integration.rs",
+            "line_number": 1,
+            "source_snippet": "",
+            "symbol_name": "PeerState",
+            "usage_kind": "type_reference"
+          },
+          {
+            "context_name": "relay.rs",
+            "file_path": "/run/media/alex/artefacts/projects/work/twag/third_party/tngf_cp/rdiameter/crates/rdiameter-core/tests/relay.rs",
+            "line_number": 1,
+            "source_snippet": "",
+            "symbol_name": "PeerState",
+            "usage_kind": "type_reference"
+          }
+        ]
+      }
+    ]
+  },
+  "meta": {
+    "duration_ms": 84,
+    "partial_response": false
+  },
+  "status": "ok",
+  "warnings": []
+}

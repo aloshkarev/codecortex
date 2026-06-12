@@ -41,6 +41,68 @@ impl Default for PoolConfig {
     }
 }
 
+fn default_rerank_weight_lexical() -> f64 {
+    1.0
+}
+
+fn default_rerank_weight_vector() -> f64 {
+    0.8
+}
+
+fn default_rerank_weight_centrality() -> f64 {
+    0.6
+}
+
+fn default_rerank_weight_path_penalty() -> f64 {
+    0.4
+}
+
+fn default_rerank_weight_definition_bias() -> f64 {
+    0.6
+}
+
+fn default_rerank_weight_recency() -> f64 {
+    0.3
+}
+
+fn default_rerank_weight_token_cost() -> f64 {
+    0.25
+}
+
+/// Tunable multi-signal rerank weights (`[vector.rerank_weights]` in config.toml).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RerankWeightsConfig {
+    #[serde(default = "default_rerank_weight_lexical")]
+    pub lexical: f64,
+    #[serde(default = "default_rerank_weight_vector")]
+    pub vector: f64,
+    #[serde(default = "default_rerank_weight_centrality")]
+    pub centrality: f64,
+    #[serde(default = "default_rerank_weight_path_penalty")]
+    pub path_penalty: f64,
+    #[serde(default = "default_rerank_weight_definition_bias")]
+    pub definition_bias: f64,
+    #[serde(default = "default_rerank_weight_recency")]
+    pub recency: f64,
+    #[serde(default = "default_rerank_weight_token_cost")]
+    pub token_cost: f64,
+}
+
+impl Default for RerankWeightsConfig {
+    fn default() -> Self {
+        Self {
+            lexical: default_rerank_weight_lexical(),
+            vector: default_rerank_weight_vector(),
+            centrality: default_rerank_weight_centrality(),
+            path_penalty: default_rerank_weight_path_penalty(),
+            definition_bias: default_rerank_weight_definition_bias(),
+            recency: default_rerank_weight_recency(),
+            token_cost: default_rerank_weight_token_cost(),
+        }
+    }
+}
+
 /// Vector store configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -64,6 +126,8 @@ pub struct VectorConfig {
     /// Enable multi-signal reranking in hybrid/capsule paths.
     #[serde(default = "default_true")]
     pub rerank_enabled: bool,
+    /// Optional per-signal rerank weights (defaults match built-in `RerankWeights`).
+    pub rerank_weights: Option<RerankWeightsConfig>,
 }
 
 fn default_hybrid_fusion() -> String {
@@ -90,6 +154,7 @@ impl Default for VectorConfig {
             hybrid_fusion: default_hybrid_fusion(),
             embedding_fallback: default_embedding_fallback(),
             rerank_enabled: true,
+            rerank_weights: None,
         }
     }
 }
@@ -666,6 +731,30 @@ mod tests {
     }
 
     #[test]
+    fn rerank_weights_toml_parses_and_applies_defaults() {
+        let toml_str = r#"
+[vector]
+rerank_enabled = true
+
+[vector.rerank_weights]
+lexical = 2.0
+"#;
+        let config: CortexConfig = toml::from_str(toml_str).unwrap();
+        let weights = config
+            .vector
+            .rerank_weights
+            .as_ref()
+            .expect("rerank_weights table");
+        assert_eq!(weights.lexical, 2.0);
+        assert_eq!(weights.vector, default_rerank_weight_vector());
+        assert_eq!(weights.centrality, default_rerank_weight_centrality());
+        assert_eq!(weights.path_penalty, default_rerank_weight_path_penalty());
+        assert_eq!(weights.definition_bias, default_rerank_weight_definition_bias());
+        assert_eq!(weights.recency, default_rerank_weight_recency());
+        assert_eq!(weights.token_cost, default_rerank_weight_token_cost());
+    }
+
+    #[test]
     fn config_roundtrip() {
         let original = CortexConfig {
             falkordb_uri: "falkor://test:6379".to_string(),
@@ -820,6 +909,8 @@ memgraph_write_pool_size = 4
         assert!(!config.a2a.enabled);
         assert!(!config.a2a.force_in_process);
         assert!(!config.mcp.tools.a2a_spawn_session);
+        assert!(config.a2a.validate.command.is_empty());
+        assert!(config.a2a.validate.working_directory.is_none());
     }
 
     #[test]

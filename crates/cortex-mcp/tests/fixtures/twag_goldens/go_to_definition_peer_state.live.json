@@ -1,0 +1,24 @@
+{
+  "data": {
+    "definitions": [
+      {
+        "file_path": "/run/media/alex/artefacts/projects/work/twag/third_party/tngf_cp/rdiameter/crates/rdiameter-core/src/peer.rs",
+        "kind": "Enum",
+        "lang": null,
+        "line_number": 34,
+        "name": "PeerState",
+        "qualified_name": "run::media::alex::artefacts::projects::work::twag::third_party::tngf_cp::rdiameter::crates::rdiameter-core::src::peer::PeerState",
+        "source": ""
+      }
+    ],
+    "tried_strategies": [
+      "navigation_engine"
+    ]
+  },
+  "meta": {
+    "duration_ms": 1,
+    "partial_response": false
+  },
+  "status": "ok",
+  "warnings": []
+}

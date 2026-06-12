@@ -92,7 +92,7 @@ pub mod a2a_services;
 pub mod agent_pack;
 mod audit;
 mod cache;
-mod capsule;
+pub mod capsule;
 mod centrality;
 pub mod contracts;
 mod flags;

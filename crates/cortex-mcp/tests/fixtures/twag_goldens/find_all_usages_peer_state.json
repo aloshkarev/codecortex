@@ -1,0 +1,19 @@
+{
+  "id": "find_all_usages_peer_state",
+  "tool": "find_all_usages",
+  "setup": {
+    "set_current_project": "/run/media/alex/artefacts/projects/work/twag/third_party/tngf_cp/rdiameter/crates/rdiameter-core"
+  },
+  "args": {
+    "symbol": "PeerState",
+    "from_file": "src/peer.rs"
+  },
+  "expect": {
+    "status_in": [
+      "ok",
+      "partial"
+    ],
+    "min_usages": 0,
+    "allow_empty": true
+  }
+}

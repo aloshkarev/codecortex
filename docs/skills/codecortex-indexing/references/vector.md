@@ -41,6 +41,34 @@ If hybrid search fails or returns empty results, verify both graph and vector in
 
 After vector hits, narrow with `get_context_capsule` or `get_api_contract` instead of reading whole files.
 
+## `[vector]` config keys (reranking)
+
+In `~/.cortex/config.toml`, hybrid and capsule retrieval honor:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `rerank_enabled` | `true` | Multi-signal reranking after hybrid/capsule scoring |
+| `hybrid_fusion` | `rrf` | Hybrid fusion: `rrf` or `legacy` |
+| `[vector.rerank_weights]` | (built-in defaults) | Optional per-signal weights |
+
+Example override:
+
+```toml
+[vector]
+rerank_enabled = true
+
+[vector.rerank_weights]
+lexical = 1.0
+vector = 0.8
+centrality = 0.6
+path_penalty = 0.4
+definition_bias = 0.6
+recency = 0.3
+token_cost = 0.25
+```
+
+Omit `[vector.rerank_weights]` to keep the built-in defaults.
+
 ## Cleanup
 
 MCP: `vector_delete_repository` when removing a repo from the vector store.

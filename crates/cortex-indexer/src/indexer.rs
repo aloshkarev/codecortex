@@ -14,13 +14,155 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{Level, debug, info, instrument, span, warn};
 
 use crate::edge_spill::{DeferredIndexedSpill, EdgeSpill};
+
+/// Process-global sled hash-cache handles keyed by canonical path.
+static HASH_CACHE_REGISTRY: LazyLock<Mutex<HashMap<PathBuf, Weak<sled::Db>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const HASH_CACHE_OPEN_ATTEMPTS: usize = 5;
+const HASH_CACHE_RETRY_BASE_MS: u64 = 25;
+
+fn sled_open_error_retryable(error: &sled::Error) -> bool {
+    match error {
+        sled::Error::Io(io_err) => {
+            io_err.kind() == ErrorKind::WouldBlock
+                || sled_open_error_text_retryable(io_err.to_string())
+        }
+        other => sled_open_error_text_retryable(&other.to_string()),
+    }
+}
+
+fn sled_open_error_text_retryable(error_text: impl AsRef<str>) -> bool {
+    let text = error_text.as_ref().to_ascii_lowercase();
+    [
+        "could not acquire lock",
+        "temporarily unavailable",
+        "resource temporarily unavailable",
+        "wouldblock",
+    ]
+    .iter()
+    .any(|needle| text.contains(needle))
+}
+
+fn hash_cache_retry_backoff(attempt: usize) -> Duration {
+    let exp = attempt.saturating_sub(1).min(4);
+    let base_ms = HASH_CACHE_RETRY_BASE_MS.saturating_mul(1_u64 << exp);
+    let jitter_ms = (attempt as u64).wrapping_mul(17) % 40;
+    Duration::from_millis(base_ms.saturating_add(jitter_ms).max(1))
+}
+
+fn hash_cache_open_error(path: &Path, attempts: usize, error: sled::Error) -> CortexError {
+    let detail = error.to_string();
+    if sled_open_error_retryable(&error) {
+        CortexError::Io(format!(
+            "hash cache {path:?} is locked or temporarily unavailable after {attempts} open \
+             attempts ({detail}); another process (for example a watch or daemon session) \
+             likely holds the sled exclusive lock — stop it or set a distinct hash_cache_path \
+             per pipeline (CortexConfig::hash_cache_path / IndexConfig::hash_cache_path); use \
+             isolated paths in parallel CI jobs"
+        ))
+    } else {
+        CortexError::Io(format!("open hash cache {path:?}: {detail}"))
+    }
+}
+
+/// Returns true when this process already holds a live shared sled handle for `path`.
+pub fn hash_cache_held_in_process(path: &Path) -> bool {
+    let Ok(canon) = canonical_hash_cache_path(path) else {
+        return false;
+    };
+    let Ok(registry) = HASH_CACHE_REGISTRY.lock() else {
+        return false;
+    };
+    registry
+        .get(&canon)
+        .and_then(Weak::upgrade)
+        .is_some()
+}
+
+fn canonical_hash_cache_path(path: &Path) -> Result<PathBuf> {
+    if path.exists() {
+        path.canonicalize().map_err(|e| {
+            CortexError::Io(format!("canonicalize hash cache path {path:?}: {e}"))
+        })
+    } else if let Some(parent) = path.parent() {
+        if parent.as_os_str().is_empty() {
+            return Ok(path.to_path_buf());
+        }
+        if parent.exists() {
+            let parent_canon = parent.canonicalize().map_err(|e| {
+                CortexError::Io(format!("canonicalize hash cache parent {parent:?}: {e}"))
+            })?;
+            let file_name = path
+                .file_name()
+                .map(PathBuf::from)
+                .unwrap_or_default();
+            Ok(parent_canon.join(file_name))
+        } else {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                CortexError::Io(format!("create hash cache directory {parent:?}: {e}"))
+            })?;
+            Ok(path.to_path_buf())
+        }
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
+
+fn open_hash_cache_with_retry(path: &Path) -> std::result::Result<sled::Db, sled::Error> {
+    let mut last_err = None;
+    for attempt in 1..=HASH_CACHE_OPEN_ATTEMPTS {
+        match sled::open(path) {
+            Ok(db) => return Ok(db),
+            Err(err) if sled_open_error_retryable(&err) && attempt < HASH_CACHE_OPEN_ATTEMPTS => {
+                last_err = Some(err);
+                std::thread::sleep(hash_cache_retry_backoff(attempt));
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(last_err.expect("hash cache retry loop ended without capturing last error"))
+}
+
+fn acquire_shared_hash_cache(path: PathBuf) -> Result<Arc<sled::Db>> {
+    let canon = canonical_hash_cache_path(&path)?;
+    if let Some(parent) = canon.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            CortexError::Io(format!("create hash cache directory {parent:?}: {e}"))
+        })?;
+    }
+
+    {
+        let registry = HASH_CACHE_REGISTRY.lock().map_err(|e| {
+            CortexError::Io(format!("hash cache registry poisoned: {e}"))
+        })?;
+        if let Some(existing) = registry.get(&canon).and_then(Weak::upgrade) {
+            return Ok(existing);
+        }
+    }
+
+    let db = open_hash_cache_with_retry(&canon)
+        .map_err(|e| hash_cache_open_error(&canon, HASH_CACHE_OPEN_ATTEMPTS, e))?;
+    let arc = Arc::new(db);
+
+    let mut registry = HASH_CACHE_REGISTRY.lock().map_err(|e| {
+        CortexError::Io(format!("hash cache registry poisoned: {e}"))
+    })?;
+    registry.retain(|_, weak| weak.strong_count() > 0);
+    if let Some(existing) = registry.get(&canon).and_then(Weak::upgrade) {
+        return Ok(existing);
+    }
+    registry.insert(canon, Arc::downgrade(&arc));
+    Ok(arc)
+}
 
 /// Default Rayon thread count when [`IndexConfig::indexer_parse_threads`] is `None`.
 ///
@@ -301,14 +443,14 @@ pub struct Indexer {
     client: GraphClient,
     writer: NodeWriter,
     parser_registry: ParserRegistry,
-    cache: sled::Db,
+    cache: Arc<sled::Db>,
     config: IndexConfig,
     parse_rayon_pool: Option<Arc<rayon::ThreadPool>>,
 }
 
 #[derive(Clone)]
 struct ParseBatchContext {
-    cache: sled::Db,
+    cache: Arc<sled::Db>,
     parser_registry: ParserRegistry,
     compile_cmd_index: Arc<HashMap<PathBuf, crate::build_detector::CompileCommand>>,
     force: bool,
@@ -426,7 +568,7 @@ impl Indexer {
             .hash_cache_path
             .clone()
             .unwrap_or_else(Self::default_hash_cache_path);
-        let cache = sled::open(cache_path).map_err(|e| CortexError::Io(e.to_string()))?;
+        let cache = acquire_shared_hash_cache(cache_path)?;
         let eff = effective_writer_batch(&config);
         let parse_rayon_pool = match config.indexer_parse_threads {
             Some(0) => None,
@@ -1284,14 +1426,14 @@ impl Indexer {
             }
 
             write_cache_entry_pairs(
-                &self.cache,
+                self.cache.as_ref(),
                 &cache_pairs,
                 &repository_path,
                 &branch,
                 &commit_hash,
             )?;
             write_deleted_cache_entries(
-                &self.cache,
+                self.cache.as_ref(),
                 &change_plan.deleted_files,
                 &repository_path,
                 &branch,
@@ -1407,7 +1549,7 @@ impl Indexer {
         branch: &Option<String>,
         commit_hash: &Option<String>,
     ) -> Result<()> {
-        write_cache_entries(&self.cache, files, repository_path, branch, commit_hash)
+        write_cache_entries(self.cache.as_ref(), files, repository_path, branch, commit_hash)
     }
 
     /// Get current indexing progress
@@ -2303,6 +2445,64 @@ mod tests {
             &state.content_hash,
             "rev1"
         ));
+    }
+
+    #[test]
+    fn hash_cache_held_in_process_tracks_open_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("hashes.db");
+        let unknown = dir.path().join("other.db");
+
+        assert!(!hash_cache_held_in_process(&unknown));
+        assert!(!hash_cache_held_in_process(&cache_path));
+
+        let _cache = acquire_shared_hash_cache(cache_path.clone()).unwrap();
+        assert!(hash_cache_held_in_process(&cache_path));
+        assert!(!hash_cache_held_in_process(&unknown));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn two_indexers_on_same_cache_path_succeed_in_one_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("hashes.db");
+
+        let exclusive = sled::open(&cache_path).unwrap();
+        assert!(
+            sled::open(&cache_path).is_err(),
+            "second exclusive sled::open on the same path should fail"
+        );
+        drop(exclusive);
+
+        let cache_a = acquire_shared_hash_cache(cache_path.clone()).unwrap();
+        let cache_b = acquire_shared_hash_cache(cache_path.clone()).unwrap();
+        cache_a.insert(b"probe", b"1").unwrap();
+        assert_eq!(
+            cache_b.get(b"probe").unwrap().as_deref(),
+            Some(b"1" as &[u8])
+        );
+
+        let config = IndexConfig {
+            hash_cache_path: Some(cache_path.clone()),
+            indexer_parse_threads: Some(0),
+            ..Default::default()
+        };
+        if let Ok(Ok(client)) = tokio::time::timeout(
+            Duration::from_millis(500),
+            cortex_graph::GraphClient::connect(&cortex_core::CortexConfig::default()),
+        )
+        .await
+        {
+            Indexer::with_config(client.clone(), config.clone())
+                .expect("first indexer on shared cache path");
+            Indexer::with_config(client, config).expect("second indexer on shared cache path");
+        } else {
+            let third = acquire_shared_hash_cache(cache_path).unwrap();
+            assert_eq!(
+                third.get(b"probe").unwrap().as_deref(),
+                Some(b"1" as &[u8]),
+                "shared hash cache remains usable without a live graph client"
+            );
+        }
     }
 
     #[test]

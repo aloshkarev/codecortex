@@ -127,7 +127,7 @@ pub use incremental::{
 pub use indexer::{
     EdgeSpillRelTypeTiming, IndexConfig, IndexPhase, IndexProgress, IndexReport, Indexer,
     collect_discoverable_source_files, default_indexer_parse_batch_size,
-    default_indexer_parse_threads,
+    default_indexer_parse_threads, hash_cache_held_in_process,
 };
 pub use parallel::{AdaptiveBatcher, ParallelConfig, ParallelStats};
 pub use reach::{

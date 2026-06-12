@@ -1,15 +1,4 @@
 //! Context Capsule Builder for Hybrid Retrieval
-//!
-//! Implements a sophisticated retrieval system combining:
-//! - Lexical search (CONTAINS queries)
-//! - TF-IDF scoring
-//! - Graph centrality
-//! - Score fusion with intent-based weights
-//! - Threshold relaxation
-//! - Token budgeting
-//! - Module-level relevance boosting
-
-#![allow(dead_code)]
 
 use crate::cache::CacheHierarchy;
 use crate::centrality::CentralityScorer;
@@ -43,6 +32,8 @@ pub struct CapsuleConfig {
     pub use_bm25: bool,
     /// Apply multi-signal reranker after base scoring.
     pub rerank_enabled: bool,
+    /// Weights for multi-signal reranking.
+    pub rerank_weights: RerankWeights,
     /// Field weights for different source fields
     pub field_weights: FieldWeights,
     /// Recency boost configuration
@@ -68,6 +59,7 @@ impl Default for CapsuleConfig {
             test_proximity_config: TestProximityConfig::default(),
             use_bm25: true,
             rerank_enabled: true,
+            rerank_weights: RerankWeights::default(),
         }
     }
 }
@@ -500,7 +492,7 @@ impl ContextCapsuleBuilder {
         }
 
         if self.config.rerank_enabled {
-            let weights = RerankWeights::default();
+            let weights = &self.config.rerank_weights;
             for (rank, item) in scored_items.iter_mut().enumerate() {
                 let candidate = RerankCandidate {
                     id: item.id.clone(),
@@ -514,7 +506,7 @@ impl ContextCapsuleBuilder {
                     token_estimate: item.snippet.chars().count() / 4,
                     mtime_secs: crate::rerank::file_mtime_secs(&item.path),
                 };
-                item.score = rerank_score(query, &candidate, &weights);
+                item.score = rerank_score(query, &candidate, weights);
             }
         }
 

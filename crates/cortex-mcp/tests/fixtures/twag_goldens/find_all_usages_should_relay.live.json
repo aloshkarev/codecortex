@@ -1,0 +1,13 @@
+{
+  "data": {
+    "groups": []
+  },
+  "meta": {
+    "duration_ms": 88,
+    "partial_response": true
+  },
+  "status": "partial",
+  "warnings": [
+    "no_usages_found"
+  ]
+}

@@ -80,6 +80,8 @@ Available per-language tests:
 
 JSON and Shell are implemented with full parser/indexing/vector/MCP runtime support. Their contract coverage currently runs in parser/vector/unit tests, and they are intentionally not yet part of the real remote-fixture matrix.
 
+TWAG real-repo tests (accuracy, token benchmark, A2A E2E) are documented in [TWAG_INTEGRATION.md](TWAG_INTEGRATION.md) and gated by `CORTEX_TEST_TWAG=1`.
+
 Run explicit ordered full pass:
 
 ```bash
@@ -100,6 +102,18 @@ For every defect:
 1. create a minimal reproducible assertion in test code
 2. apply smallest fix in owning crate
 3. rerun the failing test plus at least one cross-language control test
+
+## Parallel CI: hash cache isolation
+
+Indexer incremental state uses a sled database (`hash_cache_path`, default `~/.cortex/hashes.db`). Sled allows only one exclusive opener per file, so parallel jobs that share the same path will contend on the lock (watch/MCP in-process holders vs daemon subprocess indexers).
+
+Give each pipeline its own cache file in `~/.cortex/config.toml` (or job-local config):
+
+```toml
+hash_cache_path = "/tmp/codecortex-ci/job-${CI_JOB_ID}/hashes.db"
+```
+
+Use distinct paths per matrix shard or concurrent integration worker. The MCP server skips daemon-subprocess indexing when the current process already holds the configured cache and runs the in-process indexer instead.
 
 ## CI
 

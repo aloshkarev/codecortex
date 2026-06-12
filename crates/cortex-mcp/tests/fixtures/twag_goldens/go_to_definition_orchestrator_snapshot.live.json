@@ -1,0 +1,25 @@
+{
+  "data": {
+    "definitions": [
+      {
+        "file_path": "/run/media/alex/artefacts/projects/work/twag/components/cp/src/orchestrator.cpp",
+        "kind": "Function",
+        "lang": null,
+        "line_number": 71,
+        "name": "snapshot",
+        "qualified_name": "run::media::alex::artefacts::projects::work::twag::components::cp::src::orchestrator.cpp::snapshot",
+        "source": ""
+      }
+    ],
+    "tried_strategies": [
+      "qualified_name",
+      "navigation_engine"
+    ]
+  },
+  "meta": {
+    "duration_ms": 21,
+    "partial_response": false
+  },
+  "status": "ok",
+  "warnings": []
+}

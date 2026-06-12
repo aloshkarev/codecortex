@@ -3527,6 +3527,7 @@ async fn run_debug(
                 test_proximity_config: Default::default(),
                 use_bm25: true,
                 rerank_enabled: true,
+                rerank_weights: cortex_mcp::RerankWeights::default(),
             };
 
             let mut builder = cortex_mcp::ContextCapsuleBuilder::with_config(capsule_config);
@@ -4799,6 +4800,7 @@ async fn run_capsule(
         test_proximity_config: Default::default(),
         use_bm25: true,
         rerank_enabled: true,
+        rerank_weights: cortex_mcp::RerankWeights::default(),
     };
 
     let mut builder = cortex_mcp::ContextCapsuleBuilder::with_config(capsule_config);

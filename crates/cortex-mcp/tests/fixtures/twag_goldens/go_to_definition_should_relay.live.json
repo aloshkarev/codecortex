@@ -1,0 +1,24 @@
+{
+  "data": {
+    "definitions": [
+      {
+        "file_path": "/run/media/alex/artefacts/projects/work/twag/third_party/tngf_cp/rdiameter/crates/rdiameter-core/src/relay.rs",
+        "kind": "Function",
+        "lang": null,
+        "line_number": 199,
+        "name": "should_relay",
+        "qualified_name": "run::media::alex::artefacts::projects::work::twag::third_party::tngf_cp::rdiameter::crates::rdiameter-core::src::relay::should_relay",
+        "source": ""
+      }
+    ],
+    "tried_strategies": [
+      "navigation_engine"
+    ]
+  },
+  "meta": {
+    "duration_ms": 18,
+    "partial_response": false
+  },
+  "status": "ok",
+  "warnings": []
+}

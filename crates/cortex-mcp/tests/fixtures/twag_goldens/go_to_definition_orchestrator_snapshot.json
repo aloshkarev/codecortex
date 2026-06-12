@@ -1,0 +1,22 @@
+{
+  "id": "go_to_definition_orchestrator_snapshot",
+  "tool": "go_to_definition",
+  "setup": {
+    "set_current_project": "/run/media/alex/artefacts/projects/work/twag"
+  },
+  "args": {
+    "symbol": "snapshot",
+    "qualified_name": "Orchestrator::snapshot",
+    "from_file": "components/cp/src/orchestrator.cpp"
+  },
+  "expect": {
+    "status_in": [
+      "ok"
+    ],
+    "definition": {
+      "file_path_suffix": "components/cp/src/orchestrator.cpp",
+      "line_number": 71,
+      "name": "snapshot"
+    }
+  }
+}

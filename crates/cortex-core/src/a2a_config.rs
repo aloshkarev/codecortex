@@ -133,6 +133,97 @@ impl Default for A2aHostGuardConfig {
     }
 }
 
+/// Build validation invoked by the A2A validator role (`validate_build`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct A2aValidateConfig {
+    /// Explicit command (program + args). When empty, auto-detect from repo layout.
+    pub command: Vec<String>,
+    /// Working directory relative to the repo root, or an absolute path.
+    pub working_directory: Option<PathBuf>,
+}
+
+impl Default for A2aValidateConfig {
+    fn default() -> Self {
+        Self {
+            command: Vec::new(),
+            working_directory: None,
+        }
+    }
+}
+
+/// Resolved build-validation invocation for a repository root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidateBuildPlan {
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: std::path::PathBuf,
+    pub label: String,
+}
+
+impl A2aValidateConfig {
+    /// Resolve the command and working directory for `repo_root`.
+    ///
+    /// When `command` is empty, auto-detect:
+    /// - `CMakeLists.txt` → `./build.sh` when present, else `cmake --build build`
+    /// - `Cargo.toml` → `cargo check --quiet`
+    pub fn resolve(&self, repo_root: &std::path::Path) -> Option<ValidateBuildPlan> {
+        let cwd = self
+            .working_directory
+            .as_ref()
+            .map(|wd| {
+                if wd.is_absolute() {
+                    wd.clone()
+                } else {
+                    repo_root.join(wd)
+                }
+            })
+            .unwrap_or_else(|| repo_root.to_path_buf());
+
+        if !self.command.is_empty() {
+            let program = self.command[0].clone();
+            let args = self.command[1..].to_vec();
+            let label = self.command.join(" ");
+            return Some(ValidateBuildPlan {
+                program,
+                args,
+                cwd,
+                label,
+            });
+        }
+
+        Self::auto_detect(&cwd)
+    }
+
+    fn auto_detect(cwd: &std::path::Path) -> Option<ValidateBuildPlan> {
+        if cwd.join("CMakeLists.txt").exists() {
+            if cwd.join("build.sh").exists() {
+                return Some(ValidateBuildPlan {
+                    program: "./build.sh".to_string(),
+                    args: Vec::new(),
+                    cwd: cwd.to_path_buf(),
+                    label: "./build.sh".to_string(),
+                });
+            }
+            return Some(ValidateBuildPlan {
+                program: "cmake".to_string(),
+                args: vec!["--build".to_string(), "build".to_string()],
+                cwd: cwd.to_path_buf(),
+                label: "cmake --build build".to_string(),
+            });
+        }
+        if cwd.join("Cargo.toml").exists() {
+            return Some(ValidateBuildPlan {
+                program: "cargo".to_string(),
+                args: vec!["check".to_string(), "--quiet".to_string()],
+                cwd: cwd.to_path_buf(),
+                label: "cargo check --quiet".to_string(),
+            });
+        }
+        None
+    }
+}
+
 /// Graph blackboard settings for cross-agent insight sharing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -302,6 +393,8 @@ pub struct A2aConfig {
     pub workflows: A2aWorkflowsConfig,
     /// When true, validator rejects when scoped index freshness is not fresh.
     pub require_fresh_index: bool,
+    /// Build validation command for the validator role (`[a2a.validate]`).
+    pub validate: A2aValidateConfig,
     #[serde(default)]
     pub roles: HashMap<String, A2aRoleConfig>,
     /// Paths scanned for agent markdown manifests (Tier 2).
@@ -386,9 +479,151 @@ impl Default for A2aConfig {
             host_guard: A2aHostGuardConfig::default(),
             workflows: A2aWorkflowsConfig::default(),
             require_fresh_index: false,
+            validate: A2aValidateConfig::default(),
             agent_manifest_paths: Vec::new(),
             roles,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn validate_config_deserializes_from_toml() {
+        let raw = r#"
+            [a2a.validate]
+            command = ["cargo", "check", "--quiet"]
+            working_directory = "crates/foo"
+        "#;
+        #[derive(Deserialize)]
+        struct Wrapper {
+            a2a: A2aConfig,
+        }
+        let parsed: Wrapper = toml::from_str(raw).expect("toml");
+        assert_eq!(
+            parsed.a2a.validate.command,
+            vec!["cargo", "check", "--quiet"]
+        );
+        assert_eq!(
+            parsed.a2a.validate.working_directory,
+            Some(PathBuf::from("crates/foo"))
+        );
+    }
+
+    #[test]
+    fn auto_detect_cargo_workspace() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"rdiameter\"\n").unwrap();
+        let plan = A2aValidateConfig::default()
+            .resolve(dir.path())
+            .expect("plan");
+        assert_eq!(plan.program, "cargo");
+        assert_eq!(plan.args, vec!["check", "--quiet"]);
+        assert_eq!(plan.label, "cargo check --quiet");
+    }
+
+    #[test]
+    fn auto_detect_cmake_prefers_build_sh() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
+            .unwrap();
+        fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+        let plan = A2aValidateConfig::default()
+            .resolve(dir.path())
+            .expect("plan");
+        assert_eq!(plan.program, "./build.sh");
+        assert_eq!(plan.args, Vec::<String>::new());
+    }
+
+    #[test]
+    fn auto_detect_cmake_falls_back_to_cmake_build() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
+            .unwrap();
+        let plan = A2aValidateConfig::default()
+            .resolve(dir.path())
+            .expect("plan");
+        assert_eq!(plan.program, "cmake");
+        assert_eq!(plan.args, vec!["--build", "build"]);
+    }
+
+    #[test]
+    fn cmake_takes_precedence_over_cargo_at_same_root() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
+            .unwrap();
+        fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"twag\"\n").unwrap();
+        let plan = A2aValidateConfig::default()
+            .resolve(dir.path())
+            .expect("plan");
+        assert_eq!(plan.program, "./build.sh");
+    }
+
+    #[test]
+    fn explicit_command_overrides_auto_detect() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let cfg = A2aValidateConfig {
+            command: vec!["make".to_string(), "check".to_string()],
+            working_directory: None,
+        };
+        let plan = cfg.resolve(dir.path()).expect("plan");
+        assert_eq!(plan.program, "make");
+        assert_eq!(plan.args, vec!["check"]);
+    }
+
+    #[test]
+    fn working_directory_relative_to_repo_root() {
+        let dir = TempDir::new().unwrap();
+        let sub = dir.path().join("third_party/rdiameter");
+        fs::create_dir_all(&sub).unwrap();
+        fs::write(sub.join("Cargo.toml"), "[package]\nname = \"rdiameter\"\n").unwrap();
+        let cfg = A2aValidateConfig {
+            command: Vec::new(),
+            working_directory: Some(PathBuf::from("third_party/rdiameter")),
+        };
+        let plan = cfg.resolve(dir.path()).expect("plan");
+        assert_eq!(plan.cwd, sub);
+        assert_eq!(plan.program, "cargo");
+    }
+
+    #[test]
+    fn twag_monorepo_root_auto_detects_build_sh() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("CMakeLists.txt"), "cmake_minimum_required(VERSION 3.16)\n")
+            .unwrap();
+        fs::write(dir.path().join("build.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+        let rdiameter = dir.path().join("third_party/tngf_cp/rdiameter");
+        fs::create_dir_all(&rdiameter).unwrap();
+        fs::write(
+            rdiameter.join("Cargo.toml"),
+            "[package]\nname = \"rdiameter\"\n",
+        )
+        .unwrap();
+
+        let twag_plan = A2aValidateConfig::default()
+            .resolve(dir.path())
+            .expect("twag plan");
+        assert_eq!(twag_plan.program, "./build.sh");
+
+        let rdiameter_cfg = A2aValidateConfig {
+            command: Vec::new(),
+            working_directory: Some(PathBuf::from("third_party/tngf_cp/rdiameter")),
+        };
+        let rdiameter_plan = rdiameter_cfg.resolve(dir.path()).expect("rdiameter plan");
+        assert_eq!(rdiameter_plan.program, "cargo");
+        assert_eq!(rdiameter_plan.cwd, rdiameter);
+    }
+
+    #[test]
+    fn resolve_returns_none_without_build_manifest() {
+        let dir = TempDir::new().unwrap();
+        assert!(A2aValidateConfig::default().resolve(dir.path()).is_none());
     }
 }
 

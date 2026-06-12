@@ -1,0 +1,21 @@
+{
+  "id": "go_to_definition_should_relay",
+  "tool": "go_to_definition",
+  "setup": {
+    "set_current_project": "/run/media/alex/artefacts/projects/work/twag/third_party/tngf_cp/rdiameter/crates/rdiameter-core"
+  },
+  "args": {
+    "symbol": "should_relay",
+    "from_file": "src/relay.rs"
+  },
+  "expect": {
+    "status_in": [
+      "ok"
+    ],
+    "definition": {
+      "file_path_suffix": "src/relay.rs",
+      "line_number": 199,
+      "name": "should_relay"
+    }
+  }
+}

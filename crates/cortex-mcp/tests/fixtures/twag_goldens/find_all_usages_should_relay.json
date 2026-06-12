@@ -1,0 +1,19 @@
+{
+  "id": "find_all_usages_should_relay",
+  "tool": "find_all_usages",
+  "setup": {
+    "set_current_project": "/run/media/alex/artefacts/projects/work/twag/third_party/tngf_cp/rdiameter/crates/rdiameter-core"
+  },
+  "args": {
+    "symbol": "should_relay",
+    "from_file": "src/relay.rs"
+  },
+  "expect": {
+    "status_in": [
+      "ok",
+      "partial"
+    ],
+    "min_usages": 0,
+    "allow_empty": true
+  }
+}

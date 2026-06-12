@@ -2,6 +2,7 @@ use crate::agent_pack::{
     AgentPackInstallOptions, AgentPackInstallResult, install_agent_pack, resolve_agent_pack,
 };
 use crate::cache::{CacheHierarchy, L1Cache};
+use crate::capsule::{ContextCapsuleBuilder, GraphSearchResult};
 use crate::contracts::{
     EnvelopeBuilder, FreshnessState, OmittedItem, ResponseScope, SourcePolicy, TokenBudget,
     WARNING_EMBEDDER_TIMEOUT, WARNING_FALLBACK_TO_LEXICAL, WARNING_VECTOR_STORE_UNAVAILABLE,
@@ -946,6 +947,58 @@ impl CortexHandler {
         self.a2a_hub()
             .ok_or_else(|| envelope_error("UNAVAILABLE", "A2A hub not initialized", None, started))
     }
+
+    /// Route index/repair through the watcher daemon when running (single sled writer).
+    ///
+    /// Skips daemon enqueue when this process already holds the sled hash cache (e.g. watch task).
+    fn try_enqueue_daemon_index(
+        config: &CortexConfig,
+        path: &Path,
+        force: bool,
+    ) -> Result<Option<Value>, anyhow::Error> {
+        let hash_path = config
+            .hash_cache_path
+            .clone()
+            .unwrap_or_else(Indexer::default_hash_cache_path);
+        if cortex_indexer::hash_cache_held_in_process(&hash_path) {
+            tracing::info!(
+                "daemon index skipped: process already holds hash cache at {} — using in-process indexer",
+                hash_path.display()
+            );
+            return Ok(None);
+        }
+        let daemon_paths = cortex_watcher::DaemonPaths::default_paths();
+        let daemon_status = cortex_watcher::daemon_status(&daemon_paths)?;
+        if !daemon_status.running {
+            return Ok(None);
+        }
+        let Some((_repo_root, branch, commit_hash)) = resolve_git_context_for_path(path) else {
+            return Ok(None);
+        };
+        let graph_scope = cortex_core::graph_repository_path_for_index(path, None);
+        let enqueue = cortex_watcher::enqueue_index_job(
+            &daemon_paths,
+            &cortex_watcher::IndexJobRequest {
+                repository_path: graph_scope.clone(),
+                branch: branch.clone(),
+                commit_hash: commit_hash.clone(),
+                mode: if force {
+                    cortex_watcher::JobMode::Full
+                } else {
+                    cortex_watcher::JobMode::IncrementalDiff
+                },
+            },
+        )?;
+        Ok(Some(json!({
+            "status": "queued",
+            "daemon": true,
+            "job": enqueue.job,
+            "deduplicated": enqueue.deduplicated,
+            "repository_path": graph_scope,
+            "branch": branch,
+            "commit": commit_hash,
+        })))
+    }
 }
 
 #[tool_router]
@@ -1376,6 +1429,23 @@ impl CortexHandler {
         self.jobs
             .mark_running(&job_id, format!("Indexing {}", req.path));
 
+        if let Ok(Some(daemon_stage)) =
+            Self::try_enqueue_daemon_index(&self.config, Path::new(&req.path), force)
+        {
+            self.jobs.mark_completed(&job_id, "queued via daemon");
+            return Ok(envelope_success(
+                json!({
+                    "job_id": job_id,
+                    "path": req.path,
+                    "index": daemon_stage,
+                    "include_vector": include_vector,
+                }),
+                started_at,
+                vec!["vector indexing deferred to post-daemon graph job".to_string()],
+                false,
+            ));
+        }
+
         let cfg = self.config.clone();
         let jobs = self.jobs.clone();
         let path = req.path.clone();
@@ -1694,7 +1764,9 @@ impl CortexHandler {
         Parameters(req): Parameters<RelationshipReq>,
     ) -> Result<CallToolResult, McpError> {
         let started = Instant::now();
-        let a = Analyzer::new(self.graph_client().await?);
+        let a = self
+            .scoped_analyzer_for_filters(req.include_paths.clone())
+            .await?;
         let filters = build_analyze_filters(
             req.include_paths.clone(),
             req.include_files.clone(),
@@ -2427,7 +2499,8 @@ impl CortexHandler {
             .await
             .map_err(|e| McpError::internal_error(e, None))?;
         if self.config.vector.rerank_enabled {
-            let weights = crate::rerank::RerankWeights::default();
+            let weights =
+                crate::rerank::rerank_weights_from_vector_config(&self.config.vector);
             let candidates: Vec<crate::rerank::RerankCandidate> = results
                 .iter()
                 .enumerate()
@@ -2962,7 +3035,65 @@ impl CortexHandler {
         if items.is_empty() {
             warnings.push("fallback_relaxed_no_results".to_string());
         }
-        let omitted = if partial {
+
+        let graph_results: Vec<GraphSearchResult> = items
+            .iter()
+            .filter_map(|item| {
+                Some(GraphSearchResult {
+                    id: item.get("id").and_then(|v| v.as_str())?.to_string(),
+                    kind: item
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("CodeNode")
+                        .to_string(),
+                    path: item.get("path").and_then(|v| v.as_str())?.to_string(),
+                    name: item.get("name").and_then(|v| v.as_str())?.to_string(),
+                    source: item.get("snippet").and_then(|v| v.as_str()).map(str::to_string),
+                    line_number: item.get("line_number").and_then(|v| v.as_u64()),
+                })
+            })
+            .collect();
+
+        let mut capsule_config = crate::capsule::CapsuleConfig::default();
+        if self.config.vector.rerank_enabled {
+            capsule_config.rerank_enabled = true;
+            capsule_config.use_bm25 = true;
+            capsule_config.rerank_weights =
+                crate::rerank::rerank_weights_from_vector_config(&self.config.vector);
+        }
+        let mut capsule_builder = ContextCapsuleBuilder::with_config(capsule_config)
+            .with_max_items(max_items)
+            .with_max_tokens(max_tokens)
+            .with_include_tests(include_tests)
+            .with_intent(&intent);
+        let capsule_result =
+            capsule_builder.build(&req.query, graph_results, Some(&intent), &filters);
+        warnings.extend(capsule_result.warnings.clone());
+        token_estimate = capsule_result.token_estimate;
+        let capsule_items: Vec<Value> = capsule_result
+            .capsule_items
+            .iter()
+            .map(|item| {
+                json!({
+                    "id": item.id,
+                    "kind": item.kind,
+                    "path": item.path,
+                    "name": item.name,
+                    "snippet": item.snippet,
+                    "score": item.score,
+                    "why": {
+                        "vector": 0.0,
+                        "graph": item.why.centrality,
+                        "lexical": item.why.fts,
+                        "tfidf": item.why.tfidf,
+                        "proximity": item.why.proximity,
+                    },
+                    "line_number": item.line_number,
+                })
+            })
+            .collect();
+
+        let omitted = if partial || capsule_result.fallback_relaxed {
             vec![OmittedItem {
                 reason: "token_or_item_budget_exceeded".to_string(),
                 path: None,
@@ -2973,12 +3104,12 @@ impl CortexHandler {
             Vec::new()
         };
         let payload = json!({
-            "intent_detected": intent,
-            "capsule_items": items,
+            "intent_detected": capsule_result.intent_detected,
+            "capsule_items": capsule_items,
             "token_estimate": token_estimate,
             "token_budget": max_tokens,
-            "threshold_used": 0.15,
-            "fallback_relaxed": !warnings.is_empty(),
+            "threshold_used": capsule_result.threshold_used,
+            "fallback_relaxed": capsule_result.fallback_relaxed || !warnings.is_empty(),
             "freshness": "unknown",
             "source_policy": "snippets"
         });
@@ -2998,7 +3129,7 @@ impl CortexHandler {
             );
             cache.put(&key, payload.clone(), cache_revision);
         }
-        let baseline_sample: String = items
+        let baseline_sample: String = capsule_items
             .iter()
             .filter_map(|item| item.get("snippet").and_then(Value::as_str))
             .collect::<Vec<_>>()
@@ -4713,30 +4844,43 @@ impl CortexHandler {
             && self.graph_client().await.is_ok()
         {
             let job_id = format!("repair-{}", now_millis());
-            self.jobs
-                .mark_running(&job_id, format!("Repair index {}", repo));
-            let cfg = self.config.clone();
-            let jobs = self.jobs.clone();
-            let path = repo.clone();
-            let job_id_for_task = job_id.clone();
-            tokio::spawn(async move {
-                let outcome = async {
-                    let client = GraphClient::connect(&cfg).await?;
-                    let indexer = Indexer::from_cortex_config(client, &cfg)?;
-                    indexer.index_path_with_options(&path, true).await?;
-                    anyhow::Ok(())
-                }
-                .await;
-                if let Err(err) = outcome {
-                    jobs.mark_failed(&job_id_for_task, err.to_string());
-                } else {
-                    jobs.mark_completed(&job_id_for_task, "graph repair completed");
-                }
-            });
-            next_steps.push(format!(
-                "Queued graph repair job {job_id} — check check_job_status before impact analysis."
-            ));
-            repair_job = Some(job_id);
+            if let Ok(Some(daemon_stage)) =
+                Self::try_enqueue_daemon_index(&self.config, Path::new(&repo), true)
+            {
+                repair_job = daemon_stage
+                    .get("job")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                next_steps.push(format!(
+                    "Queued daemon repair job {} — poll project_status before impact analysis.",
+                    repair_job.as_deref().unwrap_or("unknown")
+                ));
+            } else {
+                self.jobs
+                    .mark_running(&job_id, format!("Repair index {}", repo));
+                let cfg = self.config.clone();
+                let jobs = self.jobs.clone();
+                let path = repo.clone();
+                let job_id_for_task = job_id.clone();
+                tokio::spawn(async move {
+                    let outcome = async {
+                        let client = GraphClient::connect(&cfg).await?;
+                        let indexer = Indexer::from_cortex_config(client, &cfg)?;
+                        indexer.index_path_with_options(&path, true).await?;
+                        anyhow::Ok(())
+                    }
+                    .await;
+                    if let Err(err) = outcome {
+                        jobs.mark_failed(&job_id_for_task, err.to_string());
+                    } else {
+                        jobs.mark_completed(&job_id_for_task, "graph repair completed");
+                    }
+                });
+                next_steps.push(format!(
+                    "Queued graph repair job {job_id} — check check_job_status before impact analysis."
+                ));
+                repair_job = Some(job_id);
+            }
         }
 
         if action == "repair_plan" && repair_job.is_none() && !auto_repair {
@@ -8514,6 +8658,7 @@ mod tests {
         let out = h
             .get_context_capsule(Parameters(ContextCapsuleReq {
                 query: "auth refresh".to_string(),
+                if_none_match: None,
                 task_intent: None,
                 repo_path: None,
                 max_tokens: None,
@@ -8590,6 +8735,7 @@ mod tests {
                 path: "Cargo.toml".to_string(),
                 mode: None,
                 repo_path: None,
+                if_none_match: None,
             }))
             .await
             .expect("tool response");

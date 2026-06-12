@@ -1415,6 +1415,8 @@ dependencies = [
  "cortex-vector",
  "cortex-watcher",
  "criterion",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
 ]

@@ -39,6 +39,7 @@ tracing.workspace = true
 uuid = { version = "1.10", features = ["v4"] }
 
 [dev-dependencies]
+async-trait = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 httpmock = "0.7"
 jsonschema = "0.45"

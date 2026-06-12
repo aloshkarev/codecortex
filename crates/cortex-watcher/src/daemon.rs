@@ -645,6 +645,10 @@ fn error_retryable(error_text: &str) -> bool {
         "timeout",
         "temporarily unavailable",
         "operation not permitted",
+        "could not acquire lock",
+        "hash cache",
+        "resource temporarily unavailable",
+        "wouldblock",
     ]
     .iter()
     .any(|needle| text.contains(needle))
@@ -1458,6 +1462,15 @@ mod tests {
         let paths = DaemonPaths::from_root("/tmp/cortex-daemon-test");
         assert!(paths.db_path.ends_with("daemon.db"));
         assert!(paths.pid_path.ends_with("daemon.pid"));
+    }
+
+    #[test]
+    fn error_retryable_includes_hash_cache_lock() {
+        assert!(error_retryable(
+            "hash cache /home/user/.cortex/hashes.db is locked or temporarily unavailable"
+        ));
+        assert!(error_retryable("could not acquire lock on database"));
+        assert!(error_retryable("Resource temporarily unavailable"));
     }
 
     #[test]

@@ -17,6 +17,12 @@ criterion = { version = "0.8", features = ["html_reports"] }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 tempfile = "3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "token_efficiency_twag"
+path = "src/bin/token_efficiency_twag.rs"
 
 [[bench]]
 name = "capsule_benchmark"

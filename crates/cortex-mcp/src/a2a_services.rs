@@ -355,29 +355,38 @@ impl A2aServices for McpA2aServices {
         let root = repo_root
             .map(PathBuf::from)
             .unwrap_or_else(|| self.repo_root.clone());
-        if !root.join("Cargo.toml").exists() {
-            return Ok(ValidationSummary {
-                passed: true,
-                summary: "no Cargo.toml — skipped cargo check".to_string(),
-            });
-        }
-        let output = tokio::process::Command::new("cargo")
-            .args(["check", "--quiet"])
-            .current_dir(&root)
+        let plan = match self.config.a2a.validate.resolve(&root) {
+            Some(plan) => plan,
+            None => {
+                return Ok(ValidationSummary {
+                    passed: true,
+                    summary: "no build manifest — skipped validation".to_string(),
+                });
+            }
+        };
+        let output = tokio::process::Command::new(&plan.program)
+            .args(&plan.args)
+            .current_dir(&plan.cwd)
             .output()
             .await;
         match output {
             Ok(out) if out.status.success() => Ok(ValidationSummary {
                 passed: true,
-                summary: "cargo check passed".to_string(),
+                summary: format!("{} passed", plan.label),
             }),
             Ok(out) => {
                 let stderr = String::from_utf8_lossy(&out.stderr);
-                let summary: String = stderr.lines().take(8).collect::<Vec<_>>().join("\n");
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let combined = if stderr.trim().is_empty() {
+                    stdout
+                } else {
+                    stderr
+                };
+                let summary: String = combined.lines().take(8).collect::<Vec<_>>().join("\n");
                 Ok(ValidationSummary {
                     passed: false,
                     summary: if summary.is_empty() {
-                        format!("cargo check failed: {}", out.status)
+                        format!("{} failed: {}", plan.label, out.status)
                     } else {
                         summary
                     },
@@ -385,7 +394,7 @@ impl A2aServices for McpA2aServices {
             }
             Err(e) => Ok(ValidationSummary {
                 passed: true,
-                summary: format!("cargo check skipped: {e}"),
+                summary: format!("{} skipped: {e}", plan.label),
             }),
         }
     }
