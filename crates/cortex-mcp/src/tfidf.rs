@@ -26,7 +26,13 @@ pub fn term_frequency(terms: &[String]) -> HashMap<String, f64> {
     }
 
     for term in terms {
-        *tf.entry(term.clone()).or_insert(0.0) += 1.0;
+        // PERF: Avoid `entry(term.clone()).or_insert(...)` to prevent redundant
+        // String allocations on hits in this hot loop.
+        if let Some(count) = tf.get_mut(term) {
+            *count += 1.0;
+        } else {
+            tf.insert(term.clone(), 1.0);
+        }
     }
 
     for count in tf.values_mut() {
@@ -101,7 +107,13 @@ impl TfIdfScorer {
         let seen: HashSet<&String> = doc.terms.iter().collect();
 
         for term in seen {
-            *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
+            // PERF: Avoid `entry(term.clone()).or_insert(...)` to prevent redundant
+            // String allocations on hits in this hot loop.
+            if let Some(count) = self.document_frequencies.get_mut(term.as_str()) {
+                *count += 1;
+            } else {
+                self.document_frequencies.insert(term.clone(), 1);
+            }
         }
 
         self.idf_cache.clear();
@@ -247,7 +259,11 @@ impl Bm25Scorer {
 
         let seen: HashSet<&String> = doc.terms.iter().collect();
         for term in seen {
-            *self.document_frequencies.entry(term.clone()).or_insert(0) += 1;
+            if let Some(count) = self.document_frequencies.get_mut(term.as_str()) {
+                *count += 1;
+            } else {
+                self.document_frequencies.insert(term.clone(), 1);
+            }
         }
     }
 
@@ -313,7 +329,14 @@ pub fn rrf_fuse(rank_lists: &[Vec<String>], k: f64) -> Vec<(String, f64)> {
     let mut scores: HashMap<String, f64> = HashMap::new();
     for list in rank_lists {
         for (rank, id) in list.iter().enumerate() {
-            *scores.entry(id.clone()).or_insert(0.0) += 1.0 / (k + rank as f64 + 1.0);
+            let score_add = 1.0 / (k + rank as f64 + 1.0);
+            // PERF: Avoid `entry(id.clone()).or_insert(...)` to prevent redundant
+            // String allocations on hits in this hot loop.
+            if let Some(score) = scores.get_mut(id) {
+                *score += score_add;
+            } else {
+                scores.insert(id.clone(), score_add);
+            }
         }
     }
     let mut fused: Vec<(String, f64)> = scores.into_iter().collect();
