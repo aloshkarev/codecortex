@@ -523,7 +523,11 @@ fn rrf_fuse_ids(rank_lists: &[Vec<String>], k: f64) -> Vec<(String, f64)> {
     for list in rank_lists {
         for (rank, id) in list.iter().enumerate() {
             let contribution = 1.0 / (k + (rank as f64) + 1.0);
-            *scores.entry(id.clone()).or_insert(0.0) += contribution;
+            if let Some(score) = scores.get_mut(id) {
+                *score += contribution;
+            } else {
+                scores.insert(id.clone(), contribution);
+            }
         }
     }
     let mut fused: Vec<(String, f64)> = scores.into_iter().collect();
